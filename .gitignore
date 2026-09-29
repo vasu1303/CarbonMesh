@@ -1,0 +1,29 @@
+# JavaScript
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# Environment and local tooling
+.env
+.env.*
+!.env.example
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Test output
+coverage/
+htmlcov/
+
+# Unused binary from the Vite starter template
+apps/web/src/assets/hero.png
