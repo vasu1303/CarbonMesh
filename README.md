@@ -23,7 +23,7 @@ cd apps/api
 py -m venv .venv
 .venv\Scripts\Activate.ps1
 python -m pip install -e ".[dev]"
-uvicorn app.main:app --reload --port 8000
+python -m uvicorn app.main:app --reload --reload-dir app --port 8000
 ```
 
 On macOS or Linux, activate the environment with `source .venv/bin/activate`.
@@ -81,6 +81,10 @@ alembic upgrade head
 The connection/session setup is in `app/db/session.py`. Use a SQLAlchemy
 `Session` through `session_scope()` in API services and routes; do not create
 raw database connections in route handlers.
+Keep the backend terminal open while the API is running. The base URL at
+`http://localhost:8000/` returns `404` because the API does not define a root route.
+Limiting reloads to the `app` directory prevents virtual-environment or OneDrive changes
+from repeatedly restarting the server.
 
 ## Run the frontend
 
