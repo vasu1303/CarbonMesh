@@ -10,8 +10,9 @@ async ORM metadata is the authoritative definition for exactly 32 tables across
 remain beside their evidence records through pgvector; there is no separate
 vector database.
 
-The application does not create schema objects during FastAPI startup. From
-`apps/api`, operators explicitly run:
+The shared development database is already provisioned, and the application does
+not create schema objects during FastAPI startup. Only operators provisioning a
+new or reset disposable database run the following commands from `apps/api`:
 
 ```powershell
 python -m app.db.bootstrap
@@ -42,9 +43,12 @@ WHERE table_type = 'BASE TABLE'
 ORDER BY table_schema, table_name;
 ```
 
-This document describes the implemented contract and local validation. It does
-not claim that the bootstrap has already been run against a live Neon branch;
-the operator must supply a rotated URL and run both commands there.
+This contract is installed on the shared development Neon database. Contributors
+connect to it with a locally supplied secret and do not rerun bootstrap during
+normal startup. The operator workflow remains available for new or reset
+disposable branches. Bootstrap installs and verifies database objects only; it
+does not seed application rows, and FastAPI startup neither bootstraps nor seeds
+the database.
 
 The opt-in live suite is `tests/integration/test_neon_database.py`. It runs only
 when `CARBONMESH_RUN_NEON_INTEGRATION_TESTS=rotated-disposable-branch` and the
