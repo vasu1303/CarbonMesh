@@ -1,16 +1,79 @@
-"""Shared safe error responses for failures raised before a domain service runs."""
+"""Shared, credential-safe error responses for every API boundary."""
 
 from __future__ import annotations
 
-from uuid import uuid4
+from collections.abc import Mapping, Sequence
+from typing import Any
 
-from fastapi import Request
+from fastapi import HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
+
+from app.core.tracing import ensure_trace_id
+
+
+class SafeErrorBody(BaseModel):
+    code: str
+    message: str
+    trace_id: str
+    retryable: bool
+    field_details: list[dict[str, Any]] = Field(default_factory=list)
+
+
+FieldDetails = Mapping[str, object] | Sequence[Mapping[str, object]]
+
+
+def _normalize_field_details(details: FieldDetails | None) -> list[dict[str, object]]:
+    if details is None:
+        return []
+    if isinstance(details, Mapping):
+        return [{"field": str(field), "detail": detail} for field, detail in details.items()]
+    return [dict(detail) for detail in details]
+
+
+def safe_error_body(
+    *,
+    code: str,
+    message: str,
+    trace_id: str | None,
+    retryable: bool = False,
+    field_details: FieldDetails | None = None,
+) -> SafeErrorBody:
+    return SafeErrorBody(
+        code=code,
+        message=message,
+        trace_id=ensure_trace_id(trace_id),
+        retryable=retryable,
+        field_details=_normalize_field_details(field_details),
+    )
+
+
+def safe_http_error(
+    *,
+    status_code: int,
+    code: str,
+    message: str,
+    trace_id: str | None,
+    retryable: bool = False,
+    field_details: FieldDetails | None = None,
+) -> HTTPException:
+    body = safe_error_body(
+        code=code,
+        message=message,
+        trace_id=trace_id,
+        retryable=retryable,
+        field_details=field_details,
+    )
+    return HTTPException(
+        status_code=status_code,
+        detail=body.model_dump(mode="json"),
+        headers={"X-Trace-ID": body.trace_id},
+    )
 
 
 async def request_validation_error_response(
-    _request: Request,
+    request: Request,
     error: RequestValidationError,
 ) -> JSONResponse:
     """Return field-level validation details without echoing request inputs."""
@@ -26,7 +89,7 @@ async def request_validation_error_response(
         else:
             field_details[location] = message
 
-    trace_id = str(uuid4())
+    trace_id = ensure_trace_id(request.headers.get("X-Trace-ID"))
     return JSONResponse(
         status_code=422,
         headers={"X-Trace-ID": trace_id},

@@ -50,7 +50,6 @@ class ElectricityMapsHttpClient:
 
     token: SecretStr | None
     timeout_seconds: float = 10.0
-    base_url: str = ELECTRICITY_MAPS_BASE_URL
 
     async def list_zones(self) -> Mapping[str, Any]:
         return await self._get_json("/zones")
@@ -91,7 +90,9 @@ class ElectricityMapsHttpClient:
             )
 
         query = f"?{urlencode(params)}" if params else ""
-        url = f"{self.base_url.rstrip('/')}{path}{query}"
+        # The origin and paths are source-controlled; callers can only supply
+        # query values, which urlencode escapes before the request is created.
+        url = f"{ELECTRICITY_MAPS_BASE_URL}{path}{query}"
         token = self.token.get_secret_value()
 
         def request_json() -> Mapping[str, Any]:
@@ -105,7 +106,9 @@ class ElectricityMapsHttpClient:
                 method="GET",
             )
             try:
-                with urlopen(request, timeout=self.timeout_seconds) as response:
+                with urlopen(  # nosec B310
+                    request, timeout=self.timeout_seconds
+                ) as response:
                     raw = response.read(MAX_RESPONSE_BYTES + 1)
             except HTTPError as error:
                 if error.code in {401, 403}:

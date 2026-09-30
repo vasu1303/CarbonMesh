@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
 from typing import Annotated
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.db.session import DatabaseConfigurationError, session_scope
+from app.dependencies.database import DatabaseSession
 from app.modules.measurement.schemas import (
     MeasurementCalculateRequest,
     MeasurementDetail,
@@ -22,12 +21,8 @@ from app.modules.measurement.service import MeasurementService, MeasurementServi
 router = APIRouter(prefix="/measurements", tags=["measurements"])
 
 
-async def get_measurement_service() -> AsyncIterator[MeasurementService]:
-    try:
-        async with session_scope() as session:
-            yield MeasurementService(session)
-    except (DatabaseConfigurationError, SQLAlchemyError) as error:
-        _raise_unexpected_error(trace_id=None, cause=error)
+async def get_measurement_service(session: DatabaseSession) -> MeasurementService:
+    return MeasurementService(session)
 
 
 ERROR_RESPONSES = {

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import ssl
+
 import pytest
 from pydantic import SecretStr
 from sqlalchemy.pool import NullPool
@@ -37,7 +39,11 @@ def test_normalize_neon_url_for_asyncpg_and_tls() -> None:
     assert "channel_binding" not in configuration.url.query
     assert configuration.url.query["application_name"] == "carbonmesh"
     assert configuration.url.query["prepared_statement_cache_size"] == "0"
-    assert configuration.connect_args["ssl"] == "require"
+    tls_context = configuration.connect_args["ssl"]
+    assert isinstance(tls_context, ssl.SSLContext)
+    assert tls_context.check_hostname
+    assert tls_context.verify_mode == ssl.CERT_REQUIRED
+    assert tls_context.minimum_version == ssl.TLSVersion.TLSv1_2
     assert configuration.connect_args["statement_cache_size"] == 0
     assert "do-not-print" not in str(configuration.url)
     assert "do-not-print" not in repr(configuration)

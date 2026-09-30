@@ -1,38 +1,37 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.main import app
+from app.api.routes.db import router
+from app.dependencies.database import get_db_session
 
 
-def test_database_demo_requires_database_url(monkeypatch) -> None:
-    @asynccontextmanager
-    async def unavailable_session() -> AsyncIterator[None]:
-        raise RuntimeError("secret diagnostic that must not reach the response")
-        yield  # pragma: no cover
+def test_database_demo_sanitizes_session_failure() -> None:
+    test_app = FastAPI()
+    test_app.include_router(router, prefix="/api/db")
+    test_app.dependency_overrides[get_db_session] = FailingSession
 
-    monkeypatch.setattr("app.api.routes.db.session_scope", unavailable_session)
-
-    response = TestClient(app).get("/api/db/demo")
+    response = TestClient(test_app).get("/api/db/demo")
 
     assert response.status_code == 503
-    assert response.json() == {"detail": "Database connection is unavailable."}
+    detail = response.json()["detail"]
+    assert detail["code"] == "database_unavailable"
+    assert detail["message"] == "Database connection is unavailable."
+    assert detail["retryable"] is True
     assert "secret diagnostic" not in response.text
 
 
-def test_database_demo_returns_database_timestamp(monkeypatch) -> None:
+def test_database_demo_returns_database_timestamp() -> None:
     database_time = datetime(2026, 1, 1, tzinfo=UTC)
     fake_session = FakeSession(database_time)
-    monkeypatch.setattr(
-        "app.api.routes.db.session_scope",
-        lambda: fake_session.scope(),
-    )
+    test_app = FastAPI()
+    test_app.include_router(router, prefix="/api/db")
+    test_app.dependency_overrides[get_db_session] = lambda: fake_session
 
-    response = TestClient(app).get("/api/db/demo")
+    response = TestClient(test_app).get("/api/db/demo")
 
     assert response.status_code == 200
     assert response.json() == {
@@ -56,10 +55,11 @@ class FakeSession:
         self.database_time = database_time
         self.executed_sql = ""
 
-    @asynccontextmanager
-    async def scope(self) -> AsyncIterator[FakeSession]:
-        yield self
-
     async def execute(self, query) -> FakeResult:
         self.executed_sql = str(query)
         return FakeResult(self.database_time)
+
+
+class FailingSession:
+    async def execute(self, _query) -> None:
+        raise RuntimeError("secret diagnostic that must not reach the response")
