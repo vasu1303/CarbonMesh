@@ -25,6 +25,7 @@ Important conflict resolutions:
 - The broad vision describes four agents. The four-day POC builds only Measurement and Procurement, joined through one ledger and one human approval flow.
 - Assurance and Dispatch are Phase 2. Do not create placeholder screens, tables, or agents for them during the hackathon.
 - Backend examples using Flask and MongoDB are patterns only. CarbonMesh uses FastAPI, Pydantic, SQLAlchemy, asyncpg, PostgreSQL, and pgvector.
+- The approved five-schema, 32-table code-first model in `docs/architecture/database.md` supersedes older database catalogues. The POC uses explicit SQLAlchemy bootstrap commands and no Alembic migrations.
 - The frontend reference describes a custom component catalogue. The current team decision is to use shadcn/ui components and not build a replacement custom design-system component library.
 - The POC plan is more specific and newer than the broad solution brief. It is authoritative for what must ship.
 
@@ -200,8 +201,8 @@ Do not add Recharts, React Flow, or another dependency until a real screen uses 
 - Pydantic v2.
 - SQLAlchemy 2.0 async ORM/SQL toolkit.
 - asyncpg PostgreSQL driver.
-- Alembic migrations.
-- PostgreSQL with pgvector.
+- Pydantic v2 settings with secret-safe `DATABASE_URL` validation.
+- Neon PostgreSQL with pgvector and `VECTOR(768)` evidence embeddings.
 - LangChain for model/tool abstractions only where useful.
 - LangGraph for explicit bounded workflow state.
 - Gemini API model for planning, tool selection, structured output, and explanation.
@@ -222,7 +223,7 @@ Do not add deployment infrastructure until it supports a runnable vertical slice
 
 ## Current repository state
 
-The repository currently contains only the lightweight foundation. Business logic, database models, migrations, agents, domain APIs, and feature screens have not been implemented.
+The repository contains the lightweight frontend/API foundation and the implemented database foundation. Measurement, procurement, agent business logic, seed data, and feature screens are still staged work.
 
 Current working functionality:
 
@@ -233,7 +234,12 @@ Current working functionality:
 - The frontend calls the health endpoint through TanStack Query and validates it with Zod.
 - The page displays `CarbonMesh` and the API connection state.
 - Tailwind CSS v4 and shadcn/ui configuration are initialized.
-- Placeholder folders are retained with `.gitkeep` files.
+- SQLAlchemy defines the authoritative 32-table model across five PostgreSQL schemas.
+- The backend uses one lazy asyncpg engine and async SQLAlchemy session factory for Neon.
+- Explicit bootstrap commands enable pgvector, create tables, views, and the immutable-ledger trigger, and verify compatibility.
+- The repository implements and locally tests the bootstrap workflow; applying it to a live Neon branch still requires the operator's rotated `DATABASE_URL`.
+- `GET /api/db/demo` checks connectivity asynchronously and sanitizes failures.
+- Placeholder feature folders are retained where business workflows have not yet been built.
 
 Current repository shape:
 
@@ -266,9 +272,11 @@ carbonmesh/
       app/
         api/routes/
         core/
-        db/migrations/
-        db/models/
-        db/repositories/
+        db/
+          bootstrap.py
+          ddl.py
+          session.py
+          models/
         dependencies/
         middleware/
         modules/
@@ -297,6 +305,8 @@ Frontend dependencies and `package-lock.json` live under `apps/web`. There shoul
 
 Backend dependencies are declared in `apps/api/pyproject.toml`. A `requirements.txt` is not currently used because `pyproject.toml` is the single dependency source.
 
+Database schema details, including the table catalogue and vector index, are documented in `docs/architecture/database.md`.
+
 ## Local setup
 
 Prerequisites:
@@ -319,6 +329,16 @@ py -m venv .venv
 .venv\Scripts\Activate.ps1
 python -m pip install -e ".[dev]"
 ```
+
+Copy `apps/api/.env.example` to `apps/api/.env`, replace its placeholder with a rotated pooled Neon URL, then explicitly bootstrap and verify the database from `apps/api`:
+
+```powershell
+Copy-Item .env.example .env
+python -m app.db.bootstrap
+python -m app.db.bootstrap --check
+```
+
+Never commit or log a real database URL. FastAPI startup does not create or alter database objects.
 
 Run the backend from `apps/api`:
 
@@ -409,7 +429,9 @@ Rules:
 - Database models do not leak into API responses.
 - Pydantic schemas are the API/tool boundary.
 - The LLM and LangGraph nodes call typed services/tools, never raw database sessions.
-- Use async database access where the stack supports it.
+- Use `AsyncSession` and async database access; transaction owners commit explicitly and session helpers roll back on failure.
+- Do not run DDL during application startup. Use `python -m app.db.bootstrap` explicitly.
+- SQLAlchemy `create_all()` does not alter existing tables. Rebuild a disposable branch for POC schema changes or deliberately introduce migrations before persistent environments require in-place evolution.
 - Use `Decimal`, never float, for carbon, quantity, percentage, score, and money arithmetic.
 - Store timestamps in UTC.
 - Use ISO currency codes.
@@ -509,9 +531,9 @@ Steps:
 
 1. Freeze the current product, quantity, site, period, cost ceiling, lead-time ceiling, material compatibility, and circularity requirement.
 2. Load active alternatives with valid compatible evidence.
-3. Normalize carbon, circularity, cost, and delivery-risk criteria to deterministic 0-100 scores.
+3. Normalize carbon, evidence quality, circularity, and operational-fit criteria to deterministic 0-100 scores.
 4. Apply a versioned scoring model.
-5. Remove options violating any hard constraint. Never soften constraints.
+5. Remove options violating cost or any other hard constraint. Never soften constraints or score cost as a compensating benefit.
 6. Calculate projected footprint, avoided emissions, reduction percentage, cost delta, and lead-time delta.
 7. Select the highest-scoring feasible option.
 8. Create an explanation template and bind verified facts.
@@ -522,19 +544,21 @@ Initial scoring model:
 
 | Criterion | Weight |
 | --- | ---: |
-| Carbon performance | 45% |
-| Circularity | 25% |
-| Cost | 20% |
-| Delivery and operational risk | 10% |
+| Carbon performance | 40% |
+| Evidence quality | 25% |
+| Circularity | 20% |
+| Operational fit | 15% |
+
+Cost is a hard feasibility constraint, not a weighted scoring component.
 
 Core formulas:
 
 ```text
 total_score =
-  0.45 * carbon_score +
-  0.25 * circularity_score +
-  0.20 * cost_score +
-  0.10 * delivery_risk_score
+  0.40 * carbon_score +
+  0.25 * evidence_score +
+  0.20 * circularity_score +
+  0.15 * operational_fit_score
 
 avoided_kgco2e = quantity * (current_pcf - alternative_pcf)
 
@@ -622,7 +646,7 @@ The POC plan defines versioned routes under `/api/v1`. The current bootstrap rou
 | GET | `/api/v1/measurements/{id}/lineage` | Read lineage graph. |
 | GET | `/api/v1/suppliers` | List supplier products. |
 | GET | `/api/v1/suppliers/{id}` | Read supplier/product evidence. |
-| POST | `/api/v1/procurement/assessments/run` | Calculate supplier assessments. |
+| POST | `/api/v1/procurement/supplier-scores/run` | Calculate deterministic supplier scores. |
 | POST | `/api/v1/procurement/scenarios` | Create a frozen scenario. |
 | GET | `/api/v1/procurement/scenarios/{id}` | Read scenario and comparison. |
 | GET | `/api/v1/procurement/recommendations/{id}` | Read recommendation facts, scores, and hashes. |
@@ -665,70 +689,32 @@ SSE event names:
 
 Build these as the POC requires them. Do not create all screens as empty placeholders just to satisfy the route count.
 
-## Planned database model
+## Implemented database model
 
-The POC plan contains 32 relational tables. They are planned, not currently implemented.
+The SQLAlchemy metadata contains exactly 32 relational tables across five PostgreSQL schemas. This five-schema model is authoritative over older unqualified table catalogues.
 
-### Context, sources, and audit
-
-1. `companies`
-2. `sites`
-3. `reporting_periods`
-4. `actors`
-5. `data_sources`
-6. `source_documents`
-7. `evidence_items`
-8. `audit_log`
-
-### Measurement
-
-9. `raw_activity_records`
-10. `activity_records`
-11. `emission_factors`
-12. `calculation_runs`
-13. `emission_calculations`
-14. `carbon_measurements`
-15. `data_quality_issues`
-16. `carbon_baselines`
-17. `variance_alerts`
-
-### Agent, ledger, and lineage
-
-18. `agent_runs`
-19. `ledger_events`
-20. `lineage_edges`
-21. `ledger_event_evidence`
-
-### Semantic definitions
-
-22. `standards`
-23. `metric_definitions`
-24. `semantic_aliases`
-25. `scoring_models`
-
-### Procurement and approval
-
-26. `suppliers`
-27. `supplier_products`
-28. `supplier_assessments`
-29. `procurement_scenarios`
-30. `procurement_recommendations`
-31. `fact_bindings`
-32. `approvals`
+| Schema | Tables |
+| --- | --- |
+| `core` | `companies`, `sites`, `reporting_periods`, `actors`, `data_sources`, `source_documents`, `evidence_items`, `audit_log` |
+| `carbon` | `raw_activity_records`, `activity_records`, `emission_factors`, `calculation_runs`, `emission_calculations`, `carbon_measurements`, `data_quality_issues`, `carbon_baselines`, `variance_alerts`, `agent_runs` |
+| `ledger` | `ledger_events`, `lineage_edges`, `ledger_event_evidence` |
+| `semantic` | `semantic_entities`, `semantic_aliases`, `metric_definitions`, `method_definitions` |
+| `procurement` | `suppliers`, `supplier_products`, `procurement_scenarios`, `supplier_scores`, `recommendations`, `fact_bindings`, `approvals` |
 
 Database rules:
 
-- Important events are append-oriented.
-- Core relationships remain relational; JSONB is limited to frozen context, constraints, weights, trace summaries, and raw payloads.
-- Enforce company scoping through direct or parent relationships.
-- Add uniqueness for document checksums, versioned metric/scoring keys, and supplier product codes.
-- Add checks for non-negative quantities/factors, confidence 0-1, and percentage/score ranges 0-100.
-- Prevent cross-company supersession and self-referencing lineage edges.
-- Require approval hash integrity and idempotency.
-- Use import checksums, row keys, calculation hashes, analysis signatures, and decision idempotency keys.
-- Add indexes only for demonstrated query paths: company/site/period, statuses, trace IDs, product/material lookup, and evidence vector search.
+- PostgreSQL UUID primary keys are server-generated; timestamps are UTC-aware; carbon, quantity, money, percentages, confidence, and scores use fixed-precision numerics and Python `Decimal`.
+- Tenant-owned rows carry `company_id`, and composite foreign keys prevent cross-company references through sites, sources, products, ledger events, recommendations, and approvals.
+- Core relationships remain relational. JSONB is limited to raw/frozen/configuration payloads, constraints, weights, trace summaries, and snapshots.
+- Domain statuses use named `VARCHAR` checks instead of PostgreSQL enum types. Foreign keys use `ON DELETE RESTRICT`, and ORM relationships do not cascade deletes.
+- Checks enforce non-negative quantities and factors, confidence `0..1`, percentages and scores `0..100`, lowercase SHA-256 hashes, and valid evidence-embedding metadata.
+- Important facts are append-oriented. `ledger.prevent_ledger_event_mutation()` and `trg_ledger_events_immutable` reject update/delete operations on `ledger.ledger_events` with SQLSTATE `55000`.
+- `core.evidence_items.embedding` is nullable `VECTOR(768)`. Embedding, model identifier, and timestamp must all be present or all absent. A partial cosine HNSW index uses `m = 16` and `ef_construction = 64`; a B-tree metadata index supports company/document/type filtering.
+- Uniqueness and partial indexes enforce source and row idempotency, versioned definitions, one active recommendation per scenario, one pending approval per recommendation, fact-placeholder uniqueness, and approval decision idempotency.
+- Approval composite foreign keys bind each reviewed preview hash and analysis signature to the exact recommendation payload.
+- Read models are `carbon.v_measurement_summary`, `procurement.v_supplier_comparison`, and `procurement.v_pending_approvals`.
 
-Do not implement all 32 tables blindly before validating the first vertical slice. Preserve the planned names and relationships, but sequence implementation by actual Day 1-3 workflows.
+Run `python -m app.db.bootstrap` explicitly to enable pgvector and create compatible missing objects, then `python -m app.db.bootstrap --check` to verify them. API startup never performs DDL. `create_all()` does not migrate existing tables; rebuild a disposable branch for POC structural changes or reintroduce migrations for persistent environments. The full data dictionary is in `docs/architecture/database.md`.
 
 ## Team ownership
 
@@ -737,7 +723,7 @@ Do not implement all 32 tables blindly before validating the first vertical slic
 | Dev 1 - Frontend | React shell, routes, POC screens, queries/forms, lineage/charts, SSE client, approval UX, frontend tests. |
 | Dev 2 - Backend | FastAPI contracts, imports, measurement engine, procurement engine, REST/SSE services, deterministic unit tests. |
 | Dev 3 - Agentic AI | LangGraph state, context/intent planner, tool schemas, budgets, fact-template synthesis, grounding validation, evals. |
-| Dev 4 - Database/Platform | PostgreSQL schema, Alembic, ledger/lineage, approvals/audit, pgvector, Docker, deployment, logging/tracing. |
+| Dev 4 - Database/Platform | Neon/PostgreSQL code-first schema, async sessions, ledger/lineage, approvals/audit, pgvector, Docker, deployment, logging/tracing. |
 | Dev 5 - Data/QA | Synthetic fixtures/evidence, seed/reset, expected values, integration/e2e tests, README, deck, and video coordination. |
 
 Critical handoffs:
@@ -754,10 +740,10 @@ Critical handoffs:
 ### Day 1 - Foundation
 
 - Freeze contracts and identifiers.
-- Add PostgreSQL, migrations, initial tables, and seed/reset path.
+- Bootstrap Neon PostgreSQL, pgvector, the code-first tables, and the seed/reset path.
 - Build frontend shell and data import entry point.
 - Build agent graph skeleton and terminal states.
-- Exit gate: services boot, migrations and seed run, frontend reaches health, agent can return a structured plan.
+- Exit gate: bootstrap verification and seed run, services boot, frontend reaches health, and the agent can return a structured plan.
 
 ### Day 2 - Measurement
 
@@ -781,7 +767,7 @@ Critical handoffs:
 
 ## Release-blocking journeys
 
-1. Fresh setup, migrations, and seed complete without manual database changes.
+1. Fresh Neon setup, explicit code-first bootstrap verification, and seed complete without manual database changes.
 2. Happy measurement returns 33,600 kgCO2e with expected factor, confidence, fact, and ledger IDs.
 3. Measurement trace-back resolves every graph node to real source/evidence records.
 4. Wrong units and missing supplier data create typed issues and no verified measurement.

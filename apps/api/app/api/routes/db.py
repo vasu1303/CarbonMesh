@@ -3,7 +3,6 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import text
-from sqlalchemy.exc import SQLAlchemyError
 
 from app.db.session import session_scope
 
@@ -17,15 +16,16 @@ class DatabaseDemoResponse(BaseModel):
 
 
 @router.get("/demo", response_model=DatabaseDemoResponse)
-def run_database_demo() -> DatabaseDemoResponse:
+async def run_database_demo() -> DatabaseDemoResponse:
     """Verify the Neon connection and demonstrate a parameterized query."""
     try:
-        with session_scope() as session:
-            database_time = session.execute(text("SELECT CURRENT_TIMESTAMP")).scalar_one()
-    except (RuntimeError, SQLAlchemyError) as error:
+        async with session_scope() as session:
+            result = await session.execute(text("SELECT CURRENT_TIMESTAMP"))
+            database_time = result.scalar_one()
+    except Exception as error:
         raise HTTPException(
             status_code=503,
-            detail=f"Database connection failed: {error}",
+            detail="Database connection is unavailable.",
         ) from error
 
     return DatabaseDemoResponse(
