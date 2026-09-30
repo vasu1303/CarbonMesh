@@ -221,7 +221,7 @@ Do not add deployment infrastructure until it supports a runnable vertical slice
 
 ## Current repository state
 
-The repository contains the lightweight frontend/API foundation and the implemented database foundation. Measurement, procurement, agent business logic, seed data, and feature screens are still staged work.
+The repository contains the lightweight frontend/API foundation, the implemented database foundation, and the P0 procurement, agent, lineage, approval, audit, and grid-integration API slices. Import APIs, measurement calculation, an explicit demo reset/seed command, and most feature screens remain staged work.
 
 Current working functionality:
 
@@ -235,7 +235,8 @@ Current working functionality:
 - SQLAlchemy defines the authoritative 32-table model across five PostgreSQL schemas.
 - The backend uses one lazy asyncpg engine and async SQLAlchemy session factory for Neon.
 - Explicit bootstrap commands enable pgvector, create tables, views, and the immutable-ledger trigger, and verify compatibility.
-- The repository implements and locally tests the bootstrap workflow; applying it to a live Neon branch still requires the operator's rotated `DATABASE_URL`.
+- The shared development Neon database is already provisioned. Bootstrap remains an operator-only workflow for new or reset disposable databases; normal contributors install dependencies, configure the shared `DATABASE_URL`, and start development without rerunning DDL.
+- FastAPI startup never bootstraps, resets, or seeds application data; synthetic E2E prerequisites are created only inside a disposable test database.
 - `GET /api/db/demo` checks connectivity asynchronously and sanitizes failures.
 - Placeholder feature folders are retained where business workflows have not yet been built.
 
@@ -328,15 +329,13 @@ py -m venv .venv
 python -m pip install -e ".[dev]"
 ```
 
-Copy `apps/api/.env.example` to `apps/api/.env`, replace its placeholder with a rotated pooled Neon URL, then explicitly bootstrap and verify the database from `apps/api`:
+Copy `apps/api/.env.example` to `apps/api/.env` and replace its placeholder with the shared development database's pooled Neon URL obtained through the approved secret channel:
 
 ```powershell
 Copy-Item .env.example .env
-python -m app.db.bootstrap
-python -m app.db.bootstrap --check
 ```
 
-Never commit or log a real database URL. FastAPI startup does not create or alter database objects.
+The shared database is already provisioned; normal contributors must not rerun bootstrap during startup. `python -m app.db.bootstrap` is reserved for an operator provisioning a new or reset disposable database, while `python -m app.db.bootstrap --check` is an optional read-only diagnostic. Never commit or log a real database URL. FastAPI startup does not create or alter database objects and does not seed or reset application data.
 
 Run the backend from `apps/api`:
 
@@ -428,7 +427,7 @@ Rules:
 - Pydantic schemas are the API/tool boundary.
 - The LLM and LangGraph nodes call typed services/tools, never raw database sessions.
 - Use `AsyncSession` and async database access; transaction owners commit explicitly and session helpers roll back on failure.
-- Do not run DDL during application startup. Use `python -m app.db.bootstrap` explicitly.
+- Do not run DDL during application startup. Only an operator provisioning a new or reset disposable database runs `python -m app.db.bootstrap`; normal contributors use the already-provisioned shared database.
 - SQLAlchemy `create_all()` does not alter existing tables. Rebuild a disposable branch for POC schema changes or deliberately introduce migrations before persistent environments require in-place evolution.
 - Use `Decimal`, never float, for carbon, quantity, percentage, score, and money arithmetic.
 - Store timestamps in UTC.
@@ -644,7 +643,7 @@ The POC plan defines versioned routes under `/api/v1`. The current bootstrap rou
 | GET | `/api/v1/measurements/{id}/lineage` | Read lineage graph. |
 | GET | `/api/v1/suppliers` | List supplier products. |
 | GET | `/api/v1/suppliers/{id}` | Read supplier/product evidence. |
-| POST | `/api/v1/procurement/supplier-scores/run` | Calculate deterministic supplier scores. |
+| POST | `/api/v1/procurement/assessments/run` | Calculate deterministic supplier/product assessments. |
 | POST | `/api/v1/procurement/scenarios` | Create a frozen scenario. |
 | GET | `/api/v1/procurement/scenarios/{id}` | Read scenario and comparison. |
 | GET | `/api/v1/procurement/recommendations/{id}` | Read recommendation facts, scores, and hashes. |
@@ -712,7 +711,7 @@ Database rules:
 - Approval composite foreign keys bind each reviewed preview hash and analysis signature to the exact recommendation payload.
 - Read models are `carbon.v_measurement_summary`, `procurement.v_supplier_comparison`, and `procurement.v_pending_approvals`.
 
-Run `python -m app.db.bootstrap` explicitly to enable pgvector and create compatible missing objects, then `python -m app.db.bootstrap --check` to verify them. API startup never performs DDL. `create_all()` does not migrate existing tables; rebuild a disposable branch for POC structural changes or reintroduce migrations for persistent environments. The full data dictionary is in `docs/architecture/database.md`.
+For a new or reset disposable database, an operator runs `python -m app.db.bootstrap` to enable pgvector and create compatible missing objects, then may run the read-only `python -m app.db.bootstrap --check` verification. Normal contributors connect to the already-provisioned shared database and do not bootstrap it. API startup never performs DDL. `create_all()` does not migrate existing tables; rebuild a disposable branch for POC structural changes or reintroduce migrations for persistent environments. The full data dictionary is in `docs/architecture/database.md`.
 
 ## Team ownership
 

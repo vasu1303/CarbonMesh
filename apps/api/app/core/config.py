@@ -13,6 +13,8 @@ class Settings(BaseModel):
     model_config = ConfigDict(extra="ignore", hide_input_in_errors=True)
 
     database_url: SecretStr | None = None
+    electricity_maps_api_token: SecretStr | None = None
+    electricity_maps_timeout_seconds: float = 10.0
 
     @field_validator("database_url", mode="before")
     @classmethod
@@ -22,10 +24,29 @@ class Settings(BaseModel):
             return value or None
         return value
 
+    @field_validator("electricity_maps_api_token", mode="before")
+    @classmethod
+    def validate_electricity_maps_token(cls, value: object) -> object:
+        if isinstance(value, str):
+            value = value.strip()
+            return value or None
+        return value
+
+    @field_validator("electricity_maps_timeout_seconds")
+    @classmethod
+    def validate_electricity_maps_timeout(cls, value: float) -> float:
+        if not 1 <= value <= 30:
+            raise ValueError("Electricity Maps timeout must be between 1 and 30 seconds.")
+        return value
+
 
 def get_settings() -> Settings:
     """Read environment settings without retaining a plaintext credential."""
-    return Settings(database_url=os.getenv("DATABASE_URL"))
+    return Settings(
+        database_url=os.getenv("DATABASE_URL"),
+        electricity_maps_api_token=os.getenv("ELECTRICITY_MAPS_API_TOKEN"),
+        electricity_maps_timeout_seconds=os.getenv("ELECTRICITY_MAPS_TIMEOUT_SECONDS", "10"),
+    )
 
 
 def get_database_url() -> SecretStr | None:

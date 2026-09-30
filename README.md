@@ -28,7 +28,7 @@ python -m pip install -e ".[dev]"
 
 On macOS or Linux, activate the environment with `source .venv/bin/activate`.
 
-## Configure and bootstrap Neon PostgreSQL
+## Configure the existing Neon PostgreSQL database
 
 The Neon connection URL belongs in the backend environment file, not in frontend
 code or a committed source file:
@@ -38,16 +38,24 @@ cd apps/api
 Copy-Item .env.example .env
 ```
 
-Open `apps/api/.env` and replace the example `DATABASE_URL` with a **rotated**
-pooled connection string from a clean, disposable Neon branch. Keep
+Open `apps/api/.env` and replace the example `DATABASE_URL` with the pooled
+connection string for the already-provisioned shared development database,
+obtained through the team's approved secret-sharing channel. Keep
 `sslmode=require` in the URL. The `.env` file is ignored by git; never commit,
 print, or expose the value to the frontend. If a credential has appeared in a
 prompt, issue, log, or commit, rotate it in Neon before using it here.
 Paste the raw URL from the Neon console, not a Markdown link or a string with
 brackets; reserved password characters must remain URL-encoded.
 
-From `apps/api`, create the five application schemas, enable pgvector, and create
-the 32 SQLAlchemy ORM tables plus the database views and ledger trigger:
+The shared development database is already provisioned. Normal contributors do
+not run bootstrap: after installing dependencies and configuring `.env`, start
+the API directly.
+
+### Provisioning a new database (operator only)
+
+Only an operator creating a new or reset disposable database should run the
+bootstrap commands that enable pgvector and install the five schemas, 32 tables,
+views, and immutable-ledger trigger:
 
 ```powershell
 python -m app.db.bootstrap
@@ -58,8 +66,9 @@ The first command is idempotent for a complete, compatible CarbonMesh schema.
 The check form is read-only and verifies the schemas, tables, pgvector column and
 index, views, and immutable-ledger trigger. Both commands reject partial or
 unexpected CarbonMesh structures instead of dropping or rewriting them.
-The repository supplies and locally tests this workflow; it does not imply that
-the schema has already been applied to your Neon branch.
+Do not run the provisioning command against the shared development database as
+part of routine startup. Use `--check` only when an operator needs read-only
+contract verification or when diagnosing a database mismatch.
 
 ### Viewing the tables in Neon
 
@@ -84,7 +93,7 @@ The query must return 32 rows. If it does not, compare the SQL Editor's selected
 branch and database with the connection string in `apps/api/.env`, then rerun
 `python -m app.db.bootstrap --check` from `apps/api`.
 
-Start the API only after bootstrap succeeds:
+With the existing shared database configured, start the API directly:
 
 ```powershell
 python -m uvicorn app.main:app --reload --reload-dir app --port 8000
@@ -124,7 +133,9 @@ from `app.db.base.Base`; obtain an `AsyncSession` through the database session
 context manager. Routes must not construct engines, open raw connections, or
 commit implicitly.
 
-Schema creation is explicit and never runs during FastAPI startup:
+Schema creation is explicit, operator-owned, and never runs during FastAPI
+startup. The following command is for a new or reset disposable database, not
+normal development against the shared database:
 
 ```powershell
 python -m app.db.bootstrap
@@ -143,10 +154,51 @@ model identifier is stored alongside each vector. See
 [`docs/architecture/database.md`](docs/architecture/database.md) for the full
 database contract.
 
-The API health endpoint is `http://localhost:8000/api/health`, and interactive
-API documentation is at `http://localhost:8000/docs`. The base URL returns `404`
-because no root route is defined. Limiting reloads to the `app` directory avoids
-virtual-environment or OneDrive changes repeatedly restarting the server.
+The API health endpoints are `http://localhost:8000/api/health` and
+`http://localhost:8000/api/v1/health`. Interactive API documentation is at
+`http://localhost:8000/docs`. The base URL returns `404` because no root route is
+defined. Limiting reloads to the `app` directory avoids virtual-environment or
+OneDrive changes repeatedly restarting the server.
+
+## POC API workflows
+
+The `/api/v1` surface implements measurement lineage, supplier exploration,
+deterministic procurement assessment and scenarios, bounded agent runs with SSE,
+hash-bound approvals, audit history, and Electricity Maps grid-intensity caching.
+Tenant-owned query routes require `company_id`; command payloads carry their tenant
+and actor context. OpenAPI documents the exact request and response contracts; the
+route overview is in [`docs/api/poc-v1.md`](docs/api/poc-v1.md).
+
+Set `ELECTRICITY_MAPS_API_TOKEN` only in `apps/api/.env` to use the live integration.
+The API never returns that credential. Grid-intensity syncs are bounded to ten days,
+snapshot the provider response, normalize gCO2eq/kWh to kgCO2e/kWh, and persist
+provenance in the existing evidence and factor tables.
+
+The API E2E suite arranges the minimum synthetic Nova Components / Plant B / Q3
+2026 prerequisite records only inside its disposable database, then exercises all
+requested endpoints through HTTP. Command responses are persisted and read back
+through their corresponding query endpoints. The application never seeds data at
+startup or while serving these APIs. By default, the suite starts a temporary local
+PostgreSQL server and never reads `DATABASE_URL`:
+
+```powershell
+cd apps/api
+python -m pytest tests/e2e -q
+```
+
+The local path requires `initdb` and `pg_ctl` on `PATH`. To use an explicitly
+disposable PostgreSQL database instead, set `CARBONMESH_E2E_DATABASE_URL` and also
+set `CARBONMESH_RUN_API_E2E_TESTS=disposable-database`. The suite drops and rebuilds
+the five CarbonMesh schemas, so never opt in with a database that contains data to
+preserve. Electricity Maps is replaced by a deterministic fake provider in E2E
+tests; no external credential or network call is required.
+
+Run all backend quality checks from `apps/api`:
+
+```powershell
+ruff check app tests
+pytest -q
+```
 
 ## Reset and use the synthetic POC API
 
@@ -201,3 +253,6 @@ tests/e2e/    Cross-application end-to-end tests
 The database foundation, synthetic reset/seed path, import/data-quality APIs,
 semantic context APIs, and deterministic measurement APIs are implemented.
 Procurement, approvals, agents, and most feature screens remain staged work.
+The database and P0 backend workflows are implemented. Measurement calculation and
+import APIs beyond this route batch, production model execution, and most frontend
+feature screens remain staged work.

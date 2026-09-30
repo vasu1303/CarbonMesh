@@ -17,7 +17,8 @@ __pycache__/
 .env.*
 !.env.example
 .idea/
-.vscode/
+.vscode/*
+!.vscode/settings.json
 .DS_Store
 Thumbs.db
 
