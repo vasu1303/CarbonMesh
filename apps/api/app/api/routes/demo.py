@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
-from typing import Literal
-from uuid import UUID, uuid4
+import secrets
+from typing import Annotated, Literal
+from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, Header, status
 from pydantic import BaseModel
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.db.session import DatabaseConfigurationError, session_scope
+from app.api.errors import safe_http_error
+from app.core.config import get_settings
+from app.dependencies.database import DatabaseSession
+from app.dependencies.request import TraceIdHeader
 from app.modules.demo.service import DemoResetBlockedError, reset_and_seed_demo
 
 router = APIRouter()
@@ -31,31 +35,61 @@ class DemoResetResponse(BaseModel):
     seeded: DemoSeedCounts
 
 
+def authorize_demo_reset(
+    reset_token: Annotated[
+        str | None,
+        Header(alias="X-Demo-Reset-Token", min_length=16, max_length=256),
+    ] = None,
+    trace_id: TraceIdHeader = None,
+) -> None:
+    """Keep the destructive reset unavailable without an operator secret."""
+
+    configured = get_settings().demo_reset_token
+    if configured is None or len(configured.get_secret_value()) < 16:
+        raise safe_http_error(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            code="demo_reset_disabled",
+            message="Demo reset is not enabled on this API instance.",
+            trace_id=trace_id,
+            retryable=False,
+        )
+    expected = configured.get_secret_value()
+    if reset_token is None or not secrets.compare_digest(
+        reset_token.encode("utf-8"), expected.encode("utf-8")
+    ):
+        raise safe_http_error(
+            status_code=status.HTTP_403_FORBIDDEN,
+            code="demo_reset_forbidden",
+            message="Demo reset authorization failed.",
+            trace_id=trace_id,
+            retryable=False,
+        )
+
+
 @router.post("/reset", response_model=DemoResetResponse)
-async def reset_demo() -> DemoResetResponse:
+async def reset_demo(
+    session: DatabaseSession,
+    _authorized: Annotated[None, Depends(authorize_demo_reset)],
+    trace_id: TraceIdHeader = None,
+) -> DemoResetResponse:
     """Replace an empty/all-synthetic database with the stable POC fixture set."""
     try:
-        async with session_scope() as session:
-            summary = await reset_and_seed_demo(session)
+        summary = await reset_and_seed_demo(session)
     except DemoResetBlockedError as error:
-        raise HTTPException(
+        raise safe_http_error(
             status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "code": "demo_reset_blocked",
-                "message": str(error),
-                "trace_id": str(uuid4()),
-                "retryable": False,
-            },
+            code="demo_reset_blocked",
+            message=str(error),
+            trace_id=trace_id,
+            retryable=False,
         ) from error
-    except (DatabaseConfigurationError, SQLAlchemyError, OSError) as error:
-        raise HTTPException(
+    except (SQLAlchemyError, OSError) as error:
+        raise safe_http_error(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={
-                "code": "database_unavailable",
-                "message": "The demo database could not be reset.",
-                "trace_id": str(uuid4()),
-                "retryable": True,
-            },
+            code="database_unavailable",
+            message="The demo database could not be reset.",
+            trace_id=trace_id,
+            retryable=True,
         ) from error
 
     return DemoResetResponse(

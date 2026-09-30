@@ -207,13 +207,16 @@ The versioned readiness endpoint is `GET /api/v1/health`; the legacy
 or all-synthetic disposable database, seed the documented Nova Components demo:
 
 ```powershell
-Invoke-RestMethod -Method Post http://localhost:8000/api/v1/demo/reset
+$headers = @{ "X-Demo-Reset-Token" = $env:DEMO_RESET_TOKEN }
+Invoke-RestMethod -Method Post -Headers $headers http://localhost:8000/api/v1/demo/reset
 ```
 
-The reset is intentionally blocked with `409 demo_reset_blocked` if any
-non-synthetic company exists. It atomically replaces all demo rows, so use it
-only on a disposable rehearsal database. The response returns the stable
-company, Plant B, and Q3 2026 identifiers needed by the other endpoints.
+Set a random `DEMO_RESET_TOKEN` of at least 16 characters in `apps/api/.env`
+before starting the API; without it the endpoint is disabled. The reset is also
+blocked with `409 demo_reset_blocked` if any non-synthetic company exists. It
+atomically replaces all demo rows, so use it only on a disposable rehearsal
+database. The response returns the stable company, Plant B, and Q3 2026
+identifiers needed by the other endpoints.
 
 Implemented POC endpoints include:
 

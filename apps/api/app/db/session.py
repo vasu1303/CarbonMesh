@@ -1,3 +1,4 @@
+import ssl
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -74,11 +75,15 @@ def normalize_database_url(database_url: SecretStr | str) -> AsyncDatabaseConfig
     # it avoids name/cache conflicts on Neon's PgBouncer pooled endpoint.
     query["prepared_statement_cache_size"] = "0"
     async_url = url.set(drivername="postgresql+asyncpg", query=query)
+    tls_context = ssl.create_default_context()
+    tls_context.minimum_version = ssl.TLSVersion.TLSv1_2
 
     return AsyncDatabaseConfiguration(
         url=async_url,
         connect_args={
-            "ssl": "require",
+            # An SSLContext validates both the certificate chain and hostname;
+            # asyncpg's string "require" mode encrypts without authenticating.
+            "ssl": tls_context,
             "timeout": 10,
             "command_timeout": 30,
             "statement_cache_size": 0,

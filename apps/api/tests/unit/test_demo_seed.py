@@ -1,18 +1,17 @@
 import hashlib
 import json
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
 from decimal import Decimal
 from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.api.routes.demo import router
+from app.api.routes.demo import authorize_demo_reset, router
 from app.db.models.carbon import ActivityRecord, EmissionFactor, RawActivityRecord
 from app.db.models.core import EvidenceItem, SourceDocument
 from app.db.models.procurement import SupplierProduct
 from app.db.models.semantic import MetricDefinition
+from app.dependencies.database import get_db_session
 from app.modules.demo.fixtures import (
     DEMO_COMPANY_ID,
     DEMO_PERIOD_ID,
@@ -117,10 +116,6 @@ def test_demo_reset_truncates_only_the_authoritative_table_catalogue() -> None:
 def test_demo_reset_route_returns_stable_seed_context(monkeypatch) -> None:
     fake_session = object()
 
-    @asynccontextmanager
-    async def fake_session_scope() -> AsyncIterator[object]:
-        yield fake_session
-
     async def fake_reset(session: object) -> DemoResetSummary:
         assert session is fake_session
         return DemoResetSummary(
@@ -133,10 +128,11 @@ def test_demo_reset_route_returns_stable_seed_context(monkeypatch) -> None:
             emission_factor_count=1,
         )
 
-    monkeypatch.setattr("app.api.routes.demo.session_scope", fake_session_scope)
     monkeypatch.setattr("app.api.routes.demo.reset_and_seed_demo", fake_reset)
     test_app = FastAPI()
     test_app.include_router(router, prefix="/api/v1/demo")
+    test_app.dependency_overrides[get_db_session] = lambda: fake_session
+    test_app.dependency_overrides[authorize_demo_reset] = lambda: None
 
     response = TestClient(test_app).post("/api/v1/demo/reset")
 

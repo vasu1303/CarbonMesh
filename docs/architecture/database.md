@@ -2,17 +2,21 @@
 
 Last updated: 2026-09-30
 
+This document explains the database architecture, lifecycle,
+bootstrap process, relationships, constraints, indexes, and every persisted
+table and column in the current SQLAlchemy model. The source of truth is the
+model under `apps/api/app/db/models`.
+
 ## Contract
 
 CarbonMesh uses Neon PostgreSQL as its structured source of truth. SQLAlchemy 2
-async ORM metadata is the authoritative definition for exactly 32 tables across
-`core`, `carbon`, `ledger`, `semantic`, and `procurement`. Evidence embeddings
-remain beside their evidence records through pgvector; there is no separate
-vector database.
+async ORM metadata defines exactly 32 tables across `core`, `carbon`, `ledger`,
+`semantic`, and `procurement`. Evidence embeddings remain beside their evidence
+records through pgvector; there is no separate vector database.
 
-The shared development database is already provisioned, and the application does
-not create schema objects during FastAPI startup. Only operators provisioning a
-new or reset disposable database run the following commands from `apps/api`:
+The shared development database is already provisioned, and FastAPI never
+creates schema objects during startup. Only operators provisioning a new or
+reset disposable database run these commands from `apps/api`:
 
 ```powershell
 python -m app.db.bootstrap
@@ -21,19 +25,18 @@ python -m app.db.bootstrap --check
 
 Bootstrap acquires a transaction-scoped advisory lock, enables `vector` in
 `public`, confirms HNSW support, creates the five application schemas, runs
-SQLAlchemy `create_all()`, installs the views and ledger trigger, and verifies
-the complete contract. It accepts either a pristine database or an already
+SQLAlchemy `create_all()`, installs the views and immutable-ledger trigger, and
+verifies the complete contract. It accepts a pristine database or an already
 complete compatible CarbonMesh database. A partial, extra, or incompatible
 CarbonMesh structure fails without being dropped or repaired.
 
-`--check` is read-only. It verifies all five schemas, all 32 tables, named
-constraints and indexes, the three views, pgvector, `VECTOR(768)`, the HNSW
+`--check` is read-only. It verifies all five schemas, 32 tables, named
+constraints and indexes, three views, pgvector, `VECTOR(768)`, the HNSW
 contract, and the ledger function and trigger.
 
 The tables are schema-qualified and intentionally do not appear under `public`.
-In Neon's Tables page, select the target branch/database and choose each of the
-five application schemas from the Schema menu. A blank `public` schema does not
-mean bootstrap failed. The SQL Editor can list the installed contract with:
+In Neon's Tables page, select the correct branch/database and one of the five
+application schemas. A blank `public` schema does not mean bootstrap failed.
 
 ```sql
 SELECT table_schema, table_name
@@ -43,446 +46,888 @@ WHERE table_type = 'BASE TABLE'
 ORDER BY table_schema, table_name;
 ```
 
-This contract is installed on the shared development Neon database. Contributors
-connect to it with a locally supplied secret and do not rerun bootstrap during
-normal startup. The operator workflow remains available for new or reset
-disposable branches. Bootstrap installs and verifies database objects only; it
-does not seed application rows, and FastAPI startup neither bootstraps nor seeds
-the database.
-
+Bootstrap installs and verifies database objects only; it does not seed rows.
 The opt-in live suite is `tests/integration/test_neon_database.py`. It runs only
 when `CARBONMESH_RUN_NEON_INTEGRATION_TESTS=rotated-disposable-branch` and the
-configured host is under `*.neon.tech`. It verifies repeated bootstrap, vectors,
-tenant and numeric constraints, approvals, partial uniqueness, and ledger
-immutability without dropping or resetting schemas.
+configured host is under `*.neon.tech`.
 
 ## Connection and lifecycle
 
-- `DATABASE_URL` is read from ignored `apps/api/.env` as a Pydantic `SecretStr`.
-  Use a rotated pooled Neon URL and never place a real credential in source,
-  logs, screenshots, prompts, or frontend configuration.
-- The URL parser accepts PostgreSQL URLs, replaces the driver with
-  `postgresql+asyncpg`, strips `sslmode` and `channel_binding`, and supplies TLS
-  through asyncpg connection arguments. The input must use `sslmode=require`;
-  other modes are rejected instead of being silently weakened. Non-PostgreSQL
-  or incomplete URLs also fail with credential-free messages.
-- The lazy process-wide engine uses `NullPool` for the Neon PgBouncer endpoint,
-  disables prepared-statement caches, and applies connection and command
-  timeouts. FastAPI disposes the engine during lifespan shutdown.
+- `DATABASE_URL` is read from ignored `apps/api/.env` as a Pydantic
+  `SecretStr`. Never place a real credential in source, logs, screenshots,
+  prompts, or frontend configuration.
+- The parser accepts PostgreSQL URLs, selects `postgresql+asyncpg`, strips
+  libpq-only TLS parameters, and supplies TLS through asyncpg arguments. The
+  input must use `sslmode=require`; weaker modes and malformed URLs are rejected
+  with credential-free messages.
+- The lazy process-wide engine uses `NullPool` for Neon PgBouncer, disables
+  prepared-statement caches, and applies connection/command timeouts. FastAPI
+  disposes it during lifespan shutdown.
 - `AsyncSession` scopes never commit implicitly. They roll back exceptions and
-  always close. The service that owns a transaction must call `commit()`.
-- `GET /api/db/demo` performs an async `SELECT CURRENT_TIMESTAMP`. Failures
-  return a fixed `503` detail and never expose the URL, host, user, password, or
-  driver exception.
+  always close; the service owning a transaction explicitly calls `commit()`.
+- `GET /api/db/demo` performs an async `SELECT CURRENT_TIMESTAMP`. Failures use
+  a sanitized response and do not expose connection or driver details.
 
 ## SQL and ORM conventions
 
-- Entity primary keys are PostgreSQL `UUID` values with
-  `DEFAULT gen_random_uuid()`. Unless a table says otherwise, entity tables also
-  have `created_at TIMESTAMPTZ NOT NULL DEFAULT now()` and
-  `updated_at TIMESTAMPTZ NOT NULL DEFAULT now()`.
-- Append-oriented/event tables use `created_at` without `updated_at`. The
-  `ledger.ledger_event_evidence` join table uses its two foreign keys as a
-  composite primary key.
-- Carbon, quantity, money, confidence, percentage, and score fields use
-  fixed-precision `NUMERIC` values and map to Python `Decimal`, never `float`.
-- All foreign keys use `ON DELETE RESTRICT`; ORM relationships do not perform
-  delete cascades. Tenant-owned records carry `company_id`, with composite
-  foreign keys used where a parent could otherwise cross company boundaries.
-- Every company-owned UUID entity/event table has unique `(company_id, id)` so
-  those tenant-safe composite foreign keys can target it. The composite-key
-  `ledger_event_evidence` table is the sole exception.
-- Domain states use checked `VARCHAR` columns rather than PostgreSQL enum types.
-  JSONB is reserved for raw input, frozen context/configuration, constraints,
-  telemetry, snapshots, and similar variable-shaped payloads.
-- Python attributes that map a database column named `metadata` use a safe name
-  such as `document_metadata`, `evidence_metadata`, or `entity_metadata` because
-  `metadata` is reserved by SQLAlchemy declarative models.
+- Entity primary keys are PostgreSQL UUIDs with `gen_random_uuid()`. Mutable
+  entities have `created_at` and `updated_at`; append-oriented events have only
+  `created_at`.
+- `ledger.ledger_event_evidence` uses its two foreign keys as a composite primary
+  key.
+- Carbon, quantity, money, confidence, percentage, and score fields use exact
+  `NUMERIC`/Python `Decimal`, never float.
+- Foreign keys use `ON DELETE RESTRICT`; ORM relationships do not cascade
+  deletes. Composite foreign keys enforce tenant alignment.
+- Domain states use checked `VARCHAR` values instead of PostgreSQL enum types.
+- Python attributes mapped to a database column named `metadata` use safe names
+  such as `document_metadata`, because `metadata` is reserved by SQLAlchemy.
 
-## Table catalogue
+## How to read this reference
 
-The type declarations below are the database-level contract. `NULL` is shown
-explicitly; other listed columns are `NOT NULL`. `Entity columns` means the
-standard UUID primary key and both timestamps described above. `Event columns`
-means the standard UUID primary key and `created_at` only.
+- PostgreSQL schema-qualified names are used throughout, for example
+  `core.companies`.
+- Unless marked nullable, a column is required at the database level.
+- `UUID` identifiers are generated by the backend. Fixture IDs may be stable.
+- `TIMESTAMPTZ` values are UTC-aware timestamps.
+- `NUMERIC(p,s)` values are exact decimals. The API normally serializes them as
+  JSON strings so JavaScript clients do not lose precision.
+- `JSONB` holds deliberately variable-shaped snapshots, configuration, or raw
+  provider data; it is not a substitute for stable relational fields.
+- `company_id` is the tenant boundary. Services must scope tenant-owned reads
+  and writes by it.
+- A SHA-256 digest is stored as a 64-character lowercase hexadecimal string.
 
-### `core` - context, sources, evidence, and audit (8)
+## Repeated lifecycle columns
 
-- `companies` - Entity columns; `code VARCHAR(50)`; `name VARCHAR(200)`;
-  `is_synthetic BOOLEAN DEFAULT false`; `is_active BOOLEAN DEFAULT true`.
-- `sites` - Entity columns; `company_id UUID`; `code VARCHAR(50)`;
-  `name VARCHAR(200)`; `country_code VARCHAR(2)`; `timezone VARCHAR(64) DEFAULT
-  'UTC'`; `is_active BOOLEAN DEFAULT true`.
-- `reporting_periods` - Entity columns; `company_id UUID`; `name VARCHAR(100)`;
-  `start_date DATE`; `end_date DATE`; `status VARCHAR(20) DEFAULT 'open'`.
-- `actors` - Entity columns; `company_id UUID`; `email VARCHAR(320)`;
-  `display_name VARCHAR(200)`; `role VARCHAR(40)`; `is_active BOOLEAN DEFAULT
-  true`.
-- `data_sources` - Entity columns; `company_id UUID`; `site_id UUID NULL`;
-  `name VARCHAR(200)`; `source_type VARCHAR(20)`; `status VARCHAR(20) DEFAULT
-  'pending'`; `external_reference VARCHAR(255) NULL`; `configuration JSONB
-  DEFAULT {}`; `is_synthetic BOOLEAN DEFAULT false`.
-- `source_documents` - Entity columns; `company_id UUID`; `data_source_id UUID`;
-  `filename VARCHAR(255)`; `content_type VARCHAR(100)`; `checksum VARCHAR(64)`;
-  `version INTEGER DEFAULT 1`; `size_bytes BIGINT NULL`; `storage_uri
-  VARCHAR(1000) NULL`; `metadata JSONB DEFAULT {}`; `imported_at TIMESTAMPTZ
-  DEFAULT CURRENT_TIMESTAMP`.
-- `evidence_items` - Entity columns; `company_id UUID`; `source_document_id
-  UUID`; `evidence_type VARCHAR(40)`; `locator VARCHAR(500)`; `content_text
-  TEXT`; `checksum VARCHAR(64)`; `metadata JSONB DEFAULT {}`; `embedding
-  VECTOR(768) NULL`; `embedding_model VARCHAR(100) NULL`; `embedded_at
-  TIMESTAMPTZ NULL`.
-- `audit_log` - Event columns; `company_id UUID`; `actor_id UUID NULL`;
-  `agent_run_id UUID NULL`; `action VARCHAR(100)`; `entity_type VARCHAR(100)`;
-  `entity_id UUID`; `trace_id VARCHAR(100) NULL`; `details JSONB DEFAULT {}`.
+Most mutable reference/entity tables repeat these columns:
 
-### `semantic` - canonical entities and versioned methods (4)
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `id` | `UUID`, primary key | Server-generated stable identifier for the row. |
+| `created_at` | `TIMESTAMPTZ` | Time the row was first inserted. |
+| `updated_at` | `TIMESTAMPTZ` | Time the mutable row was most recently changed. |
 
-- `semantic_entities` - Entity columns; `company_id UUID`; `entity_type
-  VARCHAR(30)`; `key VARCHAR(150)`; `label VARCHAR(255)`; `description TEXT
-  NULL`; `metadata JSONB DEFAULT {}`; `is_active BOOLEAN DEFAULT true`.
-- `semantic_aliases` - Entity columns; `company_id UUID`;
-  `semantic_entity_id UUID`; `alias VARCHAR(255)`; `locale VARCHAR(20) DEFAULT
-  'en'`; `is_active BOOLEAN DEFAULT true`.
-- `metric_definitions` - Entity columns; `company_id UUID`;
-  `semantic_entity_id UUID NULL`; `key VARCHAR(150)`; `version VARCHAR(50)`;
-  `name VARCHAR(255)`; `canonical_unit VARCHAR(50)`; `dimensions JSONB DEFAULT
-  {}`; `handler VARCHAR(150)`; `method_version VARCHAR(50)`; `description TEXT
-  NULL`; `is_active BOOLEAN DEFAULT true`.
-- `method_definitions` - Entity columns; `company_id UUID`; `method_type
-  VARCHAR(40)`; `key VARCHAR(150)`; `version VARCHAR(50)`; `name VARCHAR(255)`;
-  `code_version VARCHAR(100)`; `configuration JSONB`; `effective_from DATE`;
-  `effective_to DATE NULL`; `is_active BOOLEAN DEFAULT true`.
+Append-oriented event/fact tables contain `id` and `created_at`, but deliberately
+omit `updated_at`. Their history is extended with new rows rather than rewritten.
 
-### `carbon` - imported activity, calculation, measurement, and runs (10)
+## `core` schema
 
-- `raw_activity_records` - Event columns; `company_id UUID`; `data_source_id
-  UUID`; `source_document_id UUID`; `row_key VARCHAR(255)`; `row_number INTEGER
-  NULL`; `raw_payload JSONB`; `checksum VARCHAR(64)`; `import_status VARCHAR(20)
-  DEFAULT 'pending'`.
-- `activity_records` - Entity columns; `company_id UUID`;
-  `raw_activity_record_id UUID`; `site_id UUID`; `reporting_period_id UUID`;
-  `metric_definition_id UUID`; `supplier_product_id UUID NULL`; `material_code
-  VARCHAR(100)`; `activity_date DATE NULL`; `quantity NUMERIC(24,6)`; `unit
-  VARCHAR(50)`; `normalized_quantity NUMERIC(24,6)`; `normalized_unit
-  VARCHAR(50)`; `unit_cost NUMERIC(20,6) NULL`; `currency VARCHAR(3) NULL`;
-  `status VARCHAR(20) DEFAULT 'valid'`.
-- `emission_factors` - Entity columns; `company_id UUID`; `metric_definition_id
-  UUID`; `evidence_item_id UUID`; `factor_code VARCHAR(100)`; `version
-  VARCHAR(50)`; `name VARCHAR(255)`; `material_code VARCHAR(100) NULL`;
-  `product_code VARCHAR(100) NULL`; `geography VARCHAR(100) DEFAULT 'GLOBAL'`;
-  `factor_value NUMERIC(24,12)`; `numerator_unit VARCHAR(50) DEFAULT 'kgCO2e'`;
-  `denominator_unit VARCHAR(50)`; `effective_from DATE`; `effective_to DATE
-  NULL`; `source_quality NUMERIC(6,5)`; `factor_specificity NUMERIC(6,5)`;
-  `factor_recency NUMERIC(6,5)`; `status VARCHAR(20) DEFAULT 'active'`.
-- `calculation_runs` - Event columns; `company_id UUID`; `agent_run_id UUID
-  NULL`; `reporting_period_id UUID`; `method_definition_id UUID`;
-  `method_version VARCHAR(50)`; `code_version VARCHAR(100)`; `rounding_policy
-  VARCHAR(100)`; `input_hash VARCHAR(64)`; `output_hash VARCHAR(64) NULL`;
-  `status VARCHAR(20) DEFAULT 'pending'`; `started_at TIMESTAMPTZ NULL`;
-  `completed_at TIMESTAMPTZ NULL`; `summary JSONB DEFAULT {}`; `error_code
-  VARCHAR(100) NULL`.
-- `emission_calculations` - Event columns; `company_id UUID`;
-  `calculation_run_id UUID`; `activity_record_id UUID`; `emission_factor_id
-  UUID`; `normalized_quantity NUMERIC(24,6)`; `quantity_unit VARCHAR(50)`;
-  `factor_value NUMERIC(24,12)`; `factor_unit VARCHAR(100)`;
-  `emissions_kgco2e NUMERIC(24,6)`; `formula TEXT`; `output_hash VARCHAR(64)`.
-- `carbon_measurements` - Event columns; `company_id UUID`; `calculation_run_id
-  UUID`; `site_id UUID`; `reporting_period_id UUID`; `metric_definition_id
-  UUID`; `ledger_event_id UUID NULL`; `value_kgco2e NUMERIC(24,6)`; `unit
-  VARCHAR(50) DEFAULT 'kgCO2e'`; `confidence NUMERIC(6,5)`; `status VARCHAR(20)
-  DEFAULT 'draft'`; `formula TEXT`; `output_hash VARCHAR(64)`; `verified_at
-  TIMESTAMPTZ NULL`.
-- `data_quality_issues` - Entity columns; `company_id UUID`;
-  `raw_activity_record_id UUID NULL`; `activity_record_id UUID NULL`;
-  `issue_type VARCHAR(100)`; `code VARCHAR(100)`; `severity VARCHAR(20)`;
-  `field_name VARCHAR(100) NULL`; `message TEXT`; `status VARCHAR(20) DEFAULT
-  'open'`; `details JSONB DEFAULT {}`; `resolved_at TIMESTAMPTZ NULL`.
-- `carbon_baselines` - Event columns; `company_id UUID`; `site_id UUID`;
-  `reporting_period_id UUID`; `metric_definition_id UUID`;
-  `source_measurement_id UUID NULL`; `name VARCHAR(200)`; `value_kgco2e
-  NUMERIC(24,6)`; `unit VARCHAR(50) DEFAULT 'kgCO2e'`; `frozen_hash
-  VARCHAR(64)`.
-- `variance_alerts` - Entity columns; `company_id UUID`;
-  `carbon_measurement_id UUID`; `carbon_baseline_id UUID`; `variance_kgco2e
-  NUMERIC(24,6)`; `variance_pct NUMERIC(9,4) NULL`; `severity VARCHAR(20)`;
-  `status VARCHAR(20) DEFAULT 'open'`.
-- `agent_runs` - Event columns; `company_id UUID`; `actor_id UUID`;
-  `parent_run_id UUID NULL`; `trace_id VARCHAR(100)`; `workflow VARCHAR(50)`;
-  `stage VARCHAR(100)`; `terminal_state VARCHAR(40) DEFAULT 'running'`;
-  `context_envelope JSONB`; `plan JSONB NULL`; `result JSONB NULL`; `telemetry
-  JSONB DEFAULT {}`; `model_calls INTEGER DEFAULT 0`; `tool_calls INTEGER DEFAULT
-  0`; `retry_count INTEGER DEFAULT 0`; `started_at TIMESTAMPTZ DEFAULT
-  CURRENT_TIMESTAMP`; `completed_at TIMESTAMPTZ NULL`; `error_code VARCHAR(100)
-  NULL`.
+The `core` schema stores organization context, source provenance, evidence, and
+the human/system audit trail.
 
-### `ledger` - immutable facts, lineage, and evidence links (3)
+### `core.companies`
 
-- `ledger_events` - Event columns; `company_id UUID`; `event_type VARCHAR(100)`;
-  `entity_type VARCHAR(100)`; `entity_id UUID`; `payload JSONB`; `payload_hash
-  VARCHAR(64)`; `analysis_signature VARCHAR(64) NULL`; `created_by UUID NULL`;
-  `supersedes_event_id UUID NULL`.
-- `lineage_edges` - Event columns; `company_id UUID`; `parent_event_id UUID`;
-  `child_event_id UUID`; `relationship_type VARCHAR(100)`; `metadata JSONB
-  DEFAULT {}`.
-- `ledger_event_evidence` - `company_id UUID`; `ledger_event_id UUID`;
-  `evidence_item_id UUID`; `relevance VARCHAR(255) NULL`; `created_at TIMESTAMPTZ
-  DEFAULT now()`; primary key `(ledger_event_id, evidence_item_id)`.
+One row represents a tenant organization.
 
-### `procurement` - products, scoring, recommendations, and approvals (7)
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `id` | `UUID`, PK | Company identifier and root of tenant scoping. |
+| `code` | `VARCHAR(50)` | Short machine-friendly company code; unique across companies. |
+| `name` | `VARCHAR(200)` | Human-readable legal or display name. |
+| `is_synthetic` | `BOOLEAN`, default `false` | Marks demo/test data so it cannot be mistaken for customer data. |
+| `is_active` | `BOOLEAN`, default `true` | Whether the company may be used in active workflows. |
+| `created_at` | `TIMESTAMPTZ` | Creation time. |
+| `updated_at` | `TIMESTAMPTZ` | Last change time. |
 
-- `suppliers` - Entity columns; `company_id UUID`; `supplier_code VARCHAR(100)`;
-  `name VARCHAR(255)`; `country_code VARCHAR(2)`; `status VARCHAR(20) DEFAULT
-  'active'`; `metadata JSONB DEFAULT {}`.
-- `supplier_products` - Entity columns; `company_id UUID`; `supplier_id UUID`;
-  `evidence_item_id UUID NULL`; `product_code VARCHAR(100)`; `name VARCHAR(255)`;
-  `material_code VARCHAR(100)`; `category VARCHAR(100)`; `description TEXT
-  NULL`; `pcf_kgco2e_per_unit NUMERIC(24,12)`; `pcf_unit VARCHAR(100) DEFAULT
-  'kgCO2e/kg'`; `circularity_score NUMERIC(7,4)`; `recycled_content_pct
-  NUMERIC(7,4)`; `recyclable_pct NUMERIC(7,4)`; `evidence_quality_score
-  NUMERIC(7,4)`; `lead_time_days INTEGER`; `unit_cost NUMERIC(20,6)`; `currency
-  VARCHAR(3)`; `effective_from DATE`; `effective_to DATE NULL`; `is_active
-  BOOLEAN DEFAULT true`.
-- `procurement_scenarios` - Entity columns; `company_id UUID`; `site_id UUID`;
-  `reporting_period_id UUID`; `current_product_id UUID`; `carbon_measurement_id
-  UUID`; `agent_run_id UUID NULL`; `method_definition_id UUID`; `quantity
-  NUMERIC(24,6)`; `quantity_unit VARCHAR(50)`; `current_unit_cost NUMERIC(20,6)`;
-  `currency VARCHAR(3)`; `max_cost_increase_pct NUMERIC(7,4)`;
-  `max_lead_time_days INTEGER`; `minimum_circularity_score NUMERIC(7,4)`;
-  `material_constraints JSONB DEFAULT {}`; `carbon_weight NUMERIC(5,4) DEFAULT
-  0.4000`; `evidence_weight NUMERIC(5,4) DEFAULT 0.2500`; `circularity_weight
-  NUMERIC(5,4) DEFAULT 0.2000`; `operational_fit_weight NUMERIC(5,4) DEFAULT
-  0.1500`; `analysis_signature VARCHAR(64)`; `frozen_context JSONB`; `status
-  VARCHAR(20) DEFAULT 'draft'`.
-- `supplier_scores` - Event columns; `company_id UUID`; `scenario_id UUID`;
-  `supplier_product_id UUID`; `method_definition_id UUID`; `agent_run_id UUID
-  NULL`; `ledger_event_id UUID NULL`; `carbon_score NUMERIC(7,4)`;
-  `evidence_score NUMERIC(7,4)`; `circularity_score NUMERIC(7,4)`;
-  `operational_fit_score NUMERIC(7,4)`; `total_score NUMERIC(7,4)`; `rank INTEGER
-  NULL`; `feasible BOOLEAN`; `infeasibility_reasons JSONB DEFAULT []`.
-- `recommendations` - Event columns; `company_id UUID`; `scenario_id UUID`;
-  `recommended_product_id UUID`; `baseline_product_id UUID`; `supplier_score_id
-  UUID`; `ledger_event_id UUID NULL`; `status VARCHAR(30) DEFAULT
-  'pending_approval'`; `projected_footprint_kgco2e NUMERIC(24,6)`;
-  `avoided_kgco2e NUMERIC(24,6)`; `reduction_pct NUMERIC(7,4)`; `cost_delta_pct
-  NUMERIC(9,4)`; `lead_time_delta_days INTEGER`; `rationale_template TEXT`;
-  `analysis_signature VARCHAR(64)`; `payload_hash VARCHAR(64)`; `impact_snapshot
-  JSONB`; `invalidated_at TIMESTAMPTZ NULL`.
-- `fact_bindings` - Event columns; `company_id UUID`; `recommendation_id UUID
-  NULL`; `agent_run_id UUID`; `ledger_event_id UUID`; `evidence_item_id UUID
-  NULL`; `placeholder VARCHAR(150)`; `value_snapshot JSONB`; `display_value
-  VARCHAR(255)`; `unit VARCHAR(50) NULL`.
-- `approvals` - Event columns; `company_id UUID`; `recommendation_id UUID`;
-  `requested_by UUID`; `decided_by UUID NULL`; `ledger_event_id UUID NULL`;
-  `status VARCHAR(20) DEFAULT 'pending'`; `preview_hash VARCHAR(64)`;
-  `analysis_signature VARCHAR(64)`; `idempotency_key VARCHAR(255)`; `expires_at
-  TIMESTAMPTZ`; `decided_at TIMESTAMPTZ NULL`; `decision_note TEXT NULL`.
+## `carbon` schema
+
+The `carbon` schema retains raw imports, normalized activity, factors,
+calculation details, verified measurements, quality findings, and agent runs.
+
+### `carbon.raw_activity_records`
+
+Append-only copies of individual source rows before normalization.
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `id` | `UUID`, PK | Raw-row identifier. |
+| `company_id` | `UUID`, FK | Owning company. |
+| `data_source_id` | `UUID`, FK | Import/data source that received the row. |
+| `source_document_id` | `UUID`, FK | Exact source document containing the row. |
+| `row_key` | `VARCHAR(255)` | Stable caller/source key used for row traceability and duplicate detection. |
+| `row_number` | `INTEGER`, nullable | One-based source row position when meaningful. |
+| `raw_payload` | `JSONB` | Original structured row before normalization. |
+| `checksum` | `VARCHAR(64)` | SHA-256 of the canonical raw row. |
+| `import_status` | `VARCHAR(20)`, default `pending` | Row processing outcome, such as accepted or rejected. |
+| `created_at` | `TIMESTAMPTZ` | Time the row was ingested. |
+
+### `carbon.activity_records`
+
+Validated activity in canonical units, ready for deterministic calculation.
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `id` | `UUID`, PK | Normalized activity identifier. |
+| `company_id` | `UUID`, FK | Owning company. |
+| `raw_activity_record_id` | `UUID`, FK | Raw input row from which this record was derived. |
+| `site_id` | `UUID`, FK | Site where the activity occurred. |
+| `reporting_period_id` | `UUID`, FK | Reporting period containing the activity. |
+| `metric_definition_id` | `UUID`, FK | Activity metric and canonical-unit definition. |
+| `supplier_product_id` | `UUID`, nullable FK | Product associated with the purchase, when resolved. |
+| `material_code` | `VARCHAR(100)` | Canonical material used to select compatible factors/products. |
+| `activity_date` | `DATE`, nullable | Date of the activity when supplied. |
+| `quantity` | `NUMERIC(24,6)` | Quantity exactly as interpreted from the source. |
+| `unit` | `VARCHAR(50)` | Source quantity unit. |
+| `normalized_quantity` | `NUMERIC(24,6)` | Quantity converted to the metric's canonical unit. |
+| `normalized_unit` | `VARCHAR(50)` | Canonical unit after conversion. |
+| `unit_cost` | `NUMERIC(20,6)`, nullable | Source/current per-unit cost. |
+| `currency` | `VARCHAR(3)`, nullable | ISO 4217 currency code; required when `unit_cost` is present. |
+| `status` | `VARCHAR(20)`, default `valid` | Validation/use state of the normalized record. |
+| `created_at` | `TIMESTAMPTZ` | Creation time. |
+| `updated_at` | `TIMESTAMPTZ` | Last change time. |
+
+### `carbon.emission_factors`
+
+Versioned, evidence-backed conversion factors.
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `id` | `UUID`, PK | Emission-factor identifier. |
+| `company_id` | `UUID`, FK | Owning company. |
+| `metric_definition_id` | `UUID`, FK | Metric to which this factor applies. |
+| `evidence_item_id` | `UUID`, FK | Evidence supporting the factor value. |
+| `factor_code` | `VARCHAR(100)` | Stable factor code within the company. |
+| `version` | `VARCHAR(50)` | Factor dataset/version identifier. |
+| `name` | `VARCHAR(255)` | Human-readable factor name. |
+| `material_code` | `VARCHAR(100)`, nullable | Material-specific selector; null means not material-specific. |
+| `product_code` | `VARCHAR(100)`, nullable | Product-specific selector; preferred over broader matches. |
+| `geography` | `VARCHAR(100)`, default `GLOBAL` | Geographic applicability. |
+| `factor_value` | `NUMERIC(24,12)` | Exact factor magnitude. |
+| `numerator_unit` | `VARCHAR(50)`, default `kgCO2e` | Unit of emissions in the numerator. |
+| `denominator_unit` | `VARCHAR(50)` | Unit of activity in the denominator. |
+| `effective_from` | `DATE` | First valid date. |
+| `effective_to` | `DATE`, nullable | Last valid date; null means open-ended. |
+| `source_quality` | `NUMERIC(6,5)` | Normalized 0–1 quality score for the source. |
+| `factor_specificity` | `NUMERIC(6,5)` | Normalized 0–1 score for how closely the factor matches the activity. |
+| `factor_recency` | `NUMERIC(6,5)` | Normalized 0–1 freshness score. |
+| `status` | `VARCHAR(20)`, default `active` | Factor lifecycle state. |
+| `created_at` | `TIMESTAMPTZ` | Creation time. |
+| `updated_at` | `TIMESTAMPTZ` | Last change time. |
+
+### `carbon.calculation_runs`
+
+One reproducible execution envelope for a deterministic measurement calculation.
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `id` | `UUID`, PK | Calculation-run identifier. |
+| `company_id` | `UUID`, FK | Owning company. |
+| `agent_run_id` | `UUID`, nullable FK | Agent run that initiated the calculation. |
+| `reporting_period_id` | `UUID`, FK | Period being calculated. |
+| `method_definition_id` | `UUID`, FK | Method definition used. |
+| `method_version` | `VARCHAR(50)` | Business-method version copied for reproducibility. |
+| `code_version` | `VARCHAR(100)` | Implementation version copied for reproducibility. |
+| `rounding_policy` | `VARCHAR(100)` | Named rounding/quantization rule. |
+| `input_hash` | `VARCHAR(64)` | SHA-256 of canonical inputs; supports idempotent reuse. |
+| `output_hash` | `VARCHAR(64)`, nullable | SHA-256 of canonical output after success. |
+| `status` | `VARCHAR(20)`, default `pending` | Pending, running, completed, or failed state. |
+| `started_at` | `TIMESTAMPTZ`, nullable | Execution start time. |
+| `completed_at` | `TIMESTAMPTZ`, nullable | Terminal completion time. |
+| `summary` | `JSONB`, default `{}` | Bounded counts, confidence breakdown, and run summary. |
+| `error_code` | `VARCHAR(100)`, nullable | Safe failure code; no raw exception or SQL text. |
+| `created_at` | `TIMESTAMPTZ` | Row creation time. |
+
+### `carbon.emission_calculations`
+
+Append-only row-level arithmetic connecting one activity to one factor.
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `id` | `UUID`, PK | Calculation-detail identifier. |
+| `company_id` | `UUID`, FK | Owning company. |
+| `calculation_run_id` | `UUID`, FK | Parent deterministic run. |
+| `activity_record_id` | `UUID`, FK | Normalized activity input. |
+| `emission_factor_id` | `UUID`, FK | Selected factor input. |
+| `normalized_quantity` | `NUMERIC(24,6)` | Activity amount used by the formula. |
+| `quantity_unit` | `VARCHAR(50)` | Unit of `normalized_quantity`. |
+| `factor_value` | `NUMERIC(24,12)` | Factor value used by the formula. |
+| `factor_unit` | `VARCHAR(100)` | Combined factor unit, for example `kgCO2e/kg`. |
+| `emissions_kgco2e` | `NUMERIC(24,6)` | Exact calculated emissions for this input row. |
+| `formula` | `TEXT` | Human-readable deterministic formula. |
+| `output_hash` | `VARCHAR(64)` | SHA-256 of the row-level output. |
+| `created_at` | `TIMESTAMPTZ` | Calculation creation time. |
+
+### `carbon.carbon_measurements`
+
+Aggregated carbon result that becomes a traceable fact.
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `id` | `UUID`, PK | Measurement/fact identifier. |
+| `company_id` | `UUID`, FK | Owning company. |
+| `calculation_run_id` | `UUID`, FK | Run that produced the measurement. |
+| `site_id` | `UUID`, FK | Measured site. |
+| `reporting_period_id` | `UUID`, FK | Measured period. |
+| `metric_definition_id` | `UUID`, FK | Output emissions metric. |
+| `ledger_event_id` | `UUID`, nullable FK | Immutable ledger event representing this fact. |
+| `value_kgco2e` | `NUMERIC(24,6)` | Aggregated measurement value. |
+| `unit` | `VARCHAR(50)`, default `kgCO2e` | Measurement unit. |
+| `confidence` | `NUMERIC(6,5)` | Weighted 0–1 confidence score. |
+| `status` | `VARCHAR(20)`, default `draft` | Draft, verified, superseded, or unsupported state. |
+| `formula` | `TEXT` | Aggregation formula and method description. |
+| `output_hash` | `VARCHAR(64)` | SHA-256 of canonical measurement output. |
+| `verified_at` | `TIMESTAMPTZ`, nullable | Time the fact became verified. |
+| `created_at` | `TIMESTAMPTZ` | Creation time. |
+
+### `carbon.data_quality_issues`
+
+Typed validation findings attached to raw or normalized activity.
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `id` | `UUID`, PK | Issue identifier. |
+| `company_id` | `UUID`, FK | Owning company. |
+| `raw_activity_record_id` | `UUID`, nullable FK | Affected raw row, if available. |
+| `activity_record_id` | `UUID`, nullable FK | Affected normalized record, if available. |
+| `issue_type` | `VARCHAR(100)` | Broad category such as validation or duplicate detection. |
+| `code` | `VARCHAR(100)` | Stable machine-readable issue code. |
+| `severity` | `VARCHAR(20)` | `info`, `warning`, or `error`. |
+| `field_name` | `VARCHAR(100)`, nullable | Input field responsible for the finding. |
+| `message` | `TEXT` | Safe human-readable explanation. |
+| `status` | `VARCHAR(20)`, default `open` | Open, resolved, or waived lifecycle state. |
+| `details` | `JSONB`, default `{}` | Structured row/import context and expected/actual details. |
+| `resolved_at` | `TIMESTAMPTZ`, nullable | Resolution/waiver time. |
+| `created_at` | `TIMESTAMPTZ` | Creation time. |
+| `updated_at` | `TIMESTAMPTZ` | Last status/details change time. |
+
+### `carbon.carbon_baselines`
+
+Frozen comparison values used to calculate variance.
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `id` | `UUID`, PK | Baseline identifier. |
+| `company_id` | `UUID`, FK | Owning company. |
+| `site_id` | `UUID`, FK | Site scope. |
+| `reporting_period_id` | `UUID`, FK | Period associated with the baseline. |
+| `metric_definition_id` | `UUID`, FK | Metric represented by the baseline. |
+| `source_measurement_id` | `UUID`, nullable FK | Measurement from which the baseline was frozen. |
+| `name` | `VARCHAR(200)` | Human-readable baseline name. |
+| `value_kgco2e` | `NUMERIC(24,6)` | Frozen comparison value. |
+| `unit` | `VARCHAR(50)`, default `kgCO2e` | Baseline unit. |
+| `frozen_hash` | `VARCHAR(64)` | SHA-256 binding the baseline definition and value. |
+| `created_at` | `TIMESTAMPTZ` | Freeze time. |
+
+### `carbon.variance_alerts`
+
+Materialized comparisons between a measurement and a baseline.
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `id` | `UUID`, PK | Alert identifier. |
+| `company_id` | `UUID`, FK | Owning company. |
+| `carbon_measurement_id` | `UUID`, FK | Measurement being compared. |
+| `carbon_baseline_id` | `UUID`, FK | Baseline used for comparison. |
+| `variance_kgco2e` | `NUMERIC(24,6)` | Absolute measurement-minus-baseline difference. |
+| `variance_pct` | `NUMERIC(9,4)`, nullable | Percentage variance; null when the baseline is zero. |
+| `severity` | `VARCHAR(20)` | Classified alert severity. |
+| `status` | `VARCHAR(20)`, default `open` | Alert workflow state. |
+| `created_at` | `TIMESTAMPTZ` | Creation time. |
+| `updated_at` | `TIMESTAMPTZ` | Last status change time. |
+
+### `carbon.agent_runs`
+
+Persistent state and telemetry for one bounded orchestration request.
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `id` | `UUID`, PK | Agent-run identifier. |
+| `company_id` | `UUID`, FK | Owning company. |
+| `actor_id` | `UUID`, FK | Actor who initiated the run. |
+| `parent_run_id` | `UUID`, nullable FK | Parent run for a bounded child/subflow. |
+| `trace_id` | `VARCHAR(100)` | Cross-service/request correlation ID. |
+| `workflow` | `VARCHAR(50)` | Measurement, procurement, cross-module, or unsupported classification. |
+| `stage` | `VARCHAR(100)` | Current or final named execution stage. |
+| `terminal_state` | `VARCHAR(40)`, default `running` | Typed outcome, including completed, clarification, no data, budget exhausted, or failure. |
+| `context_envelope` | `JSONB` | Frozen authorized context and analysis signature. |
+| `plan` | `JSONB`, nullable | Structured bounded execution plan. |
+| `result` | `JSONB`, nullable | Final typed result snapshot. |
+| `telemetry` | `JSONB`, default `{}` | Event snapshots, timings, token/tool counts, and limits. |
+| `model_calls` | `INTEGER`, default `0` | Count of model-provider calls. |
+| `tool_calls` | `INTEGER`, default `0` | Count of allowlisted tool/service calls. |
+| `retry_count` | `INTEGER`, default `0` | Count of bounded repair/retry attempts. |
+| `started_at` | `TIMESTAMPTZ`, default current time | Run start time. |
+| `completed_at` | `TIMESTAMPTZ`, nullable | Terminal completion time. |
+| `error_code` | `VARCHAR(100)`, nullable | Safe terminal failure code. |
+| `created_at` | `TIMESTAMPTZ` | Persistence creation time. |
+
+## `core` schema (continued)
+
+The remaining core tables describe locations, reporting scope, actors, source
+provenance, evidence, and audit history.
+
+### `core.sites`
+
+Physical or operational locations belonging to a company.
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `id` | `UUID`, PK | Site identifier. |
+| `company_id` | `UUID`, FK | Owning `core.companies` row and tenant boundary. |
+| `code` | `VARCHAR(50)` | Company-local site code. |
+| `name` | `VARCHAR(200)` | Site display name. |
+| `country_code` | `VARCHAR(2)` | ISO 3166-1 alpha-2 country code used for geography-sensitive logic. |
+| `timezone` | `VARCHAR(64)`, default `UTC` | IANA timezone name used when interpreting site-local dates/times. |
+| `is_active` | `BOOLEAN`, default `true` | Whether the site is available for new work. |
+| `created_at` | `TIMESTAMPTZ` | Creation time. |
+| `updated_at` | `TIMESTAMPTZ` | Last change time. |
+
+### `core.reporting_periods`
+
+Named date windows used to scope calculations and comparisons.
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `id` | `UUID`, PK | Reporting-period identifier. |
+| `company_id` | `UUID`, FK | Owning company. |
+| `name` | `VARCHAR(100)` | Human-readable label such as `Q3 2026`. |
+| `start_date` | `DATE` | Inclusive first date in the period. |
+| `end_date` | `DATE` | Inclusive final date; constrained not to precede `start_date`. |
+| `status` | `VARCHAR(20)`, default `open` | Lifecycle state such as open or closed. |
+| `created_at` | `TIMESTAMPTZ` | Creation time. |
+| `updated_at` | `TIMESTAMPTZ` | Last change time. |
+
+### `core.actors`
+
+People or system identities that request, review, or approve work.
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `id` | `UUID`, PK | Actor identifier. |
+| `company_id` | `UUID`, FK | Company in which the actor operates. |
+| `email` | `VARCHAR(320)` | Company-unique contact/login-style address. |
+| `display_name` | `VARCHAR(200)` | Name shown in audit and approval views. |
+| `role` | `VARCHAR(40)` | Application role, for example analyst, procurement manager, approver, or auditor. |
+| `is_active` | `BOOLEAN`, default `true` | Whether the actor is eligible for new actions. |
+| `created_at` | `TIMESTAMPTZ` | Creation time. |
+| `updated_at` | `TIMESTAMPTZ` | Last change time. |
+
+### `core.data_sources`
+
+Logical origins of imported or externally synchronized data.
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `id` | `UUID`, PK | Data-source identifier; import APIs also use it as the import run ID. |
+| `company_id` | `UUID`, FK | Owning company. |
+| `site_id` | `UUID`, nullable FK | Optional site scope; null means company-wide. |
+| `name` | `VARCHAR(200)` | Operator-provided source name. |
+| `source_type` | `VARCHAR(20)` | Kind of source, such as an activity import, supplier import, or provider sync. |
+| `status` | `VARCHAR(20)`, default `pending` | Processing state of the source/import. |
+| `external_reference` | `VARCHAR(255)`, nullable | Caller or upstream-system correlation identifier. |
+| `configuration` | `JSONB`, default `{}` | Source-specific configuration and bounded import summary metadata. |
+| `is_synthetic` | `BOOLEAN`, default `false` | Identifies synthetic/demo content. |
+| `created_at` | `TIMESTAMPTZ` | Creation/import start time. |
+| `updated_at` | `TIMESTAMPTZ` | Last status or metadata change time. |
+
+### `core.source_documents`
+
+Immutable descriptions of files or provider responses received through a data
+source.
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `id` | `UUID`, PK | Source-document identifier. |
+| `company_id` | `UUID`, FK | Owning company. |
+| `data_source_id` | `UUID`, FK | `core.data_sources` record that produced or received the document. |
+| `filename` | `VARCHAR(255)` | Original or synthesized document name. |
+| `content_type` | `VARCHAR(100)` | MIME type, such as `text/csv` or `application/json`. |
+| `checksum` | `VARCHAR(64)` | SHA-256 of the exact document/provider payload. |
+| `version` | `INTEGER`, default `1` | Version of this logical source document. |
+| `size_bytes` | `BIGINT`, nullable | Payload size when known. |
+| `storage_uri` | `VARCHAR(1000)`, nullable | Location of externally stored content; null when content is represented in rows/evidence only. |
+| `metadata` | `JSONB`, default `{}` | Bounded document metadata such as import type or provider endpoint. |
+| `imported_at` | `TIMESTAMPTZ`, default current time | Time the backend accepted the document. |
+| `created_at` | `TIMESTAMPTZ` | Row creation time. |
+| `updated_at` | `TIMESTAMPTZ` | Last metadata/version change time. |
+
+### `core.evidence_items`
+
+Addressable excerpts or normalized evidence linked to calculations and products.
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `id` | `UUID`, PK | Evidence-item identifier. |
+| `company_id` | `UUID`, FK | Owning company. |
+| `source_document_id` | `UUID`, FK | Document from which the evidence came. |
+| `evidence_type` | `VARCHAR(40)` | Evidence category, such as supplier declaration or provider response. |
+| `locator` | `VARCHAR(500)` | Stable location within the source, for example a row, section, or API timestamp. |
+| `content_text` | `TEXT` | Evidence text used for review/retrieval; logs must not emit it. |
+| `checksum` | `VARCHAR(64)` | SHA-256 of the evidence content. |
+| `metadata` | `JSONB`, default `{}` | Structured provenance and domain-specific attributes. |
+| `embedding` | `VECTOR(768)`, nullable | Optional semantic-search vector. |
+| `embedding_model` | `VARCHAR(100)`, nullable | Model identifier used to create `embedding`. |
+| `embedded_at` | `TIMESTAMPTZ`, nullable | Time the vector was generated. |
+| `created_at` | `TIMESTAMPTZ` | Creation time. |
+| `updated_at` | `TIMESTAMPTZ` | Last metadata/embedding change time. |
+
+### `core.audit_log`
+
+Append-only chronological records of business actions.
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `id` | `UUID`, PK | Audit entry identifier. |
+| `company_id` | `UUID`, FK | Tenant to which the audited action belongs. |
+| `actor_id` | `UUID`, nullable FK | Human/system actor responsible, when known. |
+| `agent_run_id` | `UUID`, nullable FK | Agent run that caused the action, when applicable. |
+| `action` | `VARCHAR(100)` | Stable action code, for example calculation or approval decision. |
+| `entity_type` | `VARCHAR(100)` | Type of affected entity. |
+| `entity_id` | `UUID` | Affected entity ID; polymorphic and validated by the service. |
+| `trace_id` | `VARCHAR(100)`, nullable | Request/workflow correlation ID. |
+| `details` | `JSONB`, default `{}` | Sanitized action details and references. |
+| `created_at` | `TIMESTAMPTZ` | Time the action was recorded. |
+
+## `semantic` schema
+
+The `semantic` schema gives domain terms, metrics, and deterministic methods
+stable versioned identities.
+
+### `semantic.semantic_entities`
+
+Canonical business concepts to which aliases or metrics may be attached.
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `id` | `UUID`, PK | Semantic-entity identifier. |
+| `company_id` | `UUID`, FK | Owning company. |
+| `entity_type` | `VARCHAR(30)` | Concept family, such as metric, material, or standard. |
+| `key` | `VARCHAR(150)` | Stable company-local machine key. |
+| `label` | `VARCHAR(255)` | Human-readable canonical label. |
+| `description` | `TEXT`, nullable | Explanation of the concept. |
+| `metadata` | `JSONB`, default `{}` | Additional controlled semantic attributes. |
+| `is_active` | `BOOLEAN`, default `true` | Whether the concept can be resolved in current workflows. |
+| `created_at` | `TIMESTAMPTZ` | Creation time. |
+| `updated_at` | `TIMESTAMPTZ` | Last change time. |
+
+### `semantic.semantic_aliases`
+
+Alternative terms that resolve to a canonical semantic entity.
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `id` | `UUID`, PK | Alias identifier. |
+| `company_id` | `UUID`, FK | Owning company. |
+| `semantic_entity_id` | `UUID`, FK | Canonical `semantic.semantic_entities` target. |
+| `alias` | `VARCHAR(255)` | Alternative spelling or phrase. |
+| `locale` | `VARCHAR(20)`, default `en` | Language/locale for the alias. |
+| `is_active` | `BOOLEAN`, default `true` | Whether the alias participates in resolution. |
+| `created_at` | `TIMESTAMPTZ` | Creation time. |
+| `updated_at` | `TIMESTAMPTZ` | Last change time. |
+
+### `semantic.metric_definitions`
+
+Versioned definitions of measurable quantities exposed to services and agents.
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `id` | `UUID`, PK | Metric-definition identifier. |
+| `company_id` | `UUID`, FK | Owning company. |
+| `semantic_entity_id` | `UUID`, nullable FK | Optional canonical concept represented by the metric. |
+| `key` | `VARCHAR(150)` | Stable metric key, for example `emissions.scope3.category1`. |
+| `version` | `VARCHAR(50)` | Metric contract version. |
+| `name` | `VARCHAR(255)` | Human-readable metric name. |
+| `canonical_unit` | `VARCHAR(50)` | Unit to which input/output values are normalized. |
+| `dimensions` | `JSONB`, default `{}` | Required/allowed context dimensions such as site, period, and material. |
+| `handler` | `VARCHAR(150)` | Typed application handler responsible for the metric. |
+| `method_version` | `VARCHAR(50)` | Expected method version used with the metric. |
+| `description` | `TEXT`, nullable | Meaning and intended use of the metric. |
+| `is_active` | `BOOLEAN`, default `true` | Whether new workflows may select this version. |
+| `created_at` | `TIMESTAMPTZ` | Creation time. |
+| `updated_at` | `TIMESTAMPTZ` | Last change time. |
+
+### `semantic.method_definitions`
+
+Versioned deterministic calculation or scoring methods.
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `id` | `UUID`, PK | Method-definition identifier. |
+| `company_id` | `UUID`, FK | Owning company. |
+| `method_type` | `VARCHAR(40)` | Method family, such as measurement or procurement scoring. |
+| `key` | `VARCHAR(150)` | Stable machine key for the method. |
+| `version` | `VARCHAR(50)` | Business-method version. |
+| `name` | `VARCHAR(255)` | Human-readable method name. |
+| `code_version` | `VARCHAR(100)` | Deployed implementation version used for reproducibility. |
+| `configuration` | `JSONB` | Frozen method configuration, including weights or rounding rules. |
+| `effective_from` | `DATE` | First date on which the method is valid. |
+| `effective_to` | `DATE`, nullable | Last valid date; null means open-ended. |
+| `is_active` | `BOOLEAN`, default `true` | Whether the method may be selected for new work. |
+| `created_at` | `TIMESTAMPTZ` | Creation time. |
+| `updated_at` | `TIMESTAMPTZ` | Last change time. |
+
+## `ledger` schema
+
+The `ledger` schema is append-oriented. It binds verified payloads to hashes and
+connects them to their source events and evidence.
+
+### `ledger.ledger_events`
+
+Immutable business facts and state-transition events.
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `id` | `UUID`, PK | Ledger-event identifier. |
+| `company_id` | `UUID`, FK | Owning company. |
+| `event_type` | `VARCHAR(100)` | Stable event code, such as measurement verified or approval decided. |
+| `entity_type` | `VARCHAR(100)` | Type of entity represented by the event. |
+| `entity_id` | `UUID` | ID of that entity; service-validated polymorphic reference. |
+| `payload` | `JSONB` | Canonical fact/event payload snapshot. |
+| `payload_hash` | `VARCHAR(64)` | SHA-256 of the canonical payload. |
+| `analysis_signature` | `VARCHAR(64)`, nullable | Hash of the frozen context and method inputs, when applicable. |
+| `created_by` | `UUID`, nullable FK | Actor responsible for the event. |
+| `supersedes_event_id` | `UUID`, nullable FK | Prior ledger event replaced by this correction; history remains intact. |
+| `created_at` | `TIMESTAMPTZ` | Event occurrence/persistence time. |
+
+Database triggers reject updates and deletes on this table.
+
+### `ledger.lineage_edges`
+
+Directed relationships between immutable ledger events.
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `id` | `UUID`, PK | Lineage-edge identifier. |
+| `company_id` | `UUID`, FK | Owning company. |
+| `parent_event_id` | `UUID`, FK | Upstream/source ledger event. |
+| `child_event_id` | `UUID`, FK | Downstream/derived ledger event. |
+| `relationship_type` | `VARCHAR(100)` | Meaning of the derivation, for example derived-from or supersedes. |
+| `metadata` | `JSONB`, default `{}` | Optional edge-specific context. |
+| `created_at` | `TIMESTAMPTZ` | Edge creation time. |
+
+### `ledger.ledger_event_evidence`
+
+Many-to-many links between ledger events and supporting evidence.
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `company_id` | `UUID`, FK | Owning company and tenant-alignment guard. |
+| `ledger_event_id` | `UUID`, PK/FK | Ledger event supported by the evidence. |
+| `evidence_item_id` | `UUID`, PK/FK | Supporting `core.evidence_items` row. |
+| `relevance` | `VARCHAR(255)`, nullable | Short explanation of why the evidence supports the event. |
+| `created_at` | `TIMESTAMPTZ`, default current time | Link creation time. |
+
+The composite primary key (`ledger_event_id`, `evidence_item_id`) prevents the
+same evidence from being attached twice to one event.
+
+## `procurement` schema
+
+The `procurement` schema stores supplier/product facts, frozen comparison
+scenarios, deterministic scores, recommendations, fact bindings, and approvals.
+
+### `procurement.suppliers`
+
+Supplier organizations available for product comparisons.
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `id` | `UUID`, PK | Supplier identifier. |
+| `company_id` | `UUID`, FK | Company whose supplier catalogue contains the row. |
+| `supplier_code` | `VARCHAR(100)` | Company-local stable supplier code. |
+| `name` | `VARCHAR(255)` | Supplier display name. |
+| `country_code` | `VARCHAR(2)` | ISO 3166-1 alpha-2 country code. |
+| `status` | `VARCHAR(20)`, default `active` | Supplier lifecycle/eligibility state. |
+| `metadata` | `JSONB`, default `{}` | Additional supplier attributes, including bounded risk metadata. |
+| `created_at` | `TIMESTAMPTZ` | Creation time. |
+| `updated_at` | `TIMESTAMPTZ` | Last change time. |
+
+### `procurement.supplier_products`
+
+Versioned commercial and environmental facts for products offered by suppliers.
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `id` | `UUID`, PK | Supplier-product identifier. |
+| `company_id` | `UUID`, FK | Owning company. |
+| `supplier_id` | `UUID`, FK | Supplier offering the product. |
+| `evidence_item_id` | `UUID`, nullable FK | Evidence supporting PCF/circularity facts. |
+| `product_code` | `VARCHAR(100)` | Supplier/company-local product code. |
+| `name` | `VARCHAR(255)` | Product display name. |
+| `material_code` | `VARCHAR(100)` | Canonical material for compatibility filtering. |
+| `category` | `VARCHAR(100)` | Product category. |
+| `description` | `TEXT`, nullable | Product description. |
+| `pcf_kgco2e_per_unit` | `NUMERIC(24,12)` | Product carbon footprint factor. |
+| `pcf_unit` | `VARCHAR(100)`, default `kgCO2e/kg` | Unit of the PCF factor. |
+| `circularity_score` | `NUMERIC(7,4)` | Deterministic circularity score from 0 to 100. |
+| `recycled_content_pct` | `NUMERIC(7,4)` | Recycled content percentage from 0 to 100. |
+| `recyclable_pct` | `NUMERIC(7,4)` | Recyclable percentage from 0 to 100. |
+| `evidence_quality_score` | `NUMERIC(7,4)` | Evidence quality score from 0 to 100. |
+| `lead_time_days` | `INTEGER` | Expected procurement lead time in whole days. |
+| `unit_cost` | `NUMERIC(20,6)` | Product price per `quantity_unit`. |
+| `currency` | `VARCHAR(3)` | ISO 4217 price currency. |
+| `effective_from` | `DATE` | First valid date for these product facts. |
+| `effective_to` | `DATE`, nullable | Final valid date; null means open-ended. |
+| `is_active` | `BOOLEAN`, default `true` | Whether the product is eligible for new comparisons. |
+| `created_at` | `TIMESTAMPTZ` | Creation time. |
+| `updated_at` | `TIMESTAMPTZ` | Last change time. |
+
+### `procurement.procurement_scenarios`
+
+Frozen analysis context and hard constraints for one comparison.
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `id` | `UUID`, PK | Scenario identifier. |
+| `company_id` | `UUID`, FK | Owning company. |
+| `site_id` | `UUID`, FK | Site for which alternatives are evaluated. |
+| `reporting_period_id` | `UUID`, FK | Reporting period used for validity and context. |
+| `current_product_id` | `UUID`, FK | Baseline product being replaced. |
+| `carbon_measurement_id` | `UUID`, FK | Verified baseline measurement. |
+| `agent_run_id` | `UUID`, nullable FK | Agent run that initiated the scenario. |
+| `method_definition_id` | `UUID`, FK | Versioned scoring method. |
+| `quantity` | `NUMERIC(24,6)` | Purchase quantity to compare. |
+| `quantity_unit` | `VARCHAR(50)` | Unit of scenario quantity. |
+| `current_unit_cost` | `NUMERIC(20,6)` | Baseline unit cost. |
+| `currency` | `VARCHAR(3)` | ISO 4217 currency shared by compared costs. |
+| `max_cost_increase_pct` | `NUMERIC(7,4)` | Hard maximum percentage cost increase. |
+| `max_lead_time_days` | `INTEGER` | Hard maximum acceptable lead time. |
+| `minimum_circularity_score` | `NUMERIC(7,4)` | Hard minimum circularity score. |
+| `material_constraints` | `JSONB`, default `{}` | Allowed material codes and excluded risk levels. |
+| `carbon_weight` | `NUMERIC(5,4)`, default `0.4000` | Weight of carbon performance in total score. |
+| `evidence_weight` | `NUMERIC(5,4)`, default `0.2500` | Weight of evidence quality. |
+| `circularity_weight` | `NUMERIC(5,4)`, default `0.2000` | Weight of circularity. |
+| `operational_fit_weight` | `NUMERIC(5,4)`, default `0.1500` | Weight of operational fit. |
+| `analysis_signature` | `VARCHAR(64)` | SHA-256 of frozen context/method inputs. |
+| `frozen_context` | `JSONB` | Exact context snapshot used for the analysis. |
+| `status` | `VARCHAR(20)`, default `draft` | Scenario lifecycle state. |
+| `created_at` | `TIMESTAMPTZ` | Creation time. |
+| `updated_at` | `TIMESTAMPTZ` | Last status/context change time. |
+
+### `procurement.supplier_scores`
+
+Append-only deterministic assessment of one product in one scenario.
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `id` | `UUID`, PK | Score identifier. |
+| `company_id` | `UUID`, FK | Owning company. |
+| `scenario_id` | `UUID`, FK | Scenario in which the product was assessed. |
+| `supplier_product_id` | `UUID`, FK | Assessed product. |
+| `method_definition_id` | `UUID`, FK | Scoring method used. |
+| `agent_run_id` | `UUID`, nullable FK | Initiating agent run, when applicable. |
+| `ledger_event_id` | `UUID`, nullable FK | Ledger event recording the assessment fact. |
+| `carbon_score` | `NUMERIC(7,4)` | Normalized carbon-performance score, 0–100. |
+| `evidence_score` | `NUMERIC(7,4)` | Normalized evidence-quality score, 0–100. |
+| `circularity_score` | `NUMERIC(7,4)` | Normalized circularity score, 0–100. |
+| `operational_fit_score` | `NUMERIC(7,4)` | Normalized operational-fit score, 0–100. |
+| `total_score` | `NUMERIC(7,4)` | Weighted sum of component scores. |
+| `rank` | `INTEGER`, nullable | Deterministic rank among feasible options; null when not ranked. |
+| `feasible` | `BOOLEAN` | Whether all hard constraints passed. |
+| `infeasibility_reasons` | `JSONB`, default `[]` | Typed failures with actual and required values. |
+| `created_at` | `TIMESTAMPTZ` | Assessment creation time. |
+
+### `procurement.recommendations`
+
+Selected feasible outcome, impact facts, narrative template, and hash bindings.
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `id` | `UUID`, PK | Recommendation identifier. |
+| `company_id` | `UUID`, FK | Owning company. |
+| `scenario_id` | `UUID`, FK | Frozen scenario that produced the recommendation. |
+| `recommended_product_id` | `UUID`, FK | Selected alternative product. |
+| `baseline_product_id` | `UUID`, FK | Current product used as baseline. |
+| `supplier_score_id` | `UUID`, FK | Winning deterministic product score. |
+| `ledger_event_id` | `UUID`, nullable FK | Ledger event representing the recommendation. |
+| `status` | `VARCHAR(30)`, default `pending_approval` | Recommendation/approval lifecycle state. |
+| `projected_footprint_kgco2e` | `NUMERIC(24,6)` | Quantity multiplied by alternative PCF. |
+| `avoided_kgco2e` | `NUMERIC(24,6)` | Baseline footprint minus projected footprint. |
+| `reduction_pct` | `NUMERIC(7,4)` | Avoided emissions as a percentage of baseline. |
+| `cost_delta_pct` | `NUMERIC(9,4)` | Alternative-versus-current unit-cost percentage change. |
+| `lead_time_delta_days` | `INTEGER` | Alternative-versus-baseline lead-time difference. |
+| `rationale_template` | `TEXT` | Explanation template whose numeric values are fact-bound. |
+| `analysis_signature` | `VARCHAR(64)` | Signature of context and method used. |
+| `payload_hash` | `VARCHAR(64)` | SHA-256 of the exact recommendation payload. |
+| `impact_snapshot` | `JSONB` | Frozen structured impact facts used for preview/review. |
+| `invalidated_at` | `TIMESTAMPTZ`, nullable | Time a changed fact/context invalidated the recommendation. |
+| `created_at` | `TIMESTAMPTZ` | Creation time. |
+
+### `procurement.fact_bindings`
+
+Verified values used to fill recommendation/agent narrative placeholders.
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `id` | `UUID`, PK | Fact-binding identifier. |
+| `company_id` | `UUID`, FK | Owning company. |
+| `recommendation_id` | `UUID`, nullable FK | Recommendation using the binding. |
+| `agent_run_id` | `UUID`, FK | Agent run in which the binding was produced/used. |
+| `ledger_event_id` | `UUID`, FK | Immutable event proving the value. |
+| `evidence_item_id` | `UUID`, nullable FK | Supporting evidence, when directly applicable. |
+| `placeholder` | `VARCHAR(150)` | Template token such as `fact_avoided_kgco2e`. |
+| `value_snapshot` | `JSONB` | Typed raw value and relevant source snapshot. |
+| `display_value` | `VARCHAR(255)` | Backend-formatted value safe for narrative display. |
+| `unit` | `VARCHAR(50)`, nullable | Unit associated with the value. |
+| `created_at` | `TIMESTAMPTZ` | Binding creation time. |
+
+### `procurement.approvals`
+
+Human review state bound to the exact recommendation preview.
+
+| Column | Type | Meaning |
+| --- | --- | --- |
+| `id` | `UUID`, PK | Approval identifier. |
+| `company_id` | `UUID`, FK | Owning company. |
+| `recommendation_id` | `UUID`, FK | Recommendation under review. |
+| `requested_by` | `UUID`, FK | Actor who requested approval. |
+| `decided_by` | `UUID`, nullable FK | Actor who approved or rejected. |
+| `ledger_event_id` | `UUID`, nullable FK | Ledger event recording the decision. |
+| `status` | `VARCHAR(20)`, default `pending` | Pending, approved, or rejected. |
+| `preview_hash` | `VARCHAR(64)` | SHA-256 of the exact payload shown to the approver. |
+| `analysis_signature` | `VARCHAR(64)` | Signature that detects changed context/method/facts. |
+| `idempotency_key` | `VARCHAR(255)` | Caller/server key that makes repeat decision requests safe. |
+| `expires_at` | `TIMESTAMPTZ` | Deadline after which the preview cannot be decided. |
+| `decided_at` | `TIMESTAMPTZ`, nullable | Decision time. |
+| `decision_note` | `TEXT`, nullable | Optional approver explanation. |
+| `created_at` | `TIMESTAMPTZ` | Approval-request creation time. |
+
+## Table count and ownership summary
+
+| Schema | Tables | Responsibility |
+| --- | ---: | --- |
+| `core` | 8 | Tenant/site context, source provenance, evidence, audit. |
+| `semantic` | 4 | Canonical concepts, metrics, and method versions. |
+| `carbon` | 10 | Activity, factors, calculations, measurements, quality, runs. |
+| `ledger` | 3 | Immutable facts, lineage, and evidence links. |
+| `procurement` | 7 | Suppliers, scenarios, scores, recommendations, approvals. |
+| **Total** | **32** | Authoritative POC relational model. |
 
 ## Relationships and integrity
 
-All relationships in this section are restrictive. A notation such as
-`(company_id, site_id) -> core.sites(company_id, id)` denotes a composite
-foreign key that enforces tenant alignment.
+All relationships are restrictive. A notation such as `(company_id, site_id)
+-> core.sites(company_id, id)` denotes a composite foreign key that enforces
+tenant alignment.
 
 ### Core and semantic relationships
 
-- `core.sites.company_id`, `core.reporting_periods.company_id`, and
-  `core.actors.company_id` reference `core.companies.id`.
-- `core.data_sources.company_id` references the company; `(company_id, site_id)`
-  references `core.sites` when a site is present.
-- `(company_id, data_source_id)` on `core.source_documents` references
-  `core.data_sources`; `(company_id, source_document_id)` on
-  `core.evidence_items` references `core.source_documents`.
-- `core.audit_log` belongs to a company and optionally links through composite
-  keys to `core.actors` and `carbon.agent_runs`; `entity_id` is deliberately a
-  service-validated polymorphic UUID.
-- Every semantic table belongs to a company. `semantic_aliases` and optional
-  `metric_definitions.semantic_entity_id` use composite references to
-  `semantic.semantic_entities`.
+- Sites, reporting periods, and actors reference their company.
+- A data source belongs to a company and may be site-scoped. Source documents
+  reference their data source; evidence items reference their source document.
+- Audit rows optionally reference an actor and agent run. Their polymorphic
+  `entity_id` is validated by the service.
+- Every semantic row belongs to a company. Aliases and optional metric semantic
+  targets use composite company-aligned references.
 
 ### Carbon relationships
 
-- Raw activity rows link to both `core.data_sources` and
-  `core.source_documents`. Normalized activity links to its raw row, site,
-  period, metric, and optionally a procurement product.
-- Emission factors link to a metric definition and evidence item. Calculation
-  runs link to a reporting period, method definition, and optional agent run.
-  Each emission calculation links one run, normalized activity row, and factor.
-- Carbon measurements link to their calculation run, site, period, metric, and
-  optional ledger event. Baselines link the same context to an optional source
-  measurement; variance alerts link one measurement/baseline pair.
-- Data-quality issues may link to a raw row, normalized row, or both. Agent runs
-  link to their actor and may link to a parent run in the same company.
+- Raw activity links to its data source and source document. Normalized activity
+  links to its raw row, site, period, metric, and optional supplier product.
+- Factors link to a metric and evidence. Calculation runs link to a period,
+  method, and optional agent run. Each calculation links one run, activity, and
+  factor.
+- Measurements link to their run, site, period, metric, and optional ledger
+  event. Baselines use the same context and may reference a source measurement;
+  variance alerts connect a measurement/baseline pair.
+- Quality issues may reference a raw row, normalized row, or both. Agent runs
+  reference their actor and may reference a same-company parent run.
 
 ### Ledger relationships
 
-- Ledger events belong to a company, optionally link to the creating actor, and
-  may supersede another event in the same company. `entity_id` remains a
-  service-validated polymorphic UUID.
+- Ledger events belong to a company, may reference their creating actor, and
+  may supersede another same-company event.
 - Both ends of a lineage edge reference company-aligned ledger events.
-- `ledger_event_evidence` links a company-aligned ledger event to a
-  company-aligned evidence item.
+- `ledger_event_evidence` connects a company-aligned event and evidence item.
 
 ### Procurement relationships
 
-- Suppliers belong to a company. Supplier products link to a company-aligned
-  supplier and optional evidence item.
-- Procurement scenarios link to a site, reporting period, current supplier
-  product, verified carbon measurement, scoring method, and optional agent run,
-  all through company-aligned composite foreign keys.
-- Supplier scores link one scenario, candidate product, and method; optional
-  agent-run and ledger-event links preserve orchestration and audit context.
-- Recommendations link one scenario, recommended product, baseline product, and
-  supplier score, plus an optional ledger event. Fact bindings optionally link
-  the recommendation and evidence item and always link an agent run and ledger
-  event.
-- Approvals link the exact recommendation, requester, optional deciding actor,
-  and the ledger event created for a completed decision. Their composite
-  recommendation foreign key also requires `preview_hash` to match the
-  recommendation payload hash and requires the same analysis signature.
+- Products reference a company-aligned supplier and optional evidence item.
+- Scenarios reference their site, period, current product, verified measurement,
+  scoring method, and optional agent run through tenant-aligned keys.
+- Scores reference their scenario, candidate product, and method. Optional run
+  and ledger links preserve orchestration/audit context.
+- Recommendations reference a scenario, recommended product, baseline product,
+  score, and optional ledger event. Fact bindings reference an agent run and
+  ledger event and may reference a recommendation/evidence item.
+- Approvals reference the exact recommendation, requester, optional decider, and
+  decision ledger event. Their composite recommendation key also requires the
+  preview hash and analysis signature to match.
 
-### Core and semantic uniqueness, checks, and indexes
+## Uniqueness, checks, and indexes
+
+### Core and semantic
 
 - `core.companies`: unique `code`.
-- `core.sites`: unique `(company_id, id)` and `(company_id, code)`; ISO alpha-2
-  uppercase country check; index `(company_id, is_active)`.
-- `core.reporting_periods`: unique `(company_id, id)` and
-  `(company_id, start_date, end_date)`; `end_date >= start_date`; status is
-  `open`, `closed`, or `locked`; index `(company_id, status)`.
-- `core.actors`: unique `(company_id, id)` and `(company_id, email)`; role is
-  `sustainability_analyst`, `procurement_manager`, `approver`, `auditor`, or
-  `system`.
-- `core.data_sources`: unique `(company_id, id)` and `(company_id, name)`;
-  source type is `csv`, `json`, `pdf`, `api`, or `synthetic`; status is
-  `pending`, `ready`, `failed`, or `archived`; index `(company_id, site_id)`.
-- `core.source_documents`: unique `(company_id, id)` and
-  `(company_id, checksum)`; checksum is lowercase SHA-256; version is positive;
-  size is null or non-negative; index `(company_id, data_source_id)`.
-- `core.evidence_items`: unique `(company_id, id)` and
-  `(company_id, source_document_id, locator)`; lowercase SHA-256 checksum; all-or-
-  none embedding metadata check; B-tree metadata and partial cosine HNSW indexes.
-- `core.audit_log`: unique `(company_id, id)`; indexes
-  `(company_id, entity_type, entity_id)` and `(company_id, trace_id)`.
-- `semantic.semantic_entities`: unique `(company_id, id)` and
-  `(company_id, entity_type, key)`; type is `standard`, `material`, `unit`,
-  `supplier`, `product`, or `metric`; index `(company_id, entity_type,
-  is_active)`.
-- `semantic.semantic_aliases`: unique `(company_id, id)` and
-  `(company_id, alias, locale)`; index `(company_id, semantic_entity_id)`.
-- `semantic.metric_definitions`: unique `(company_id, id)` and
-  `(company_id, key, version)`; non-empty version; index `(company_id,
-  is_active)`.
-- `semantic.method_definitions`: unique `(company_id, id)` and
-  `(company_id, method_type, key, version)`; type is `measurement`,
-  `confidence`, `supplier_scoring`, or `fact_binding`; effective end is null or
-  not before effective start; index `(company_id, method_type, is_active)`.
+- `core.sites`: unique `(company_id, id)` and `(company_id, code)`; uppercase
+  ISO alpha-2 country check; index `(company_id, is_active)`.
+- `core.reporting_periods`: unique `(company_id, id)` and period dates; end date
+  cannot precede start; checked `open`/`closed`/`locked` status.
+- `core.actors`: company-unique ID/email; checked analyst, procurement manager,
+  approver, auditor, or system role.
+- `core.data_sources`: company-unique ID/name; checked source type and status;
+  index `(company_id, site_id)`.
+- `core.source_documents`: company-unique ID/checksum; lowercase SHA-256,
+  positive version, and non-negative optional size checks.
+- `core.evidence_items`: company-unique ID and document/locator; lowercase
+  SHA-256; all-or-none embedding metadata; metadata and partial HNSW indexes.
+- `core.audit_log`: company-unique ID; entity and trace indexes.
+- `semantic.semantic_entities`: company/type/key uniqueness and checked entity
+  types; active lookup index.
+- `semantic.semantic_aliases`: company/alias/locale uniqueness and entity index.
+- `semantic.metric_definitions`: company/key/version uniqueness and active index.
+- `semantic.method_definitions`: company/type/key/version uniqueness, checked
+  method type, valid effective dates, and active lookup index.
 
-### Carbon uniqueness, checks, and indexes
+### Carbon
 
-- `raw_activity_records`: unique `(company_id, id)` and
-  `(company_id, data_source_id, row_key)`; positive optional row number;
-  lowercase SHA-256 checksum; import status is `pending`, `accepted`, or
-  `rejected`; index `(company_id, source_document_id)`.
-- `activity_records`: unique `(company_id, id)` and
-  `(company_id, raw_activity_record_id)`; quantity and normalized quantity are
-  non-negative; optional unit cost is non-negative and optional currency is an
-  uppercase ISO 4217 code; status is `valid`, `invalid`, or `superseded`; index
-  `(company_id, site_id, reporting_period_id, material_code)`.
-- `emission_factors`: unique `(company_id, id)` and
-  `(company_id, factor_code, version, geography)`; non-negative factor; valid
-  effective dates; source quality, specificity, and recency are each `0..1`;
-  status is `active`, `inactive`, or `superseded`; lookup index over company,
-  metric, material, geography, and status.
-- `calculation_runs`: unique `(company_id, id)` and `(company_id, input_hash)`;
-  input and optional output hashes are lowercase SHA-256; status is `pending`,
-  `running`, `completed`, or `failed`; index `(company_id,
-  reporting_period_id, status)`.
-- `emission_calculations`: unique `(company_id, id)` and `(company_id,
-  calculation_run_id, activity_record_id)`; quantities, factors, and emissions
-  are non-negative; output hash is lowercase SHA-256; index `(company_id,
-  calculation_run_id)`.
-- `carbon_measurements`: unique `(company_id, id)` and `(company_id,
-  output_hash)`; non-negative value, confidence `0..1`, lowercase SHA-256 output
-  hash; status is `draft`, `verified`, `superseded`, or `unsupported`; index
-  `(company_id, site_id, reporting_period_id, status)`.
-- `data_quality_issues`: severity is `info`, `warning`, or `error`; status is
-  `open`, `resolved`, or `waived`; index `(company_id, status, severity)`.
-- `carbon_baselines`: unique `(company_id, id)` and `(company_id, site_id,
-  reporting_period_id, metric_definition_id)`; non-negative value and lowercase
-  SHA-256 frozen hash.
-- `variance_alerts`: unique `(company_id, id)` and `(company_id,
-  carbon_measurement_id, carbon_baseline_id)`; severity is `info`, `warning`, or
-  `critical`; status is `open`, `acknowledged`, or `closed`; index `(company_id,
-  status, severity)`.
-- `agent_runs`: unique `(company_id, id)` and `(company_id, trace_id)`; terminal
-  state is one of the bounded workflow states; budgets enforce `0..3` model
-  calls, `0..6` tool calls, and `0..1` repair; indexes on `trace_id` and
-  `(company_id, terminal_state)`.
+- `raw_activity_records`: company/source/row-key uniqueness; positive optional
+  row number; lowercase SHA-256; checked import status.
+- `activity_records`: one normalized row per raw row; non-negative quantities
+  and optional cost; uppercase ISO currency; checked status; context index.
+- `emission_factors`: company/code/version/geography uniqueness; non-negative
+  factor; valid dates; 0–1 quality values; checked status; lookup index.
+- `calculation_runs`: company/input-hash uniqueness; lowercase SHA-256 hashes;
+  checked status; period/status index.
+- `emission_calculations`: one calculation per run/activity; non-negative
+  quantities/factors/emissions; lowercase output hash; run index.
+- `carbon_measurements`: company/output-hash uniqueness; non-negative value,
+  confidence 0–1, lowercase output hash, checked status, context index.
+- `data_quality_issues`: checked severity/status and status/severity index.
+- `carbon_baselines`: one baseline per company/site/period/metric; non-negative
+  value and lowercase frozen hash.
+- `variance_alerts`: one row per measurement/baseline pair; checked severity and
+  status; status/severity index.
+- `agent_runs`: company/trace uniqueness; checked terminal states; budgets
+  enforce at most 3 model calls, 6 tools, and 1 repair; trace/state indexes.
 
-### Ledger uniqueness, checks, and indexes
+### Ledger
 
-- `ledger_events`: unique `(company_id, id)`; cannot supersede itself; payload
-  hash and optional analysis signature are lowercase SHA-256; indexes
-  `(company_id, entity_type, entity_id)` and `(company_id, event_type,
-  created_at)` in addition to the immutability trigger.
-- `lineage_edges`: unique `(company_id, id)` and `(company_id, parent_event_id,
-  child_event_id, relationship_type)`; parent and child must differ; separate
-  company/parent and company/child indexes.
-- `ledger_event_evidence`: composite primary key `(ledger_event_id,
-  evidence_item_id)`; index `(company_id, evidence_item_id)`.
+- `ledger_events`: company-unique ID; cannot supersede itself; lowercase hashes;
+  entity and event/time indexes plus the immutability trigger.
+- `lineage_edges`: unique company/parent/child/relationship; parent and child
+  differ; separate parent and child indexes.
+- `ledger_event_evidence`: composite event/evidence primary key and company/
+  evidence index.
 
-### Procurement uniqueness, checks, and indexes
+### Procurement
 
-- `suppliers`: unique `(company_id, id)` and `(company_id, supplier_code)`;
-  country is uppercase ISO alpha-2; status is `active` or `inactive`; index
-  `(company_id, status)`.
-- `supplier_products`: unique `(company_id, id)` and `(company_id, supplier_id,
-  product_code)`; product carbon footprint, lead time, and cost are
-  non-negative; circularity, recycled content, recyclable content, and evidence
-  quality are `0..100`; currency is uppercase ISO 4217; effective end is null or
-  not before effective start; index `(company_id, material_code, category,
-  is_active)`.
-- `procurement_scenarios`: unique `(company_id, id)` and `(company_id,
-  analysis_signature)`; quantity and current unit cost are positive; maximum
-  cost increase is `0..100`; maximum lead time is non-negative; currency is
-  uppercase ISO 4217; minimum circularity is `0..100`; all weights are
-  non-negative and sum to exactly `1`; analysis signature is lowercase SHA-256; status is `draft`,
-  `assessed`, `recommended`, or `closed`; context index `(company_id, site_id,
-  reporting_period_id, status)`. Cost remains a hard feasibility constraint and
-  is not a weighted score.
-- `supplier_scores`: unique `(company_id, id)`, `(company_id, scenario_id,
-  supplier_product_id, method_definition_id)`, and `(company_id, scenario_id,
-  rank)`; all component and total scores are `0..100`; optional rank is positive;
-  index `(company_id, scenario_id, feasible)`.
-- `recommendations`: unique `(company_id, id)`, `(company_id, payload_hash)`,
-  and the approval-binding tuple `(company_id, id, payload_hash,
-  analysis_signature)`;
-  projected footprint and avoided emissions are non-negative; reduction is
-  `0..100`; signature and payload hash are lowercase SHA-256; status is
-  `pending_approval`, `approved`, `rejected`, or `invalidated`; status index plus
-  a partial unique index on `(company_id, scenario_id)` where the recommendation
-  is not invalidated and is pending or approved.
-- `fact_bindings`: unique `(company_id, id)` and `(company_id,
-  recommendation_id, placeholder)`; placeholders match
-  `^fact_[a-z0-9_]+$`; index `(company_id, agent_run_id)`.
-- `approvals`: unique `(company_id, id)` and `(company_id, idempotency_key)`;
-  preview hash and analysis signature are lowercase SHA-256; status is
-  `pending`, `approved`, or `rejected`; pending records have no decision actor,
-  decision time, or ledger event, while decided records require all three;
-  the composite recommendation foreign key enforces that the reviewed hash and
-  analysis signature match the exact recommendation;
-  status index plus a partial unique index on `(company_id, recommendation_id)`
-  where status is `pending`.
+- `suppliers`: company/code uniqueness; uppercase country; checked active state.
+- `supplier_products`: company/supplier/product-code uniqueness; non-negative
+  PCF, lead time, and cost; 0–100 sustainability/evidence values; uppercase
+  currency; valid dates; material/category/active index.
+- `procurement_scenarios`: company/signature uniqueness; positive quantity/cost;
+  bounded cost/circularity constraints; non-negative lead time; uppercase
+  currency; non-negative weights summing exactly to 1; checked status and
+  context index. Cost remains a hard constraint, not a score component.
+- `supplier_scores`: one product/method score per scenario and unique rank per
+  scenario; component/total scores 0–100; positive optional rank; feasibility
+  index.
+- `recommendations`: company-unique payload hash and approval-binding tuple;
+  non-negative footprint/avoided emissions; reduction 0–100; lowercase hashes;
+  checked status; only one non-invalidated pending/approved recommendation per
+  scenario.
+- `fact_bindings`: unique recommendation/placeholder; placeholders match
+  `^fact_[a-z0-9_]+$`; agent-run index.
+- `approvals`: company/idempotency-key uniqueness; lowercase hashes; checked
+  status; pending/decided field consistency; hash/signature matching foreign key;
+  only one pending approval per recommendation.
 
 ## pgvector retrieval contract
 
-`core.evidence_items.embedding` uses the full single-precision
-`VECTOR(768)` type. The three embedding fields must be all absent or all present:
-`embedding`, `embedding_model`, and `embedded_at`. The exact model identifier is
-stored with each vector, and `checksum` binds the record to immutable evidence
-content.
-
-Nearest-neighbour retrieval uses cosine distance and this partial index:
+`core.evidence_items.embedding` uses full single-precision `VECTOR(768)`. The
+three fields `embedding`, `embedding_model`, and `embedded_at` must be all absent
+or all present. The model identifier is stored with each vector, and `checksum`
+binds it to immutable evidence content.
 
 ```sql
 CREATE INDEX ix_core_evidence_items_embedding_cosine_hnsw
@@ -492,31 +937,25 @@ WITH (m = 16, ef_construction = 64)
 WHERE embedding IS NOT NULL;
 ```
 
-`ix_core_evidence_company_document_type` is a B-tree index over
-`(company_id, source_document_id, evidence_type)`. Retrieval must apply company
-and evidence metadata filters and explicit row limits in addition to vector
-distance. Embedding generation is outside the database foundation; callers must
-supply exactly 768 values and the configured model identifier.
+`ix_core_evidence_company_document_type` is a B-tree index over `(company_id,
+source_document_id, evidence_type)`. Retrieval must also apply company/metadata
+filters and explicit row limits. Callers must supply exactly 768 values and the
+configured model identifier.
 
 ## Views and immutable ledger
 
-- `carbon.v_measurement_summary` currently projects all columns from
-  `carbon.carbon_measurements`.
-- `procurement.v_supplier_comparison` currently projects all columns from
-  `procurement.supplier_scores`.
-- `procurement.v_pending_approvals` projects rows from
-  `procurement.approvals` where `status = 'pending'`.
-- `ledger.prevent_ledger_event_mutation()` is a PL/pgSQL trigger function that
-  raises SQLSTATE `55000`. `trg_ledger_events_immutable` invokes it before every
-  update or delete on `ledger.ledger_events`; corrections therefore require a
-  new event and a supersession relationship.
+- `carbon.v_measurement_summary` projects `carbon.carbon_measurements`.
+- `procurement.v_supplier_comparison` projects `procurement.supplier_scores`.
+- `procurement.v_pending_approvals` projects pending approvals.
+- `ledger.prevent_ledger_event_mutation()` raises SQLSTATE `55000` before every
+  update/delete on `ledger.ledger_events`. Corrections require a new event and
+  supersession relationship.
 
 ## Evolution limitation
 
-SQLAlchemy `create_all()` only creates missing objects; it does not compare or
-alter existing columns, constraints, or indexes. For this POC, make structural
-changes on a new disposable Neon branch and bootstrap it from scratch. Before
-any persistent environment requires in-place upgrades or retained production
-data, deliberately reintroduce a migration system and create reviewed forward
-and rollback procedures. The bootstrap command is verification and initial
-creation tooling, not a migration engine or destructive reset command.
+SQLAlchemy `create_all()` creates missing objects but does not alter existing
+columns, constraints, or indexes. For this POC, make structural changes on a new
+disposable Neon branch and bootstrap it from scratch. Before persistent data
+requires in-place upgrades, deliberately reintroduce migrations with reviewed
+forward and rollback procedures. Bootstrap is verification/initial-creation
+tooling, not a migration engine or destructive reset command.

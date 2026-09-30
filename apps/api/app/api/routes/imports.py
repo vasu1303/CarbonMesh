@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from typing import Annotated
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
-from app.db.session import DatabaseConfigurationError, session_scope
+from app.api.errors import safe_http_error
+from app.dependencies.database import DatabaseSession
+from app.dependencies.request import TraceIdHeader
 from app.modules.imports.schemas import (
     ActivityImportRequest,
     ImportResult,
@@ -28,28 +30,33 @@ router = APIRouter(prefix="/imports", tags=["imports"])
     response_model=ImportResult,
     status_code=status.HTTP_201_CREATED,
 )
-async def import_activity(request: ActivityImportRequest) -> ImportResult:
+async def import_activity(
+    request: ActivityImportRequest,
+    session: DatabaseSession,
+    trace_id: TraceIdHeader = None,
+) -> ImportResult:
     """Import CSV/JSON activity rows and normalize accepted records."""
     try:
-        async with session_scope() as session:
-            return await ImportService(session).import_activity(request)
+        return await ImportService(session).import_activity(request)
     except ImportReferenceNotFound as error:
-        raise _http_error(status.HTTP_404_NOT_FOUND, error) from error
+        raise _http_error(status.HTTP_404_NOT_FOUND, error, trace_id) from error
     except InvalidImportContext as error:
-        raise _http_error(status.HTTP_422_UNPROCESSABLE_ENTITY, error) from error
+        raise _http_error(status.HTTP_422_UNPROCESSABLE_ENTITY, error, trace_id) from error
     except IntegrityError as error:
         raise _database_error(
             status.HTTP_409_CONFLICT,
             code="import_conflict",
             message="The import conflicts with data already stored.",
             retryable=False,
+            trace_id=trace_id,
         ) from error
-    except (DatabaseConfigurationError, SQLAlchemyError) as error:
+    except SQLAlchemyError as error:
         raise _database_error(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             code="database_unavailable",
             message="The import database is temporarily unavailable.",
             retryable=True,
+            trace_id=trace_id,
         ) from error
 
 
@@ -58,26 +65,31 @@ async def import_activity(request: ActivityImportRequest) -> ImportResult:
     response_model=ImportResult,
     status_code=status.HTTP_201_CREATED,
 )
-async def import_suppliers(request: SupplierImportRequest) -> ImportResult:
+async def import_suppliers(
+    request: SupplierImportRequest,
+    session: DatabaseSession,
+    trace_id: TraceIdHeader = None,
+) -> ImportResult:
     """Import supplier products and bind each product to source evidence."""
     try:
-        async with session_scope() as session:
-            return await ImportService(session).import_suppliers(request)
+        return await ImportService(session).import_suppliers(request)
     except ImportReferenceNotFound as error:
-        raise _http_error(status.HTTP_404_NOT_FOUND, error) from error
+        raise _http_error(status.HTTP_404_NOT_FOUND, error, trace_id) from error
     except IntegrityError as error:
         raise _database_error(
             status.HTTP_409_CONFLICT,
             code="import_conflict",
             message="The import conflicts with data already stored.",
             retryable=False,
+            trace_id=trace_id,
         ) from error
-    except (DatabaseConfigurationError, SQLAlchemyError) as error:
+    except SQLAlchemyError as error:
         raise _database_error(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             code="database_unavailable",
             message="The import database is temporarily unavailable.",
             retryable=True,
+            trace_id=trace_id,
         ) from error
 
 
@@ -85,37 +97,41 @@ async def import_suppliers(request: SupplierImportRequest) -> ImportResult:
 async def get_import(
     import_id: UUID,
     company_id: Annotated[UUID, Query(description="Tenant owning the import run.")],
+    session: DatabaseSession,
+    trace_id: TraceIdHeader = None,
 ) -> ImportResult:
     """Read an import run. The path identifier is the persisted DataSource ID."""
     try:
-        async with session_scope() as session:
-            return await ImportService(session).get_import(
-                company_id=company_id, import_id=import_id
-            )
+        return await ImportService(session).get_import(
+            company_id=company_id, import_id=import_id
+        )
     except ImportRunNotFound as error:
-        raise _http_error(status.HTTP_404_NOT_FOUND, error) from error
-    except (DatabaseConfigurationError, SQLAlchemyError) as error:
+        raise _http_error(status.HTTP_404_NOT_FOUND, error, trace_id) from error
+    except SQLAlchemyError as error:
         raise _database_error(
             status.HTTP_503_SERVICE_UNAVAILABLE,
             code="database_unavailable",
             message="Import status is temporarily unavailable.",
             retryable=True,
+            trace_id=trace_id,
         ) from error
 
 
-def _http_error(status_code: int, error: ImportServiceError) -> HTTPException:
+def _http_error(
+    status_code: int,
+    error: ImportServiceError,
+    trace_id: str | None,
+) -> HTTPException:
     field_details: dict[str, str] = {}
     if error.field_name is not None:
         field_details[error.field_name] = str(error)
-    return HTTPException(
+    return safe_http_error(
         status_code=status_code,
-        detail={
-            "code": error.code,
-            "message": str(error),
-            "trace_id": uuid4().hex,
-            "retryable": False,
-            "field_details": field_details,
-        },
+        code=error.code,
+        message=str(error),
+        trace_id=trace_id,
+        retryable=False,
+        field_details=field_details,
     )
 
 
@@ -125,14 +141,12 @@ def _database_error(
     code: str,
     message: str,
     retryable: bool,
+    trace_id: str | None,
 ) -> HTTPException:
-    return HTTPException(
+    return safe_http_error(
         status_code=status_code,
-        detail={
-            "code": code,
-            "message": message,
-            "trace_id": uuid4().hex,
-            "retryable": retryable,
-            "field_details": {},
-        },
+        code=code,
+        message=message,
+        trace_id=trace_id,
+        retryable=retryable,
     )
