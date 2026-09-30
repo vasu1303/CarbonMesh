@@ -1,0 +1,17 @@
+{
+  "synthetic": true,
+  "company": "Nova Components Ltd",
+  "site": "Plant B",
+  "reporting_period": "Q3 2026",
+  "material_code": "PACKAGING-TRAY",
+  "quantity_kg": "12000",
+  "current_factor_kgco2e_per_kg": "2.8",
+  "current_footprint_kgco2e": "33600",
+  "alternative_product_code": "TRAY-ALT-B",
+  "alternative_factor_kgco2e_per_kg": "1.9",
+  "projected_footprint_kgco2e": "22800",
+  "avoided_emissions_kgco2e": "10800",
+  "reduction_pct": "32.1429",
+  "maximum_cost_increase_pct": "5",
+  "expected_cost_delta_pct": "3.2"
+}

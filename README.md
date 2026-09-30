@@ -200,6 +200,33 @@ ruff check app tests
 pytest -q
 ```
 
+## Reset and use the synthetic POC API
+
+The versioned readiness endpoint is `GET /api/v1/health`; the legacy
+`GET /api/health` path remains available to the existing frontend. On an empty
+or all-synthetic disposable database, seed the documented Nova Components demo:
+
+```powershell
+Invoke-RestMethod -Method Post http://localhost:8000/api/v1/demo/reset
+```
+
+The reset is intentionally blocked with `409 demo_reset_blocked` if any
+non-synthetic company exists. It atomically replaces all demo rows, so use it
+only on a disposable rehearsal database. The response returns the stable
+company, Plant B, and Q3 2026 identifiers needed by the other endpoints.
+
+Implemented POC endpoints include:
+
+- `GET /api/v1/semantic/metrics` and `POST /api/v1/context/resolve`
+- `POST /api/v1/imports/activity` and `POST /api/v1/imports/suppliers`
+- `GET /api/v1/imports/{import_id}` and `GET /api/v1/data-quality/issues`
+- `POST /api/v1/measurements/calculate`
+- `GET /api/v1/measurements` and `GET /api/v1/measurements/{measurement_id}`
+
+Import commands use a typed JSON envelope containing either CSV text or JSON
+rows. The exact request and response contracts, filters, status codes, and
+examples are available in the OpenAPI UI at `http://localhost:8000/docs`.
+
 ## Run the frontend
 
 In a second terminal, from the repository root:
@@ -223,6 +250,9 @@ scripts/      Project automation
 tests/e2e/    Cross-application end-to-end tests
 ```
 
+The database foundation, synthetic reset/seed path, import/data-quality APIs,
+semantic context APIs, and deterministic measurement APIs are implemented.
+Procurement, approvals, agents, and most feature screens remain staged work.
 The database and P0 backend workflows are implemented. Measurement calculation and
 import APIs beyond this route batch, production model execution, and most frontend
 feature screens remain staged work.

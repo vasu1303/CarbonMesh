@@ -1,0 +1,2 @@
+row_key,material_code,quantity,unit,activity_date,supplier_code,product_code,unit_cost,currency,synthetic
+plant-b-packaging-q3,PACKAGING-TRAY,12000,kg,2026-09-15,CURRENT-SUPPLIER,TRAY-CURRENT,1.000000,USD,true
