@@ -174,6 +174,41 @@ The API never returns that credential. Grid-intensity syncs are bounded to ten d
 snapshot the provider response, normalize gCO2eq/kWh to kgCO2e/kWh, and persist
 provenance in the existing evidence and factor tables.
 
+### Configure an AI model provider
+
+The agent layer exposes one provider-neutral model interface for OpenAI, Gemini,
+Anthropic, and OpenRouter. Put one provider's key and model identifier in
+`apps/api/.env`; model identifiers have no source-code defaults because provider
+catalogues change over time. For example:
+
+```dotenv
+AI_PROVIDER=openai
+OPENAI_API_KEY=replace-locally
+OPENAI_MODEL=replace-with-a-current-model-id
+```
+
+When `AI_PROVIDER=auto` (or blank), the factory selects a provider only if exactly
+one of `OPENAI_API_KEY`, `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, or
+`OPENROUTER_API_KEY` is configured. If multiple credentials are present, set
+`AI_PROVIDER` explicitly. The factory never silently fails over to another vendor.
+
+Agent code calls the same interface regardless of provider:
+
+```python
+from app.modules.agents.llm import AIMessage, AIRequest, build_ai_model
+
+model = build_ai_model()
+result = await model.generate(
+    AIRequest(messages=(AIMessage(role="user", content="Summarize these facts."),))
+)
+```
+
+Construction is lazy and makes no network call, so deterministic workflows and API
+startup do not require an AI credential. Provider calls have a bounded timeout and
+response size, return normalized token/latency metadata, and expose only sanitized
+errors. Prompts, provider response bodies, and credentials are not retained in the
+normalized result.
+
 The API E2E suite arranges the minimum synthetic Nova Components / Plant B / Q3
 2026 prerequisite records only inside its disposable database, then exercises all
 requested endpoints through HTTP. Command responses are persisted and read back
