@@ -4,7 +4,7 @@ import hashlib
 import json
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from itertools import pairwise
 from typing import Any
 from uuid import UUID
@@ -69,6 +69,7 @@ FORECAST_PROVIDER = "electricity_maps"
 FORECAST_API_VERSION = "v4"
 FORECAST_ENDPOINT = "/carbon-intensity/forecast"
 EXPECTED_FORECAST_POINTS = 24
+FORECAST_INTENSITY_QUANTUM = Decimal("0.000000001")
 APPROVAL_TTL = timedelta(hours=24)
 RATIONALE = (
     "Advisory only: prefer the complete feasible window with the lowest calculated "
@@ -91,6 +92,18 @@ def _json_bytes(value: Any) -> bytes:
 
 def _hash(value: Mapping[str, Any]) -> str:
     return payload_sha256(value)[1]
+
+
+def _persisted_forecast_intensity(value: Decimal) -> Decimal:
+    """Match PostgreSQL NUMERIC(24, 9) before hashing immutable provenance."""
+
+    return value.quantize(FORECAST_INTENSITY_QUANTUM, rounding=ROUND_HALF_UP)
+
+
+def _canonical_forecast_intensity(value: Decimal) -> Decimal:
+    """Make numerically equal fixed-scale values hash to the same JSON bytes."""
+
+    return _persisted_forecast_intensity(value).normalize()
 
 
 def raw_synthetic(payload: object) -> bool:
@@ -221,7 +234,9 @@ def _forecast_point_payload(point: GridForecast) -> dict[str, Any]:
         "zone": point.zone,
         "forecast_for": point.forecast_for,
         "issued_at": point.issued_at,
-        "intensity_gco2e_per_kwh": point.intensity_gco2e_per_kwh,
+        "intensity_gco2e_per_kwh": _canonical_forecast_intensity(
+            point.intensity_gco2e_per_kwh
+        ),
         "emission_factor_type": point.emission_factor_type,
         "flow_traced": point.flow_traced,
         "is_estimated": point.is_estimated,
@@ -537,13 +552,18 @@ class DispatchService:
         persisted: list[GridForecast] = []
         evidence_ids: set[UUID] = set()
         for point in payload.points:
+            persisted_intensity = _persisted_forecast_intensity(
+                point.intensity_gco2e_per_kwh
+            )
             point_payload = {
                 "provider": FORECAST_PROVIDER,
                 "api_version": FORECAST_API_VERSION,
                 "zone": zone,
                 "forecast_for": point.forecast_for,
                 "issued_at": payload.issued_at,
-                "intensity_gco2e_per_kwh": point.intensity_gco2e_per_kwh,
+                "intensity_gco2e_per_kwh": _canonical_forecast_intensity(
+                    persisted_intensity
+                ),
                 "emission_factor_type": point.emission_factor_type,
                 "flow_traced": point.flow_traced,
                 "is_estimated": point.is_estimated,
@@ -616,7 +636,7 @@ class DispatchService:
                 emission_factor_type=point.emission_factor_type,
                 flow_traced=point.flow_traced,
                 is_estimated=point.is_estimated,
-                intensity_gco2e_per_kwh=point.intensity_gco2e_per_kwh,
+                intensity_gco2e_per_kwh=persisted_intensity,
                 point_hash=point_hash,
                 provider_metadata={
                     "synthetic": bool(raw_synthetic(snapshot["response"])),

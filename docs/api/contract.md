@@ -27,7 +27,7 @@ Status meanings:
 | ---: | --- | --- | --- | --- | --- |
 | 1 | GET | `/api/health` | P0 | Implemented process health; dependency readiness partial | Dev 2 |
 | 2 | POST | `/api/demo/reset` | P0 | Implemented for the Maverick synthetic seed | Dev 2 |
-| 3 | POST | `/api/sources/upload` | P0 | Missing generic document/evidence upload | Dev 3 |
+| 3 | POST | `/api/sources/upload` | P0 | Implemented checksum-verified document/evidence upload with deterministic extraction, chunking, embedding, and replay | Dev 3 |
 | 4 | POST | `/api/activities/import` | P0 | Implemented for existing activity input; hourly electricity partial | Dev 2 |
 | 5 | GET | `/api/quality/issues` | P0 | Implemented | Dev 2 |
 | 6 | PATCH | `/api/quality/issues/{issue_id}` | P1 | Missing resolve/waive command | Dev 2 |
@@ -42,11 +42,11 @@ Status meanings:
 | 15 | GET | `/api/measurements/{measurement_id}` | P0 | Implemented | Dev 2 |
 | 16 | GET | `/api/measurements/{measurement_id}/lineage` | P0 | Implemented | Dev 2 |
 | 17 | GET | `/api/measurements/{measurement_id}/breakdown` | P1 | Missing | Dev 2 |
-| 18 | GET | `/api/assurance/standards` | P0 | Storage exists; API/service missing | Dev 3 |
-| 19 | POST | `/api/assurance/drafts` | P0 | Storage exists; API/service missing | Dev 3 |
-| 20 | GET | `/api/assurance/drafts/{draft_id}` | P0 | Missing | Dev 3 |
-| 21 | POST | `/api/assurance/drafts/{draft_id}/validate` | P0 | Missing | Dev 3 |
-| 22 | GET | `/api/assurance/drafts/{draft_id}/evidence-pack` | P1 | Missing | Dev 3 |
+| 18 | GET | `/api/assurance/standards` | P0 | Implemented tenant-scoped standards with ordered requirements | Dev 3 |
+| 19 | POST | `/api/assurance/drafts` | P0 | Implemented immutable-context, idempotent draft creation | Dev 3 |
+| 20 | GET | `/api/assurance/drafts/{draft_id}` | P0 | Implemented atomic claims, citations, gaps, binding identities, and approval state | Dev 3 |
+| 21 | POST | `/api/assurance/drafts/{draft_id}/validate` | P0 | Implemented deterministic fact/evidence validation, gaps, staleness, and exact approval preview creation | Dev 3 |
+| 22 | GET | `/api/assurance/drafts/{draft_id}/evidence-pack` | P1 | Implemented structured traceability manifest with safe evidence metadata | Dev 3 |
 | 23 | GET | `/api/procurement/suppliers` | P0 | Implemented | Dev 4 |
 | 24 | GET | `/api/procurement/products` | P0 | Implemented | Dev 4 |
 | 25 | POST | `/api/procurement/scenarios` | P0 | Implemented | Dev 4 |

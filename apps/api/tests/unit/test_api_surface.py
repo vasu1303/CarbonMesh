@@ -15,6 +15,12 @@ def test_requested_api_surface_is_registered() -> None:
         ("post", "/api/measurement/calculate"),
         ("get", "/api/measurements"),
         ("get", "/api/measurements/{measurement_id}"),
+        ("post", "/api/sources/upload"),
+        ("get", "/api/assurance/standards"),
+        ("post", "/api/assurance/drafts"),
+        ("get", "/api/assurance/drafts/{draft_id}"),
+        ("post", "/api/assurance/drafts/{draft_id}/validate"),
+        ("get", "/api/assurance/drafts/{draft_id}/evidence-pack"),
         ("post", "/api/agent/requests"),
         ("get", "/api/runs/{run_id}"),
         ("get", "/api/runs/{run_id}/events"),
@@ -32,11 +38,7 @@ def test_requested_api_surface_is_registered() -> None:
         ("get", "/api/ledger/events"),
         ("get", "/api/ledger/events/{event_id}"),
     }
-    registered = {
-        (method, path)
-        for path, operations in paths.items()
-        for method in operations
-    }
+    registered = {(method, path) for path, operations in paths.items() for method in operations}
 
     assert expected <= registered
 
@@ -59,17 +61,13 @@ def test_grid_aliases_keep_company_and_site_scope_explicit() -> None:
 
 def test_scenario_score_uses_path_id_and_tenant_only_body() -> None:
     openapi = app.openapi()
-    operation = openapi["paths"][
-        "/api/procurement/scenarios/{scenario_id}/score"
-    ]["post"]
+    operation = openapi["paths"]["/api/procurement/scenarios/{scenario_id}/score"]["post"]
     path_parameter = next(
         parameter
         for parameter in operation["parameters"]
         if parameter["in"] == "path" and parameter["name"] == "scenario_id"
     )
-    body_reference = operation["requestBody"]["content"]["application/json"]["schema"][
-        "$ref"
-    ]
+    body_reference = operation["requestBody"]["content"]["application/json"]["schema"]["$ref"]
     body_schema = openapi["components"]["schemas"][body_reference.rsplit("/", 1)[-1]]
 
     assert path_parameter["required"] is True

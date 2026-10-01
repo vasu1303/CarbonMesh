@@ -11,13 +11,13 @@ is not considered implemented merely because it appears in this document.
 - Target: Measurement, Assurance, Procurement, and Dispatch joined by one
   append-only ledger, one bounded agent runtime, and one generic
   Preview-Approve-Commit flow.
-- Implemented foundation: the repository has a strong Measurement +
-  Procurement backend and the 46-table/eight-schema SQLAlchemy contract,
-  historical grid-intensity sync, procurement approvals, audit/lineage,
-  bounded ledger queries, and persisted SSE run events.
-- Missing feature depth: hourly Scope 2, Assurance, Dispatch forecasting and
-  optimization, generic approvals/fact binding, five LangGraph graphs, durable
-  resume, and agent-sustainability reporting.
+- Implemented foundation: the repository has Measurement, Assurance,
+  Procurement, and advisory Dispatch domain services plus the
+  46-table/eight-schema SQLAlchemy contract, historical grid-intensity sync,
+  exact approval previews, audit/lineage, bounded ledger queries, and persisted
+  SSE run events.
+- Missing feature depth: hourly Scope 2, cross-target approval decisions, five
+  LangGraph graphs, durable resume, and agent-sustainability reporting.
 
 ## Logical architecture
 
@@ -179,8 +179,9 @@ service.
 Canonical routes cover activity import, quality listing, agent run
 start/read/SSE, Measurement calculation, grid history/latest, and Procurement
 scoring. Tenant-scoped ledger search/detail is implemented as new behavior.
-Generic source upload, Assurance, Dispatch, run resume, generic approval detail,
-and agent-sustainability metrics still require real domain services.
+Generic source upload, Assurance, and Dispatch now have real domain services.
+Run resume, generic approval detail/decision handling across every target, and
+agent-sustainability metrics remain contract gaps.
 
 See [contract.md](../api/contract.md) for the full 38-operation catalog and
 implementation status.

@@ -21,9 +21,12 @@ from app.modules.dispatch.schemas import (
 from app.modules.dispatch.service import (
     APPROVAL_TTL,
     DispatchService,
+    _forecast_point_payload,
     _freeze_load,
     _freeze_method,
     _freeze_policy,
+    _json_bytes,
+    _persisted_forecast_intensity,
     raw_synthetic,
 )
 
@@ -55,6 +58,31 @@ def _constraint(kind: str, configuration: dict[str, object]) -> SimpleNamespace:
         configuration=configuration,
         is_active=True,
     )
+
+
+def test_forecast_provenance_hash_material_is_decimal_scale_independent() -> None:
+    point = SimpleNamespace(
+        provider="electricity_maps",
+        zone="IN",
+        forecast_for=datetime(2026, 10, 1, 8, tzinfo=UTC),
+        issued_at=datetime(2026, 10, 1, 7, tzinfo=UTC),
+        emission_factor_type="lifecycle",
+        flow_traced=True,
+        is_estimated=True,
+        temporal_granularity="hourly",
+        provider_metadata={
+            "api_version": "v4",
+            "estimation_method": "synthetic_fixture",
+        },
+    )
+    encoded = set()
+    for value in (Decimal(480), Decimal("480.0"), Decimal("480.000000000")):
+        point.intensity_gco2e_per_kwh = value
+        encoded.add(_json_bytes(_forecast_point_payload(point)))
+
+    assert len(encoded) == 1
+    assert b'"intensity_gco2e_per_kwh":"480"' in encoded.pop()
+    assert _persisted_forecast_intensity(Decimal("1.1234567895")) == Decimal("1.123456790")
 
 
 def test_hard_constraints_narrow_and_freeze_the_request() -> None:

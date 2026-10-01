@@ -32,6 +32,7 @@ from app.db.models.semantic import (
     PolicyDefinition,
     SemanticEntity,
 )
+from app.modules.sources.embedding import EMBEDDING_MODEL_ID, hash_embedding
 
 
 def _id(value: int) -> UUID:
@@ -724,11 +725,17 @@ def build_demo_records() -> Sequence[DeclarativeBase]:
             checksum=hashlib.sha256(assurance_evidence_document).hexdigest(),
             evidence_metadata={
                 "synthetic": True,
+                "company_id": str(DEMO_COMPANY_ID),
+                "site_id": str(DEMO_SITE_ID),
+                "reporting_period_id": str(DEMO_PERIOD_ID),
                 "company": "Maverick Manufacturing (synthetic)",
-                "site": "Plant B (synthetic)",
+                "site": "Plant B",
                 "reporting_period": "Q3 2026",
                 "requirement_codes": ["S2-BOUNDARY", "S2-TOTAL"],
             },
+            embedding=hash_embedding(assurance_evidence_document.decode("utf-8")),
+            embedding_model=EMBEDDING_MODEL_ID,
+            embedded_at=datetime(2026, 10, 1, tzinfo=UTC),
         ),
     )
 

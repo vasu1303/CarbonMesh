@@ -157,6 +157,17 @@ def test_demo_documents_and_evidence_match_checked_in_source_artifacts() -> None
     assurance_document = (fixture_directory / "assurance-evidence.md").read_text(encoding="utf-8")
     assert assurance_document.startswith("# Maverick Manufacturing - synthetic evidence")
     assert "\ufffd" not in assurance_document
+    assurance_evidence = next(
+        item for item in evidence if item.evidence_type == "disclosure_support"
+    )
+    assert assurance_evidence.content_text == assurance_document
+    assert assurance_evidence.embedding_model == "carbonmesh-hash-768-v1"
+    assert assurance_evidence.embedded_at is not None
+    assert len(assurance_evidence.embedding) == 768
+    assert assurance_evidence.evidence_metadata["requirement_codes"] == [
+        "S2-BOUNDARY",
+        "S2-TOTAL",
+    ]
 
 
 def test_demo_fixture_seeds_advisory_batch_process_and_hard_constraints() -> None:
