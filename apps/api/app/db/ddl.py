@@ -7,10 +7,13 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 APPLICATION_SCHEMAS: tuple[str, ...] = (
     "core",
+    "semantic",
+    "ai",
     "carbon",
     "ledger",
-    "semantic",
+    "assurance",
     "procurement",
+    "dispatch",
 )
 
 VIEW_NAMES: frozenset[str] = frozenset(
@@ -35,7 +38,7 @@ VIEW_STATEMENTS: tuple[str, ...] = (
     """
     CREATE OR REPLACE VIEW procurement.v_pending_approvals AS
     SELECT approvals.*
-    FROM procurement.approvals AS approvals
+    FROM core.approvals AS approvals
     WHERE approvals.status = 'pending'
     """,
 )

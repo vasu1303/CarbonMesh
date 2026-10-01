@@ -1,1 +1,107 @@
-"""CarbonMesh SQLAlchemy model package."""
+"""CarbonMesh SQLAlchemy model registry and stable public imports."""
+
+from app.db.models.ai import AgentRun, AgentRunStep
+from app.db.models.assurance import (
+    ClaimCitation,
+    DisclosureClaim,
+    DisclosureDraft,
+    DisclosureRequirement,
+    EvidenceGap,
+    Standard,
+)
+from app.db.models.carbon import (
+    ActivityRecord,
+    CalculationRun,
+    CarbonBaseline,
+    CarbonMeasurement,
+    DataQualityIssue,
+    EmissionCalculation,
+    EmissionFactor,
+    GridIntensityPoint,
+    RawActivityRecord,
+    VarianceAlert,
+)
+from app.db.models.core import (
+    Actor,
+    Approval,
+    AuditLog,
+    Company,
+    DataSource,
+    EvidenceItem,
+    ReportingPeriod,
+    Site,
+    SourceDocument,
+)
+from app.db.models.dispatch import (
+    DispatchRecommendation,
+    DispatchScenario,
+    FlexibleLoad,
+    GridForecast,
+    OperatingConstraint,
+)
+from app.db.models.ledger import FactBinding, LedgerEvent, LedgerEventEvidence, LineageEdge
+from app.db.models.procurement import (
+    ProcurementRecommendation,
+    ProcurementScenario,
+    Recommendation,
+    Supplier,
+    SupplierProduct,
+    SupplierScore,
+)
+from app.db.models.semantic import (
+    MethodDefinition,
+    MetricDefinition,
+    PolicyDefinition,
+    SemanticAlias,
+    SemanticEntity,
+)
+
+__all__ = [
+    "ActivityRecord",
+    "Actor",
+    "AgentRun",
+    "AgentRunStep",
+    "Approval",
+    "AuditLog",
+    "CalculationRun",
+    "CarbonBaseline",
+    "CarbonMeasurement",
+    "ClaimCitation",
+    "Company",
+    "DataQualityIssue",
+    "DataSource",
+    "DisclosureClaim",
+    "DisclosureDraft",
+    "DisclosureRequirement",
+    "DispatchRecommendation",
+    "DispatchScenario",
+    "EmissionCalculation",
+    "EmissionFactor",
+    "EvidenceGap",
+    "EvidenceItem",
+    "FactBinding",
+    "FlexibleLoad",
+    "GridForecast",
+    "GridIntensityPoint",
+    "LedgerEvent",
+    "LedgerEventEvidence",
+    "LineageEdge",
+    "MethodDefinition",
+    "MetricDefinition",
+    "OperatingConstraint",
+    "PolicyDefinition",
+    "ProcurementRecommendation",
+    "ProcurementScenario",
+    "RawActivityRecord",
+    "Recommendation",
+    "ReportingPeriod",
+    "SemanticAlias",
+    "SemanticEntity",
+    "Site",
+    "SourceDocument",
+    "Standard",
+    "Supplier",
+    "SupplierProduct",
+    "SupplierScore",
+    "VarianceAlert",
+]

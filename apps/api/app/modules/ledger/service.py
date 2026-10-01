@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
@@ -15,6 +15,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models.ledger import LedgerEvent, LedgerEventEvidence, LineageEdge
 from app.modules.ledger import repository
 from app.modules.ledger.schemas import (
+    LedgerEventDetail,
+    LedgerEventListResult,
+    LedgerEventSummary,
+    LedgerEvidenceSummary,
+    LedgerLineageNeighbor,
     LineageEdgeResult,
     LineageNode,
     MeasurementLineageResult,
@@ -22,10 +27,193 @@ from app.modules.ledger.schemas import (
 
 MAX_LINEAGE_DEPTH = 25
 MAX_LINEAGE_EVENTS = 200
+MAX_LEDGER_PAGE_SIZE = 100
+MAX_LEDGER_OFFSET = 10_000
+MAX_EVENT_EVIDENCE = 100
+MAX_EVENT_NEIGHBORS = 100
 
 
 class MeasurementNotFoundError(LookupError):
     """Raised when a measurement does not exist."""
+
+
+class LedgerEventNotFoundError(LookupError):
+    """Raised when an event is unavailable in the requested tenant."""
+
+
+class InvalidLedgerQueryError(ValueError):
+    def __init__(self, field: str, message: str) -> None:
+        super().__init__(message)
+        self.field = field
+
+
+def _event_summary(event: LedgerEvent) -> LedgerEventSummary:
+    return LedgerEventSummary(
+        id=event.id,
+        company_id=event.company_id,
+        event_type=event.event_type,
+        entity_type=event.entity_type,
+        entity_id=event.entity_id,
+        payload_hash=event.payload_hash,
+        analysis_signature=event.analysis_signature,
+        created_by=event.created_by,
+        supersedes_event_id=event.supersedes_event_id,
+        created_at=event.created_at,
+    )
+
+
+def _normalize_filter(value: str | None, field: str) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    if not normalized:
+        raise InvalidLedgerQueryError(field, "Filter must not be blank.")
+    if len(normalized) > 100:
+        raise InvalidLedgerQueryError(field, "Filter must not exceed 100 characters.")
+    return normalized
+
+
+def _normalize_time(value: datetime | None, field: str) -> datetime | None:
+    if value is None:
+        return None
+    if value.utcoffset() is None:
+        raise InvalidLedgerQueryError(field, "Timestamp must include a UTC offset.")
+    return value.astimezone(UTC)
+
+
+async def search_ledger_events(
+    session: AsyncSession,
+    *,
+    company_id: UUID,
+    event_type: str | None = None,
+    entity_type: str | None = None,
+    entity_id: UUID | None = None,
+    agent_run_id: UUID | None = None,
+    created_from: datetime | None = None,
+    created_to: datetime | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> LedgerEventListResult:
+    if not 1 <= limit <= MAX_LEDGER_PAGE_SIZE:
+        raise InvalidLedgerQueryError(
+            "limit", f"Limit must be between 1 and {MAX_LEDGER_PAGE_SIZE}."
+        )
+    if not 0 <= offset <= MAX_LEDGER_OFFSET:
+        raise InvalidLedgerQueryError(
+            "offset", f"Offset must be between 0 and {MAX_LEDGER_OFFSET}."
+        )
+    normalized_from = _normalize_time(created_from, "created_from")
+    normalized_to = _normalize_time(created_to, "created_to")
+    if (
+        normalized_from is not None
+        and normalized_to is not None
+        and normalized_from > normalized_to
+    ):
+        raise InvalidLedgerQueryError(
+            "created_to", "created_to must be at or after created_from."
+        )
+
+    events, total = await repository.search_ledger_events(
+        session,
+        company_id=company_id,
+        event_type=_normalize_filter(event_type, "event_type"),
+        entity_type=_normalize_filter(entity_type, "entity_type"),
+        entity_id=entity_id,
+        agent_run_id=agent_run_id,
+        created_from=normalized_from,
+        created_to=normalized_to,
+        limit=limit,
+        offset=offset,
+    )
+    return LedgerEventListResult(
+        items=[_event_summary(event) for event in events],
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
+
+
+async def get_ledger_event_detail(
+    session: AsyncSession,
+    *,
+    company_id: UUID,
+    event_id: UUID,
+) -> LedgerEventDetail:
+    event = await repository.get_ledger_event(
+        session,
+        company_id=company_id,
+        event_id=event_id,
+    )
+    if event is None:
+        raise LedgerEventNotFoundError(str(event_id))
+
+    evidence_rows = await repository.list_bounded_event_evidence(
+        session,
+        company_id=company_id,
+        event_id=event_id,
+        limit=MAX_EVENT_EVIDENCE + 1,
+    )
+    parent_rows = await repository.list_parent_neighbors(
+        session,
+        company_id=company_id,
+        event_id=event_id,
+        limit=MAX_EVENT_NEIGHBORS + 1,
+    )
+    child_rows = await repository.list_child_neighbors(
+        session,
+        company_id=company_id,
+        event_id=event_id,
+        limit=MAX_EVENT_NEIGHBORS + 1,
+    )
+
+    evidence = [
+        LedgerEvidenceSummary(
+            id=item.id,
+            evidence_type=item.evidence_type,
+            locator=item.locator,
+            checksum=item.checksum,
+            metadata=item.evidence_metadata,
+            relevance=link.relevance,
+            source_document_id=document.id,
+            source_filename=document.filename,
+            source_document_checksum=document.checksum,
+            data_source_id=data_source.id,
+            data_source_name=data_source.name,
+            is_synthetic=data_source.is_synthetic,
+            created_at=item.created_at,
+        )
+        for link, item, document, data_source in evidence_rows[:MAX_EVENT_EVIDENCE]
+    ]
+    parents = [
+        LedgerLineageNeighbor(
+            edge_id=edge.id,
+            relationship_type=edge.relationship_type,
+            metadata=edge.edge_metadata,
+            created_at=edge.created_at,
+            event=_event_summary(neighbor),
+        )
+        for edge, neighbor in parent_rows[:MAX_EVENT_NEIGHBORS]
+    ]
+    children = [
+        LedgerLineageNeighbor(
+            edge_id=edge.id,
+            relationship_type=edge.relationship_type,
+            metadata=edge.edge_metadata,
+            created_at=edge.created_at,
+            event=_event_summary(neighbor),
+        )
+        for edge, neighbor in child_rows[:MAX_EVENT_NEIGHBORS]
+    ]
+    return LedgerEventDetail(
+        **_event_summary(event).model_dump(),
+        payload=event.payload,
+        evidence=evidence,
+        parents=parents,
+        children=children,
+        evidence_truncated=len(evidence_rows) > MAX_EVENT_EVIDENCE,
+        parents_truncated=len(parent_rows) > MAX_EVENT_NEIGHBORS,
+        children_truncated=len(child_rows) > MAX_EVENT_NEIGHBORS,
+    )
 
 
 def normalize_json(value: Any) -> Any:

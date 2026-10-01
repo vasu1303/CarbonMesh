@@ -18,7 +18,7 @@ from app.modules.measurement.schemas import (
 )
 from app.modules.measurement.service import MeasurementService, MeasurementServiceError
 
-router = APIRouter(prefix="/measurements", tags=["measurements"])
+router = APIRouter(tags=["measurements"])
 
 
 async def get_measurement_service(session: DatabaseSession) -> MeasurementService:
@@ -35,7 +35,7 @@ ERROR_RESPONSES = {
 
 
 @router.post(
-    "/calculate",
+    "/measurement/calculate",
     response_model=MeasurementResult,
     responses=ERROR_RESPONSES,
 )
@@ -52,7 +52,7 @@ async def calculate_measurement(
 
 
 @router.get(
-    "",
+    "/measurements",
     response_model=MeasurementListResponse,
     responses={503: {"model": MeasurementErrorEnvelope}},
 )
@@ -83,7 +83,7 @@ async def list_measurements(
 
 
 @router.get(
-    "/{measurement_id}",
+    "/measurements/{measurement_id}",
     response_model=MeasurementDetail,
     responses=ERROR_RESPONSES,
 )

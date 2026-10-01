@@ -101,7 +101,7 @@ def test_review_source_fingerprint_detects_product_evidence_and_method_changes()
         key="procurement.supplier_assessment",
         version="1.0.0",
         name="Supplier assessment",
-        code_version="poc-v1",
+        code_version="carbonmesh-api-0.1.0",
         configuration={"carbon": "0.40"},
         effective_from=date(2026, 1, 1),
         is_active=True,

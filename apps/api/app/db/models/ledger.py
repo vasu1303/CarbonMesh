@@ -31,6 +31,12 @@ class LedgerEvent(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
             ondelete="RESTRICT",
         ),
         ForeignKeyConstraint(
+            ["company_id", "agent_run_id"],
+            ["ai.agent_runs.company_id", "ai.agent_runs.id"],
+            name="fk_ledger_events_company_agent_run",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
             ["company_id", "supersedes_event_id"],
             ["ledger.ledger_events.company_id", "ledger.ledger_events.id"],
             name="fk_ledger_events_company_supersedes",
@@ -61,6 +67,7 @@ class LedgerEvent(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     payload_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     analysis_signature: Mapped[str | None] = mapped_column(String(64))
     created_by: Mapped[UUID | None] = mapped_column(PostgreSQLUUID(as_uuid=True))
+    agent_run_id: Mapped[UUID | None] = mapped_column(PostgreSQLUUID(as_uuid=True))
     supersedes_event_id: Mapped[UUID | None] = mapped_column(PostgreSQLUUID(as_uuid=True))
 
 
@@ -136,3 +143,88 @@ class LedgerEventEvidence(CreatedAtMixin, Base):
     ledger_event_id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), nullable=False)
     evidence_item_id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), nullable=False)
     relevance: Mapped[str | None] = mapped_column(String(255))
+
+
+class FactBinding(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
+    """Resolve a generated placeholder to an immutable verified ledger fact."""
+
+    __tablename__ = "fact_bindings"
+    __table_args__ = (
+        UniqueConstraint("company_id", "id", name="uq_ledger_bindings_company_id_id"),
+        UniqueConstraint(
+            "company_id",
+            "recommendation_id",
+            "placeholder",
+            name="uq_ledger_bindings_recommendation_placeholder",
+        ),
+        UniqueConstraint(
+            "company_id",
+            "artifact_type",
+            "artifact_id",
+            "placeholder",
+            name="uq_ledger_bindings_artifact_placeholder",
+        ),
+        ForeignKeyConstraint(
+            ["company_id", "recommendation_id"],
+            [
+                "procurement.procurement_recommendations.company_id",
+                "procurement.procurement_recommendations.id",
+            ],
+            name="fk_ledger_bindings_company_recommendation",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["company_id", "agent_run_id"],
+            ["ai.agent_runs.company_id", "ai.agent_runs.id"],
+            name="fk_ledger_bindings_company_agent",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["company_id", "ledger_event_id"],
+            ["ledger.ledger_events.company_id", "ledger.ledger_events.id"],
+            name="fk_ledger_bindings_company_event",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["company_id", "evidence_item_id"],
+            ["core.evidence_items.company_id", "core.evidence_items.id"],
+            name="fk_ledger_bindings_company_evidence",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint(
+            "artifact_id IS NOT NULL OR recommendation_id IS NOT NULL",
+            name="artifact_present",
+        ),
+        CheckConstraint("placeholder ~ '^fact_[a-z0-9_]+$'", name="placeholder_format"),
+        CheckConstraint(
+            "binding_hash IS NULL OR binding_hash ~ '^[0-9a-f]{64}$'",
+            name="binding_hash_sha256",
+        ),
+        CheckConstraint(
+            "context_hash IS NULL OR context_hash ~ '^[0-9a-f]{64}$'",
+            name="context_hash_sha256",
+        ),
+        Index("ix_ledger_bindings_agent", "company_id", "agent_run_id"),
+        Index("ix_ledger_bindings_artifact", "company_id", "artifact_type", "artifact_id"),
+        {"schema": "ledger"},
+    )
+
+    company_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("core.companies.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    artifact_type: Mapped[str] = mapped_column(
+        String(100), nullable=False, server_default="procurement_recommendation"
+    )
+    artifact_id: Mapped[UUID | None] = mapped_column(PostgreSQLUUID(as_uuid=True))
+    recommendation_id: Mapped[UUID | None] = mapped_column(PostgreSQLUUID(as_uuid=True))
+    agent_run_id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), nullable=False)
+    ledger_event_id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), nullable=False)
+    evidence_item_id: Mapped[UUID | None] = mapped_column(PostgreSQLUUID(as_uuid=True))
+    placeholder: Mapped[str] = mapped_column(String(150), nullable=False)
+    value_snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    display_value: Mapped[str] = mapped_column(String(255), nullable=False)
+    unit: Mapped[str | None] = mapped_column(String(50))
+    context_hash: Mapped[str | None] = mapped_column(String(64))
+    binding_hash: Mapped[str | None] = mapped_column(String(64))

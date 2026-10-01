@@ -38,3 +38,61 @@ class MeasurementLineageResult(BaseModel):
     nodes: list[LineageNode]
     edges: list[LineageEdgeResult]
     truncated: bool = False
+
+
+class LedgerEventSummary(BaseModel):
+    """Bounded event metadata returned by searches and neighbor projections."""
+
+    id: UUID
+    company_id: UUID
+    event_type: str
+    entity_type: str
+    entity_id: UUID
+    payload_hash: str
+    analysis_signature: str | None = None
+    created_by: UUID | None = None
+    supersedes_event_id: UUID | None = None
+    created_at: datetime
+
+
+class LedgerEventListResult(BaseModel):
+    items: list[LedgerEventSummary]
+    total: int = Field(ge=0)
+    limit: int = Field(ge=1, le=100)
+    offset: int = Field(ge=0, le=10_000)
+
+
+class LedgerEvidenceSummary(BaseModel):
+    """Evidence metadata only; source and evidence bodies are intentionally excluded."""
+
+    id: UUID
+    evidence_type: str
+    locator: str
+    checksum: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    relevance: str | None = None
+    source_document_id: UUID
+    source_filename: str
+    source_document_checksum: str
+    data_source_id: UUID
+    data_source_name: str
+    is_synthetic: bool
+    created_at: datetime
+
+
+class LedgerLineageNeighbor(BaseModel):
+    edge_id: UUID
+    relationship_type: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+    event: LedgerEventSummary
+
+
+class LedgerEventDetail(LedgerEventSummary):
+    payload: dict[str, Any] = Field(default_factory=dict)
+    evidence: list[LedgerEvidenceSummary] = Field(default_factory=list)
+    parents: list[LedgerLineageNeighbor] = Field(default_factory=list)
+    children: list[LedgerLineageNeighbor] = Field(default_factory=list)
+    evidence_truncated: bool = False
+    parents_truncated: bool = False
+    children_truncated: bool = False

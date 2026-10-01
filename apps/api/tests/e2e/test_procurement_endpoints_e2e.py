@@ -25,7 +25,7 @@ async def test_procurement_api_vertical_slice_is_deterministic(
     ids = e2e_context.ids
     company_query = {"company_id": str(ids.company_id)}
 
-    supplier_list = await api_client.get("/api/v1/suppliers", params=company_query)
+    supplier_list = await api_client.get("/api/suppliers", params=company_query)
     assert supplier_list.status_code == 200
     assert supplier_list.json()["total"] == 3
     assert {item["id"] for item in supplier_list.json()["items"]} == {
@@ -35,7 +35,7 @@ async def test_procurement_api_vertical_slice_is_deterministic(
     }
 
     product_detail = await api_client.get(
-        f"/api/v1/suppliers/{ids.recommended_product_id}", params=company_query
+        f"/api/suppliers/{ids.recommended_product_id}", params=company_query
     )
     assert product_detail.status_code == 200
     assert product_detail.json()["pcf_kgco2e_per_unit"] == "1.900000000000"
@@ -58,7 +58,7 @@ async def test_procurement_api_vertical_slice_is_deterministic(
         "minimum_circularity_score": "50",
     }
     unknown_constraint = await api_client.post(
-        "/api/v1/procurement/scenarios",
+        "/api/procurement/scenarios",
         json={
             **common_scenario,
             "material_constraints": {"minimum_recycled_content": "50"},
@@ -67,7 +67,7 @@ async def test_procurement_api_vertical_slice_is_deterministic(
     assert unknown_constraint.status_code == 422
 
     zero_cost = await api_client.post(
-        "/api/v1/procurement/scenarios",
+        "/api/procurement/scenarios",
         json={**common_scenario, "current_unit_cost": "0"},
     )
     assert zero_cost.status_code == 422
@@ -79,7 +79,7 @@ async def test_procurement_api_vertical_slice_is_deterministic(
         "material_constraints": {"excluded_risk_levels": ["high"]},
     }
     scenario_response = await api_client.post(
-        "/api/v1/procurement/scenarios",
+        "/api/procurement/scenarios",
         json=scenario_payload,
     )
     assert scenario_response.status_code == 201, scenario_response.text
@@ -103,7 +103,7 @@ async def test_procurement_api_vertical_slice_is_deterministic(
     recommendation_id = recommendation["id"]
 
     reused_response = await api_client.post(
-        "/api/v1/procurement/scenarios",
+        "/api/procurement/scenarios",
         json=scenario_payload,
     )
     assert reused_response.status_code == 201, reused_response.text
@@ -112,21 +112,21 @@ async def test_procurement_api_vertical_slice_is_deterministic(
     assert reused["selected_recommendation"]["id"] == recommendation_id
 
     rerun = await api_client.post(
-        "/api/v1/procurement/assessments/run",
-        json={"company_id": str(ids.company_id), "scenario_id": scenario_id},
+        f"/api/procurement/scenarios/{scenario_id}/score",
+        json={"company_id": str(ids.company_id)},
     )
     assert rerun.status_code == 200
     assert rerun.json()["recommendation_id"] == recommendation_id
     assert rerun.json()["selected_product_id"] == str(ids.recommended_product_id)
 
     scenario_detail = await api_client.get(
-        f"/api/v1/procurement/scenarios/{scenario_id}", params=company_query
+        f"/api/procurement/scenarios/{scenario_id}", params=company_query
     )
     assert scenario_detail.status_code == 200
     assert scenario_detail.json()["analysis_signature"] == scenario["analysis_signature"]
 
     recommendation_detail = await api_client.get(
-        f"/api/v1/procurement/recommendations/{recommendation_id}",
+        f"/api/procurement/recommendations/{recommendation_id}",
         params=company_query,
     )
     assert recommendation_detail.status_code == 200
@@ -140,7 +140,7 @@ async def test_procurement_api_vertical_slice_is_deterministic(
     assert all(binding["id"] is None for binding in detail["narrative"]["fact_bindings"])
 
     tight_response = await api_client.post(
-        "/api/v1/procurement/scenarios",
+        "/api/procurement/scenarios",
         json={
             **common_scenario,
             "max_cost_increase_pct": "3",
@@ -188,7 +188,7 @@ async def test_procurement_api_vertical_slice_is_deterministic(
         product.pcf_kgco2e_per_unit = Decimal("1.8")
 
     frozen_scenario = await api_client.get(
-        f"/api/v1/procurement/scenarios/{scenario_id}", params=company_query
+        f"/api/procurement/scenarios/{scenario_id}", params=company_query
     )
     assert frozen_scenario.status_code == 200
     frozen_selected = next(
@@ -200,7 +200,7 @@ async def test_procurement_api_vertical_slice_is_deterministic(
     assert Decimal(frozen_selected["impact"]["projected_footprint_kgco2e"]) == Decimal(22800)
 
     frozen_recommendation = await api_client.get(
-        f"/api/v1/procurement/recommendations/{recommendation_id}",
+        f"/api/procurement/recommendations/{recommendation_id}",
         params=company_query,
     )
     assert frozen_recommendation.status_code == 200
@@ -210,13 +210,13 @@ async def test_procurement_api_vertical_slice_is_deterministic(
     assert Decimal(frozen_recommendation.json()["avoided_kgco2e"]) == Decimal(10800)
 
     stale_queue = await api_client.get(
-        "/api/v1/approvals", params={**company_query, "status": "pending"}
+        "/api/approvals", params={**company_query, "status": "pending"}
     )
     assert stale_queue.status_code == 200
     assert stale_queue.json()["items"][0]["preview_current"] is False
 
     stale_decision = await api_client.post(
-        f"/api/v1/approvals/{approval_id}/decision",
+        f"/api/approvals/{approval_id}/decision",
         json={
             "company_id": str(ids.company_id),
             "decision": "approve",

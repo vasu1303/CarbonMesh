@@ -15,7 +15,7 @@ async def _wait_for_terminal_run(
 ) -> httpx.Response:
     for _ in range(100):
         response = await client.get(
-            f"/api/v1/agent/runs/{run_id}",
+            f"/api/runs/{run_id}",
             params={"company_id": company_id},
         )
         assert response.status_code == 200
@@ -29,7 +29,7 @@ async def _wait_for_terminal_run(
 async def test_agent_query_run_and_terminal_sse_replay(api_client, e2e_context) -> None:
     ids = e2e_context.ids
     response = await api_client.post(
-        "/api/v1/agent/query",
+        "/api/agent/requests",
         json={
             "query": (
                 "Measure the Plant B packaging footprint and recommend a lower-carbon "
@@ -84,13 +84,13 @@ async def test_agent_query_run_and_terminal_sse_replay(api_client, e2e_context) 
     assert run["telemetry"]["analysis_signature"] == run["context"]["analysis_signature"]
 
     cross_tenant_response = await api_client.get(
-        f"/api/v1/agent/runs/{accepted['run_id']}",
+        f"/api/runs/{accepted['run_id']}",
         params={"company_id": str(uuid4())},
     )
     assert cross_tenant_response.status_code == 404
 
     stream_response = await api_client.get(
-        f"/api/v1/agent/runs/{accepted['run_id']}/events",
+        f"/api/runs/{accepted['run_id']}/events",
         params={"company_id": str(ids.company_id)},
     )
 
@@ -106,7 +106,7 @@ async def test_agent_query_run_and_terminal_sse_replay(api_client, e2e_context) 
 
     final_sequence = run["telemetry"]["events"][-1]["sequence"]
     resumed = await api_client.get(
-        f"/api/v1/agent/runs/{accepted['run_id']}/events",
+        f"/api/runs/{accepted['run_id']}/events",
         params={"company_id": str(ids.company_id)},
         headers={"Last-Event-ID": str(final_sequence - 1)},
     )
@@ -123,7 +123,7 @@ async def test_agent_no_feasible_run_omits_unexecuted_approval_tool(
 ) -> None:
     ids = e2e_context.ids
     response = await api_client.post(
-        "/api/v1/agent/query",
+        "/api/agent/requests",
         json={
             "query": "Measure packaging emissions and recommend a feasible supplier.",
             "context": {

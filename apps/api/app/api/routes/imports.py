@@ -22,11 +22,11 @@ from app.modules.imports.service import (
     InvalidImportContext,
 )
 
-router = APIRouter(prefix="/imports", tags=["imports"])
+router = APIRouter(tags=["imports"])
 
 
 @router.post(
-    "/activity",
+    "/activities/import",
     response_model=ImportResult,
     status_code=status.HTTP_201_CREATED,
 )
@@ -61,7 +61,7 @@ async def import_activity(
 
 
 @router.post(
-    "/suppliers",
+    "/imports/suppliers",
     response_model=ImportResult,
     status_code=status.HTTP_201_CREATED,
 )
@@ -93,7 +93,7 @@ async def import_suppliers(
         ) from error
 
 
-@router.get("/{import_id}", response_model=ImportResult)
+@router.get("/imports/{import_id}", response_model=ImportResult)
 async def get_import(
     import_id: UUID,
     company_id: Annotated[UUID, Query(description="Tenant owning the import run.")],

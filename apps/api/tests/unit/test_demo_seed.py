@@ -108,7 +108,7 @@ def test_demo_reset_truncates_only_the_authoritative_table_catalogue() -> None:
 
     assert statement.startswith("TRUNCATE TABLE ")
     assert statement.endswith(" RESTART IDENTITY CASCADE")
-    assert statement.count('"."') == 32
+    assert statement.count('"."') == 46
     assert '"core"."companies"' in statement
     assert '"ledger"."ledger_events"' in statement
 
@@ -130,11 +130,11 @@ def test_demo_reset_route_returns_stable_seed_context(monkeypatch) -> None:
 
     monkeypatch.setattr("app.api.routes.demo.reset_and_seed_demo", fake_reset)
     test_app = FastAPI()
-    test_app.include_router(router, prefix="/api/v1/demo")
+    test_app.include_router(router, prefix="/api/demo")
     test_app.dependency_overrides[get_db_session] = lambda: fake_session
     test_app.dependency_overrides[authorize_demo_reset] = lambda: None
 
-    response = TestClient(test_app).post("/api/v1/demo/reset")
+    response = TestClient(test_app).post("/api/demo/reset")
 
     assert response.status_code == 200
     assert response.json() == {

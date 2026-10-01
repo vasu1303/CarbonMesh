@@ -53,7 +53,7 @@ async def test_electricity_maps_connection(
 
 
 @router.post(
-    "/sites/{site_id}/grid-intensity/sync",
+    "/measurement/grid/history/sync",
     response_model=GridIntensitySyncResult,
 )
 async def synchronize_grid_intensity(
@@ -77,7 +77,7 @@ async def synchronize_grid_intensity(
 
 
 @router.get(
-    "/sites/{site_id}/grid-intensity/latest",
+    "/measurement/grid/latest",
     response_model=LatestGridIntensityResult,
 )
 async def read_latest_grid_intensity(

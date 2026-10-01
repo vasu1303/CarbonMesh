@@ -15,6 +15,7 @@ from app.modules.procurement.schemas import (
     CreateScenarioRequest,
     ProcurementScenarioResult,
     RecommendationDetail,
+    ScoreScenarioRequest,
     SupplierProductDetail,
     SupplierProductList,
 )
@@ -84,17 +85,23 @@ async def get_supplier_product(
 
 
 @router.post(
-    "/procurement/assessments/run",
+    "/procurement/scenarios/{scenario_id}/score",
     response_model=AssessmentRunResult,
-    summary="Run deterministic supplier-product assessments",
+    summary="Score a frozen procurement scenario",
 )
 async def run_supplier_assessments(
-    request: AssessmentRunRequest,
+    scenario_id: UUID,
+    request: ScoreScenarioRequest,
     session: DatabaseSession,
     trace_id: TraceIdHeader = None,
 ) -> AssessmentRunResult:
     try:
-        return await ProcurementService(session).run_assessment(request)
+        return await ProcurementService(session).run_assessment(
+            AssessmentRunRequest(
+                company_id=request.company_id,
+                scenario_id=scenario_id,
+            )
+        )
     except ProcurementError as error:
         raise _http_error(error, trace_id) from error
 

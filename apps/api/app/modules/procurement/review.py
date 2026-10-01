@@ -14,7 +14,7 @@ from app.db.models.semantic import MethodDefinition
 from app.modules.ledger.service import normalize_json, payload_sha256
 from app.modules.procurement.repository import ProcurementRepository, ProductRecord
 
-REVIEW_SNAPSHOT_VERSION = "procurement-review.v1"
+REVIEW_SNAPSHOT_VERSION = "procurement-review.initial"
 RECOMMENDATION_PAYLOAD_VERSION = "procurement-recommendation.v2"
 SCENARIO_DECIMAL_FIELDS = (
     (("quantity",), Decimal("0.000001")),

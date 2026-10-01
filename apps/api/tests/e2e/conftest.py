@@ -186,7 +186,7 @@ async def e2e_context(e2e_database: DatabaseProcess) -> AsyncIterator[E2EContext
     try:
         metadata = _portable_test_metadata()
         async with engine.begin() as connection:
-            # Every test receives a pristine copy of the five-schema model. The
+            # Every test receives a pristine copy of the eight-schema model. The
             # server itself is temporary (or explicitly opted-in as disposable),
             # so this cannot touch the configured CarbonMesh application database.
             for schema in reversed(APPLICATION_SCHEMAS):

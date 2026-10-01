@@ -21,7 +21,7 @@ async def _wait_for_agent_terminal(
 ) -> httpx.Response:
     for _ in range(100):
         response = await client.get(
-            f"/api/v1/agent/runs/{run_id}",
+            f"/api/runs/{run_id}",
             params={"company_id": company_id},
         )
         assert response.status_code == 200
@@ -92,7 +92,7 @@ async def test_all_requested_apis_as_one_synthetic_journey(
     app.dependency_overrides[get_electricity_maps_client] = FakeElectricityMapsProvider
     try:
         lineage_response = await api_client.get(
-            f"/api/v1/measurements/{ids.measurement_id}/lineage",
+            f"/api/measurements/{ids.measurement_id}/lineage",
             params=company_params,
         )
         assert lineage_response.status_code == 200
@@ -107,7 +107,7 @@ async def test_all_requested_apis_as_one_synthetic_journey(
         }
 
         suppliers_response = await api_client.get(
-            "/api/v1/suppliers",
+            "/api/suppliers",
             params={**company_params, "material_code": "PACKAGING-TRAY"},
         )
         assert suppliers_response.status_code == 200
@@ -117,7 +117,7 @@ async def test_all_requested_apis_as_one_synthetic_journey(
         assert {item["risk"] for item in suppliers["items"]} == {"low", "medium"}
 
         supplier_response = await api_client.get(
-            f"/api/v1/suppliers/{ids.recommended_product_id}",
+            f"/api/suppliers/{ids.recommended_product_id}",
             params=company_params,
         )
         assert supplier_response.status_code == 200
@@ -128,7 +128,7 @@ async def test_all_requested_apis_as_one_synthetic_journey(
         assert supplier["evidence"]["metadata"]["synthetic"] is True
 
         scenario_response = await api_client.post(
-            "/api/v1/procurement/scenarios",
+            "/api/procurement/scenarios",
             json={
                 "company_id": str(ids.company_id),
                 "site_id": str(ids.site_id),
@@ -167,8 +167,8 @@ async def test_all_requested_apis_as_one_synthetic_journey(
         preview_hash = selected["approval"]["preview_hash"]
 
         assessment_response = await api_client.post(
-            "/api/v1/procurement/assessments/run",
-            json={"company_id": str(ids.company_id), "scenario_id": scenario_id},
+            f"/api/procurement/scenarios/{scenario_id}/score",
+            json={"company_id": str(ids.company_id)},
         )
         assert assessment_response.status_code == 200
         assessment = assessment_response.json()
@@ -185,14 +185,14 @@ async def test_all_requested_apis_as_one_synthetic_journey(
         }
 
         scenario_read_response = await api_client.get(
-            f"/api/v1/procurement/scenarios/{scenario_id}",
+            f"/api/procurement/scenarios/{scenario_id}",
             params=company_params,
         )
         assert scenario_read_response.status_code == 200
         assert scenario_read_response.json()["analysis_signature"] == scenario["analysis_signature"]
 
         recommendation_response = await api_client.get(
-            f"/api/v1/procurement/recommendations/{recommendation_id}",
+            f"/api/procurement/recommendations/{recommendation_id}",
             params=company_params,
         )
         assert recommendation_response.status_code == 200
@@ -202,7 +202,7 @@ async def test_all_requested_apis_as_one_synthetic_journey(
         assert "10800" in recommendation["narrative"]["resolved_text"]
 
         agent_response = await api_client.post(
-            "/api/v1/agent/query",
+            "/api/agent/requests",
             json={
                 "query": (
                     "Measure the Plant B packaging footprint and recommend a lower-carbon "
@@ -245,14 +245,14 @@ async def test_all_requested_apis_as_one_synthetic_journey(
         assert run["approval_requirement"]["approval_id"] == approval_id
 
         events_response = await api_client.get(
-            f"/api/v1/agent/runs/{run_id}/events", params=company_params
+            f"/api/runs/{run_id}/events", params=company_params
         )
         assert events_response.status_code == 200
         assert "event: run.started\n" in events_response.text
         assert "event: run.completed\n" in events_response.text
 
         approvals_response = await api_client.get(
-            "/api/v1/approvals", params={**company_params, "status": "pending"}
+            "/api/approvals", params={**company_params, "status": "pending"}
         )
         assert approvals_response.status_code == 200
         approvals = approvals_response.json()
@@ -260,7 +260,7 @@ async def test_all_requested_apis_as_one_synthetic_journey(
         assert approvals["items"][0]["preview_current"] is True
 
         stale_decision = await api_client.post(
-            f"/api/v1/approvals/{approval_id}/decision",
+            f"/api/approvals/{approval_id}/decision",
             json={
                 "company_id": str(ids.company_id),
                 "decision": "approve",
@@ -273,7 +273,7 @@ async def test_all_requested_apis_as_one_synthetic_journey(
         assert stale_decision.json()["detail"]["code"] == "approval_invalidated"
 
         decision_response = await api_client.post(
-            f"/api/v1/approvals/{approval_id}/decision",
+            f"/api/approvals/{approval_id}/decision",
             json={
                 "company_id": str(ids.company_id),
                 "decision": "approve",
@@ -288,7 +288,7 @@ async def test_all_requested_apis_as_one_synthetic_journey(
         assert decision["idempotent_replay"] is False
 
         replay_response = await api_client.post(
-            f"/api/v1/approvals/{approval_id}/decision",
+            f"/api/approvals/{approval_id}/decision",
             json={
                 "company_id": str(ids.company_id),
                 "decision": "approve",
@@ -302,7 +302,7 @@ async def test_all_requested_apis_as_one_synthetic_journey(
         assert replay_response.json()["ledger_event_id"] == decision["ledger_event_id"]
 
         audit_response = await api_client.get(
-            f"/api/v1/audit/recommendation/{recommendation_id}",
+            f"/api/audit/recommendation/{recommendation_id}",
             params=company_params,
         )
         assert audit_response.status_code == 200
@@ -311,7 +311,7 @@ async def test_all_requested_apis_as_one_synthetic_journey(
         assert any(edge["relationship_type"] == "decided_by" for edge in audit["lineage"]["edges"])
 
         integration_test_response = await api_client.post(
-            "/api/v1/integrations/electricity-maps/test?max_zones=10"
+            "/api/integrations/electricity-maps/test?max_zones=10"
         )
         assert integration_test_response.status_code == 200
         integration_test = integration_test_response.json()
@@ -320,8 +320,8 @@ async def test_all_requested_apis_as_one_synthetic_journey(
         assert "token" not in integration_test_response.text.casefold()
 
         sync_response = await api_client.post(
-            f"/api/v1/sites/{ids.site_id}/grid-intensity/sync",
-            params=company_params,
+            "/api/measurement/grid/history/sync",
+            params={**company_params, "site_id": str(ids.site_id)},
             json={
                 "zone": "IN",
                 "start": "2026-09-29T00:00:00Z",
@@ -337,8 +337,8 @@ async def test_all_requested_apis_as_one_synthetic_journey(
         assert len(sync["response_checksum"]) == 64
 
         latest_response = await api_client.get(
-            f"/api/v1/sites/{ids.site_id}/grid-intensity/latest",
-            params=company_params,
+            "/api/measurement/grid/latest",
+            params={**company_params, "site_id": str(ids.site_id)},
         )
         assert latest_response.status_code == 200
         latest = latest_response.json()

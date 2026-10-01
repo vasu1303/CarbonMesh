@@ -159,7 +159,7 @@ class AgentPlanStep(StrictModel):
 
 
 class AgentPlan(StrictModel):
-    version: Literal["orchestrator.v1"] = "orchestrator.v1"
+    version: Literal["orchestrator.initial"] = "orchestrator.initial"
     execution_mode: Literal["deterministic_services"] = "deterministic_services"
     workflow: Workflow
     steps: list[AgentPlanStep] = Field(max_length=6)
@@ -228,7 +228,7 @@ class StageTelemetry(StrictModel):
 class AgentTelemetry(StrictModel):
     trace_id: str = Field(min_length=1, max_length=100)
     analysis_signature: str = Field(pattern=r"^[0-9a-f]{64}$")
-    orchestrator_version: Literal["orchestrator.v1"] = "orchestrator.v1"
+    orchestrator_version: Literal["orchestrator.initial"] = "orchestrator.initial"
     provider: Literal["none"] = "none"
     model_id: None = None
     model_calls: int = Field(default=0, ge=0, le=3)

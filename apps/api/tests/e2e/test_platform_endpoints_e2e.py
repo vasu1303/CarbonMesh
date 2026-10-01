@@ -20,7 +20,7 @@ async def test_measurement_lineage_and_audit_are_tenant_scoped(
     company_query = {"company_id": str(ids.company_id)}
 
     lineage_response = await api_client.get(
-        f"/api/v1/measurements/{ids.measurement_id}/lineage",
+        f"/api/measurements/{ids.measurement_id}/lineage",
         params=company_query,
     )
     assert lineage_response.status_code == 200, lineage_response.text
@@ -36,7 +36,7 @@ async def test_measurement_lineage_and_audit_are_tenant_scoped(
     assert len(lineage["edges"]) >= 4
 
     audit_response = await api_client.get(
-        f"/api/v1/audit/measurement/{ids.measurement_id}",
+        f"/api/audit/measurement/{ids.measurement_id}",
         params=company_query,
     )
     assert audit_response.status_code == 200, audit_response.text
@@ -46,14 +46,14 @@ async def test_measurement_lineage_and_audit_are_tenant_scoped(
 
     wrong_company = {"company_id": str(uuid4())}
     wrong_lineage_response = await api_client.get(
-        f"/api/v1/measurements/{ids.measurement_id}/lineage",
+        f"/api/measurements/{ids.measurement_id}/lineage",
         params=wrong_company,
     )
     assert wrong_lineage_response.status_code == 404
     assert wrong_lineage_response.json()["detail"]["trace_id"]
     assert (
         await api_client.get(
-            f"/api/v1/audit/measurement/{ids.measurement_id}",
+            f"/api/audit/measurement/{ids.measurement_id}",
             params=wrong_company,
         )
     ).status_code == 404
@@ -67,7 +67,7 @@ async def test_approval_decision_validates_hash_and_is_idempotent(
     ids = e2e_context.ids
     company_query = {"company_id": str(ids.company_id)}
     scenario_response = await api_client.post(
-        "/api/v1/procurement/scenarios",
+        "/api/procurement/scenarios",
         json={
             "company_id": str(ids.company_id),
             "site_id": str(ids.site_id),
@@ -88,13 +88,13 @@ async def test_approval_decision_validates_hash_and_is_idempotent(
     approval_id = recommendation["approval"]["id"]
     preview_hash = recommendation["approval"]["preview_hash"]
 
-    pending_response = await api_client.get("/api/v1/approvals", params=company_query)
+    pending_response = await api_client.get("/api/approvals", params=company_query)
     assert pending_response.status_code == 200
     assert pending_response.json()["items"][0]["status"] == "pending"
     assert pending_response.json()["items"][0]["preview_current"] is True
 
     invalid_response = await api_client.post(
-        f"/api/v1/approvals/{approval_id}/decision",
+        f"/api/approvals/{approval_id}/decision",
         json={
             "company_id": str(ids.company_id),
             "decision": "approve",
@@ -107,7 +107,7 @@ async def test_approval_decision_validates_hash_and_is_idempotent(
     assert invalid_response.json()["detail"]["trace_id"]
 
     cross_tenant_response = await api_client.post(
-        f"/api/v1/approvals/{approval_id}/decision",
+        f"/api/approvals/{approval_id}/decision",
         json={
             "company_id": str(uuid4()),
             "decision": "approve",
@@ -119,7 +119,7 @@ async def test_approval_decision_validates_hash_and_is_idempotent(
     assert cross_tenant_response.json()["detail"]["code"] == "approval_not_found"
 
     missing_response = await api_client.post(
-        f"/api/v1/approvals/{uuid4()}/decision",
+        f"/api/approvals/{uuid4()}/decision",
         json={
             "company_id": str(ids.company_id),
             "decision": "approve",
@@ -142,7 +142,7 @@ async def test_approval_decision_validates_hash_and_is_idempotent(
         "decision_note": "Synthetic POC approval.",
     }
     decision_response = await api_client.post(
-        f"/api/v1/approvals/{approval_id}/decision",
+        f"/api/approvals/{approval_id}/decision",
         json=decision_payload,
         headers={"X-Trace-ID": "synthetic-approval-trace"},
     )
@@ -153,7 +153,7 @@ async def test_approval_decision_validates_hash_and_is_idempotent(
     assert decision["idempotent_replay"] is False
 
     replay_response = await api_client.post(
-        f"/api/v1/approvals/{approval_id}/decision",
+        f"/api/approvals/{approval_id}/decision",
         json=decision_payload,
     )
     assert replay_response.status_code == 200
@@ -161,14 +161,14 @@ async def test_approval_decision_validates_hash_and_is_idempotent(
     assert replay_response.json()["ledger_event_id"] == decision["ledger_event_id"]
 
     approved_response = await api_client.get(
-        "/api/v1/approvals",
+        "/api/approvals",
         params={**company_query, "status": "approved"},
     )
     assert approved_response.status_code == 200
     assert approved_response.json()["total"] == 1
 
     audit_response = await api_client.get(
-        f"/api/v1/audit/approval/{approval_id}",
+        f"/api/audit/approval/{approval_id}",
         params=company_query,
     )
     assert audit_response.status_code == 200, audit_response.text
@@ -200,7 +200,7 @@ async def test_electricity_maps_company_zone_cache_is_shared_across_sites(
     app.dependency_overrides[get_electricity_maps_client] = lambda: fake_provider
     try:
         token_test = await api_client.post(
-            "/api/v1/integrations/electricity-maps/test",
+            "/api/integrations/electricity-maps/test",
             params={"max_zones": 10},
         )
         assert token_test.status_code == 200, token_test.text
@@ -214,8 +214,8 @@ async def test_electricity_maps_company_zone_cache_is_shared_across_sites(
             "end": "2026-09-29T03:00:00Z",
         }
         sync_response = await api_client.post(
-            f"/api/v1/sites/{ids.site_id}/grid-intensity/sync",
-            params=company_query,
+            "/api/measurement/grid/history/sync",
+            params={**company_query, "site_id": str(ids.site_id)},
             json=sync_payload,
         )
         assert sync_response.status_code == 200, sync_response.text
@@ -227,8 +227,8 @@ async def test_electricity_maps_company_zone_cache_is_shared_across_sites(
         assert sync["estimated_points"] == 1
 
         repeated_response = await api_client.post(
-            f"/api/v1/sites/{ids.site_id}/grid-intensity/sync",
-            params=company_query,
+            "/api/measurement/grid/history/sync",
+            params={**company_query, "site_id": str(ids.site_id)},
             json=sync_payload,
         )
         assert repeated_response.status_code == 200, repeated_response.text
@@ -236,8 +236,8 @@ async def test_electricity_maps_company_zone_cache_is_shared_across_sites(
         assert repeated_response.json()["existing_factors"] == 2
 
         second_site_sync = await api_client.post(
-            f"/api/v1/sites/{second_site_id}/grid-intensity/sync",
-            params=company_query,
+            "/api/measurement/grid/history/sync",
+            params={**company_query, "site_id": str(second_site_id)},
             json=sync_payload,
         )
         assert second_site_sync.status_code == 200, second_site_sync.text
@@ -247,8 +247,8 @@ async def test_electricity_maps_company_zone_cache_is_shared_across_sites(
         assert second_site_sync.json()["existing_factors"] == 2
 
         latest_response = await api_client.get(
-            f"/api/v1/sites/{ids.site_id}/grid-intensity/latest",
-            params=company_query,
+            "/api/measurement/grid/latest",
+            params={**company_query, "site_id": str(ids.site_id)},
         )
         assert latest_response.status_code == 200, latest_response.text
         latest = latest_response.json()
@@ -260,8 +260,8 @@ async def test_electricity_maps_company_zone_cache_is_shared_across_sites(
         assert latest["provenance"]["cache_scope"] == "company_zone"
 
         second_site_latest_response = await api_client.get(
-            f"/api/v1/sites/{second_site_id}/grid-intensity/latest",
-            params=company_query,
+            "/api/measurement/grid/latest",
+            params={**company_query, "site_id": str(second_site_id)},
         )
         assert second_site_latest_response.status_code == 200, second_site_latest_response.text
         second_site_latest = second_site_latest_response.json()
@@ -271,8 +271,8 @@ async def test_electricity_maps_company_zone_cache_is_shared_across_sites(
         assert second_site_latest["provenance"]["source_site_id"] == str(ids.site_id)
 
         wrong_tenant_response = await api_client.get(
-            f"/api/v1/sites/{ids.site_id}/grid-intensity/latest",
-            params={"company_id": str(uuid4())},
+            "/api/measurement/grid/latest",
+            params={"company_id": str(uuid4()), "site_id": str(ids.site_id)},
         )
         assert wrong_tenant_response.status_code == 404
         assert wrong_tenant_response.json()["detail"]["trace_id"]

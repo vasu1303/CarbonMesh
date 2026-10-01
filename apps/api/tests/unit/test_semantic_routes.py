@@ -28,14 +28,10 @@ METRIC_ID = UUID("00000000-0000-0000-0000-000000000004")
 SIGNATURE = "a" * 64
 
 
-def test_health_router_supports_versioned_and_legacy_mounts() -> None:
+def test_health_router_supports_canonical_mount() -> None:
     app = _app(FakeSemanticService())
     client = TestClient(app)
 
-    assert client.get("/api/v1/health").json() == {
-        "status": "ok",
-        "service": "CarbonMesh API",
-    }
     assert client.get("/api/health").json() == {
         "status": "ok",
         "service": "CarbonMesh API",
@@ -46,7 +42,7 @@ def test_metric_route_returns_db_service_contract() -> None:
     app = _app(FakeSemanticService())
 
     response = TestClient(app).get(
-        "/api/v1/semantic/metrics",
+        "/api/semantic/metrics",
         params={"company_id": str(COMPANY_ID)},
     )
 
@@ -62,7 +58,7 @@ def test_metric_route_returns_db_service_contract() -> None:
                 "canonical_unit": "kgCO2e",
                 "dimensions": {"site": True, "period": True},
                 "handler": "measurement.calculate_scope3_category1",
-                "method_version": "measurement-v1",
+                "method_version": "measurement-initial",
                 "description": None,
             }
         ],
@@ -74,7 +70,7 @@ def test_context_route_returns_frozen_resolved_context() -> None:
     app = _app(FakeSemanticService())
 
     response = TestClient(app).post(
-        "/api/v1/context/resolve",
+        "/api/context/resolve",
         json={
             "company_id": str(COMPANY_ID),
             "site_id": str(SITE_ID),
@@ -96,7 +92,7 @@ def test_context_route_exposes_typed_safe_error() -> None:
     app = _app(FailingSemanticService())
 
     response = TestClient(app).post(
-        "/api/v1/context/resolve",
+        "/api/context/resolve",
         json={
             "company_id": str(COMPANY_ID),
             "site_id": str(SITE_ID),
@@ -122,9 +118,8 @@ def test_context_route_exposes_typed_safe_error() -> None:
 def _app(service) -> FastAPI:
     app = FastAPI()
     app.include_router(health_router, prefix="/api/health")
-    app.include_router(health_router, prefix="/api/v1/health")
-    app.include_router(semantic_router, prefix="/api/v1/semantic")
-    app.include_router(context_router, prefix="/api/v1/context")
+    app.include_router(semantic_router, prefix="/api/semantic")
+    app.include_router(context_router, prefix="/api/context")
     app.dependency_overrides[get_semantic_service] = lambda: service
     return app
 
@@ -138,7 +133,7 @@ def _metric() -> MetricDefinitionRead:
         canonical_unit="kgCO2e",
         dimensions={"site": True, "period": True},
         handler="measurement.calculate_scope3_category1",
-        method_version="measurement-v1",
+        method_version="measurement-initial",
     )
 
 

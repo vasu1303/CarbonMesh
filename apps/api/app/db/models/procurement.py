@@ -25,6 +25,11 @@ from sqlalchemy.dialects.postgresql import UUID as PostgreSQLUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, CreatedAtMixin, TimestampMixin, UUIDPrimaryKeyMixin
+from app.db.models.core import Approval as _Approval
+from app.db.models.ledger import FactBinding as _FactBinding
+
+Approval = _Approval
+FactBinding = _FactBinding
 
 
 class Supplier(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -149,7 +154,7 @@ class ProcurementScenario(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ),
         ForeignKeyConstraint(
             ["company_id", "agent_run_id"],
-            ["carbon.agent_runs.company_id", "carbon.agent_runs.id"],
+            ["ai.agent_runs.company_id", "ai.agent_runs.id"],
             name="fk_proc_scenarios_company_agent",
             ondelete="RESTRICT",
         ),
@@ -256,7 +261,7 @@ class SupplierScore(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
         ),
         ForeignKeyConstraint(
             ["company_id", "agent_run_id"],
-            ["carbon.agent_runs.company_id", "carbon.agent_runs.id"],
+            ["ai.agent_runs.company_id", "ai.agent_runs.id"],
             name="fk_proc_scores_company_agent",
             ondelete="RESTRICT",
         ),
@@ -299,7 +304,7 @@ class SupplierScore(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
 
 
 class Recommendation(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
-    __tablename__ = "recommendations"
+    __tablename__ = "procurement_recommendations"
     __table_args__ = (
         UniqueConstraint("company_id", "id", name="uq_proc_recommendations_company_id_id"),
         UniqueConstraint("company_id", "payload_hash", name="uq_proc_recommendations_payload_hash"),
@@ -385,125 +390,6 @@ class Recommendation(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     invalidated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
-class FactBinding(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
-    __tablename__ = "fact_bindings"
-    __table_args__ = (
-        UniqueConstraint("company_id", "id", name="uq_proc_bindings_company_id_id"),
-        UniqueConstraint(
-            "company_id", "recommendation_id", "placeholder", name="uq_proc_bindings_recommendation_placeholder"
-        ),
-        ForeignKeyConstraint(
-            ["company_id", "recommendation_id"],
-            ["procurement.recommendations.company_id", "procurement.recommendations.id"],
-            name="fk_proc_bindings_company_recommendation",
-            ondelete="RESTRICT",
-        ),
-        ForeignKeyConstraint(
-            ["company_id", "agent_run_id"],
-            ["carbon.agent_runs.company_id", "carbon.agent_runs.id"],
-            name="fk_proc_bindings_company_agent",
-            ondelete="RESTRICT",
-        ),
-        ForeignKeyConstraint(
-            ["company_id", "ledger_event_id"],
-            ["ledger.ledger_events.company_id", "ledger.ledger_events.id"],
-            name="fk_proc_bindings_company_ledger",
-            ondelete="RESTRICT",
-        ),
-        ForeignKeyConstraint(
-            ["company_id", "evidence_item_id"],
-            ["core.evidence_items.company_id", "core.evidence_items.id"],
-            name="fk_proc_bindings_company_evidence",
-            ondelete="RESTRICT",
-        ),
-        CheckConstraint("placeholder ~ '^fact_[a-z0-9_]+$'", name="placeholder_format"),
-        Index("ix_proc_bindings_agent", "company_id", "agent_run_id"),
-        {"schema": "procurement"},
-    )
-
-    company_id: Mapped[UUID] = mapped_column(
-        PostgreSQLUUID(as_uuid=True),
-        ForeignKey("core.companies.id", ondelete="RESTRICT"),
-        nullable=False,
-    )
-    recommendation_id: Mapped[UUID | None] = mapped_column(PostgreSQLUUID(as_uuid=True))
-    agent_run_id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), nullable=False)
-    ledger_event_id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), nullable=False)
-    evidence_item_id: Mapped[UUID | None] = mapped_column(PostgreSQLUUID(as_uuid=True))
-    placeholder: Mapped[str] = mapped_column(String(150), nullable=False)
-    value_snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
-    display_value: Mapped[str] = mapped_column(String(255), nullable=False)
-    unit: Mapped[str | None] = mapped_column(String(50))
-
-
-class Approval(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
-    __tablename__ = "approvals"
-    __table_args__ = (
-        UniqueConstraint("company_id", "id", name="uq_proc_approvals_company_id_id"),
-        UniqueConstraint("company_id", "idempotency_key", name="uq_proc_approvals_idempotency"),
-        ForeignKeyConstraint(
-            ["company_id", "recommendation_id", "preview_hash", "analysis_signature"],
-            [
-                "procurement.recommendations.company_id",
-                "procurement.recommendations.id",
-                "procurement.recommendations.payload_hash",
-                "procurement.recommendations.analysis_signature",
-            ],
-            name="fk_proc_approvals_recommendation_preview",
-            ondelete="RESTRICT",
-        ),
-        ForeignKeyConstraint(
-            ["company_id", "requested_by"],
-            ["core.actors.company_id", "core.actors.id"],
-            name="fk_proc_approvals_company_requester",
-            ondelete="RESTRICT",
-        ),
-        ForeignKeyConstraint(
-            ["company_id", "decided_by"],
-            ["core.actors.company_id", "core.actors.id"],
-            name="fk_proc_approvals_company_decider",
-            ondelete="RESTRICT",
-        ),
-        ForeignKeyConstraint(
-            ["company_id", "ledger_event_id"],
-            ["ledger.ledger_events.company_id", "ledger.ledger_events.id"],
-            name="fk_proc_approvals_company_ledger",
-            ondelete="RESTRICT",
-        ),
-        CheckConstraint("preview_hash ~ '^[0-9a-f]{64}$'", name="preview_hash_sha256"),
-        CheckConstraint("analysis_signature ~ '^[0-9a-f]{64}$'", name="signature_sha256"),
-        CheckConstraint("status IN ('pending', 'approved', 'rejected')", name="status_allowed"),
-        CheckConstraint(
-            "(status = 'pending' AND decided_by IS NULL AND decided_at IS NULL "
-            "AND ledger_event_id IS NULL) OR "
-            "(status IN ('approved', 'rejected') AND decided_by IS NOT NULL "
-            "AND decided_at IS NOT NULL AND ledger_event_id IS NOT NULL)",
-            name="decision_fields_consistent",
-        ),
-        Index(
-            "uq_proc_approvals_pending_recommendation",
-            "company_id",
-            "recommendation_id",
-            unique=True,
-            postgresql_where=text("status = 'pending'"),
-        ),
-        Index("ix_proc_approvals_status", "company_id", "status"),
-        {"schema": "procurement"},
-    )
-
-    company_id: Mapped[UUID] = mapped_column(
-        PostgreSQLUUID(as_uuid=True),
-        ForeignKey("core.companies.id", ondelete="RESTRICT"),
-        nullable=False,
-    )
-    recommendation_id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), nullable=False)
-    requested_by: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), nullable=False)
-    decided_by: Mapped[UUID | None] = mapped_column(PostgreSQLUUID(as_uuid=True))
-    ledger_event_id: Mapped[UUID | None] = mapped_column(PostgreSQLUUID(as_uuid=True))
-    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="pending")
-    preview_hash: Mapped[str] = mapped_column(String(64), nullable=False)
-    analysis_signature: Mapped[str] = mapped_column(String(64), nullable=False)
-    idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False)
-    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    decision_note: Mapped[str | None] = mapped_column(Text)
+# New code can use the explicit artifact name while existing services retain
+# the established Recommendation class/import contract.
+ProcurementRecommendation = Recommendation

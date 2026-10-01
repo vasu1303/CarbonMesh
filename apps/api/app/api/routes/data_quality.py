@@ -12,7 +12,7 @@ from app.dependencies.request import TraceIdHeader
 from app.modules.imports.schemas import DataQualityIssueList
 from app.modules.imports.service import ImportReferenceNotFound, ImportService
 
-router = APIRouter(prefix="/data-quality", tags=["data-quality"])
+router = APIRouter(prefix="/quality", tags=["data-quality"])
 
 
 @router.get("/issues", response_model=DataQualityIssueList)

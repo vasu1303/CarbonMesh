@@ -7,7 +7,7 @@ from app.main import app
 
 def test_request_validation_errors_are_typed_and_do_not_echo_inputs() -> None:
     response = TestClient(app).post(
-        "/api/v1/context/resolve",
+        "/api/context/resolve",
         json={"company_id": "do-not-reflect-this-value"},
     )
 

@@ -50,7 +50,7 @@ class FakeMeasurementService:
 
 def _client(service: FakeMeasurementService) -> TestClient:
     application = FastAPI()
-    application.include_router(router, prefix="/api/v1")
+    application.include_router(router, prefix="/api")
     application.dependency_overrides[get_measurement_service] = lambda: service
     return TestClient(application)
 
@@ -59,7 +59,7 @@ def test_calculate_route_returns_typed_ambiguous_factor_error() -> None:
     service = FakeMeasurementService()
     company_id = uuid4()
     response = _client(service).post(
-        "/api/v1/measurements/calculate",
+        "/api/measurement/calculate",
         json={
             "company_id": str(company_id),
             "site_id": str(uuid4()),
@@ -82,7 +82,7 @@ def test_list_route_forwards_bounded_filters() -> None:
     company_id = uuid4()
     site_id = uuid4()
     response = _client(service).get(
-        "/api/v1/measurements",
+        "/api/measurements",
         params={
             "company_id": str(company_id),
             "site_id": str(site_id),
@@ -110,7 +110,7 @@ def test_detail_route_is_tenant_scoped_and_returns_safe_not_found() -> None:
     service = FakeMeasurementService()
     measurement_id = uuid4()
     response = _client(service).get(
-        f"/api/v1/measurements/{measurement_id}",
+        f"/api/measurements/{measurement_id}",
         params={"company_id": str(uuid4())},
     )
 
@@ -129,7 +129,7 @@ def test_database_failure_is_redacted_and_returns_503() -> None:
     service = FakeMeasurementService()
     service.database_error = True
     response = _client(service).get(
-        "/api/v1/measurements",
+        "/api/measurements",
         params={"company_id": str(uuid4())},
     )
 

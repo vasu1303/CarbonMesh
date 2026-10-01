@@ -28,6 +28,8 @@ class AsyncDatabaseConfiguration:
 
     url: URL
     connect_args: dict[str, object]
+    is_neon: bool
+    uses_tls: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,8 +45,26 @@ _session_factory: async_sessionmaker[AsyncSession] | None = None
 _engine_lock = Lock()
 
 
+_LOCAL_DATABASE_HOSTS = frozenset(
+    {
+        "127.0.0.1",
+        "::1",
+        "localhost",
+        # Docker Compose service names used by the project and common local setups.
+        "db",
+        "postgres",
+        "carbonmesh-db",
+    }
+)
+
+
 def normalize_database_url(database_url: SecretStr | str) -> AsyncDatabaseConfiguration:
-    """Convert a PostgreSQL URL to a TLS-only SQLAlchemy asyncpg configuration."""
+    """Build a secret-safe asyncpg configuration for local PostgreSQL or Neon.
+
+    Remote databases must use authenticated TLS. Unencrypted connections are
+    accepted only for explicit loopback/Docker service hosts so the local Docker
+    stack can run without weakening the hosted-database policy.
+    """
     raw_url = database_url.get_secret_value() if isinstance(database_url, SecretStr) else database_url
     if any(marker in raw_url for marker in ("mailto:", "[", "]", "\r", "\n")):
         raise DatabaseConfigurationError(
@@ -62,32 +82,46 @@ def normalize_database_url(database_url: SecretStr | str) -> AsyncDatabaseConfig
     if not url.host or not url.database:
         raise DatabaseConfigurationError("DATABASE_URL must include a host and database name.")
 
+    host = (url.host or "").casefold()
+    local_database = host in _LOCAL_DATABASE_HOSTS
+    is_neon = host.endswith(".neon.tech")
+
     query = dict(url.query)
-    ssl_mode_value = query.pop("sslmode", "require")
+    ssl_mode_value = query.pop("sslmode", "disable" if local_database else "require")
     query.pop("channel_binding", None)
     if not isinstance(ssl_mode_value, str):
         raise DatabaseConfigurationError("DATABASE_URL must define one TLS mode.")
     ssl_mode = ssl_mode_value.lower()
-    if ssl_mode != "require":
-        raise DatabaseConfigurationError("DATABASE_URL must use sslmode=require.")
+    if ssl_mode not in {"disable", "require"}:
+        raise DatabaseConfigurationError(
+            "DATABASE_URL sslmode must be either require or disable for an approved local host."
+        )
+    if ssl_mode == "disable" and not local_database:
+        raise DatabaseConfigurationError("Remote DATABASE_URL values must use sslmode=require.")
 
     # The SQLAlchemy asyncpg dialect owns its prepared statement cache. Disabling
     # it avoids name/cache conflicts on Neon's PgBouncer pooled endpoint.
-    query["prepared_statement_cache_size"] = "0"
+    if is_neon:
+        query["prepared_statement_cache_size"] = "0"
     async_url = url.set(drivername="postgresql+asyncpg", query=query)
-    tls_context = ssl.create_default_context()
-    tls_context.minimum_version = ssl.TLSVersion.TLSv1_2
+    connect_args: dict[str, object] = {
+        "timeout": 10,
+        "command_timeout": 30,
+    }
+    if ssl_mode == "require":
+        tls_context = ssl.create_default_context()
+        tls_context.minimum_version = ssl.TLSVersion.TLSv1_2
+        connect_args["ssl"] = tls_context
+    if is_neon:
+        connect_args["statement_cache_size"] = 0
 
     return AsyncDatabaseConfiguration(
         url=async_url,
-        connect_args={
-            # An SSLContext validates both the certificate chain and hostname;
-            # asyncpg's string "require" mode encrypts without authenticating.
-            "ssl": tls_context,
-            "timeout": 10,
-            "command_timeout": 30,
-            "statement_cache_size": 0,
-        },
+        # An SSLContext validates both the certificate chain and hostname;
+        # asyncpg's string "require" mode encrypts without authenticating.
+        connect_args=connect_args,
+        is_neon=is_neon,
+        uses_tls=ssl_mode == "require",
     )
 
 
@@ -96,7 +130,7 @@ def get_database_target() -> DatabaseTarget:
     database_url = get_database_url()
     if database_url is None:
         raise DatabaseConfigurationError(
-            "DATABASE_URL is not configured. Copy .env.example to .env and add a Neon URL."
+            "DATABASE_URL is not configured. Copy .env.example to .env and add a PostgreSQL URL."
         )
     configuration = normalize_database_url(database_url)
     host_label = (configuration.url.host or "").split(".", 1)[0]
@@ -108,7 +142,7 @@ def get_database_target() -> DatabaseTarget:
 
 
 def get_engine() -> AsyncEngine:
-    """Return the process-wide lazy async engine for the Neon pooled endpoint."""
+    """Return one lazy async engine for local PostgreSQL or hosted Neon."""
     global _engine, _session_factory
 
     if _engine is not None:
@@ -121,16 +155,20 @@ def get_engine() -> AsyncEngine:
         database_url = get_database_url()
         if database_url is None:
             raise DatabaseConfigurationError(
-                "DATABASE_URL is not configured. Copy .env.example to .env and add a Neon URL."
+                "DATABASE_URL is not configured. Copy .env.example to .env and add a PostgreSQL URL."
             )
 
         configuration = normalize_database_url(database_url)
-        _engine = create_async_engine(
-            configuration.url,
-            connect_args=configuration.connect_args,
-            echo=False,
-            poolclass=NullPool,
-        )
+        engine_options: dict[str, object] = {
+            "connect_args": configuration.connect_args,
+            "echo": False,
+            "pool_pre_ping": True,
+        }
+        # Neon pooled endpoints already provide connection pooling. Local and
+        # ordinary PostgreSQL deployments use SQLAlchemy's bounded default pool.
+        if configuration.is_neon:
+            engine_options["poolclass"] = NullPool
+        _engine = create_async_engine(configuration.url, **engine_options)
         _session_factory = async_sessionmaker(
             bind=_engine,
             autoflush=False,
