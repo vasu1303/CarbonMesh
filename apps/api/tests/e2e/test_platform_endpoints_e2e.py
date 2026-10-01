@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
+from decimal import Decimal
 from uuid import uuid4
 
 import pytest
@@ -296,7 +297,7 @@ async def test_electricity_maps_history_points_are_immutable_and_site_scoped(
         latest = latest_response.json()
         assert latest["zone"] == "IN"
         assert latest["value"] == "0.480000000000"
-        assert latest["provider_value_gco2eq_per_kwh"] == "480"
+        assert Decimal(latest["provider_value_gco2eq_per_kwh"]) == Decimal(480)
         assert latest["is_estimated"] is True
         assert latest["provenance"]["response_checksum"] == sync["response_checksum"]
         assert latest["provenance"]["cache_scope"] == "site_zone"
