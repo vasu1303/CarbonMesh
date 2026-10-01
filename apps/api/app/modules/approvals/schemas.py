@@ -2,12 +2,79 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Literal
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 ApprovalStatus = Literal["pending", "approved", "rejected"]
+GenericApprovalStatus = Literal[
+    "pending",
+    "approved",
+    "rejected",
+    "invalidated",
+    "expired",
+]
+Sha256 = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
+TargetType = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True,
+        min_length=1,
+        max_length=100,
+        pattern=r"^[a-z][a-z0-9_]*$",
+    ),
+]
+IdempotencyKey = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=255),
+]
+
+
+class GenericApprovalPreviewRequest(BaseModel):
+    """Exact generic preview input owned by the calling domain transaction."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    company_id: UUID
+    target_type: TargetType
+    target_id: UUID
+    requested_by: UUID
+    preview_payload: dict[str, Any] = Field(min_length=1)
+    preview_hash: Sha256
+    analysis_signature: Sha256
+    context_hash: Sha256
+    idempotency_key: IdempotencyKey | None = None
+    policy_definition_id: UUID | None = None
+    expires_at: datetime | None = None
+
+    @field_validator("expires_at")
+    @classmethod
+    def normalize_expiry(cls, value: datetime | None) -> datetime | None:
+        if value is None:
+            return None
+        if value.utcoffset() is None:
+            raise ValueError("expires_at must include a UTC offset")
+        return value
+
+
+class GenericApprovalPreviewResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    approval_id: UUID
+    company_id: UUID
+    target_type: TargetType
+    target_id: UUID
+    requested_by: UUID
+    status: GenericApprovalStatus
+    preview_payload: dict[str, Any]
+    preview_hash: Sha256
+    analysis_signature: Sha256
+    context_hash: Sha256
+    idempotency_key: IdempotencyKey
+    policy_definition_id: UUID | None
+    expires_at: datetime
+    idempotent_replay: bool = False
 
 
 class ApprovalItem(BaseModel):

@@ -4,7 +4,7 @@ Last updated: 2026-10-01
 
 ## Scope
 
-This document describes the 35 paths currently published in OpenAPI. Product
+This document describes the 41 paths currently published in OpenAPI. Product
 routes use one canonical `/api/...` path per implemented operation.
 
 OpenAPI at `http://localhost:8000/docs` is authoritative for complete Pydantic
@@ -64,6 +64,37 @@ in `carbon.grid_intensity_points`; the latest-point query reads that store and
 returns both canonical kgCO2e/kWh and the original provider gCO2e/kWh value with
 source-document and evidence provenance, including explicit fixture/live and
 synthetic markers.
+
+### Sources and Assurance
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| POST | `/api/sources/upload` | Validate and persist one evidence-backed source document. |
+| GET | `/api/assurance/standards` | List tenant-scoped standards and their ordered requirements. |
+| POST | `/api/assurance/drafts` | Create an idempotent disclosure draft bound to immutable context. |
+| GET | `/api/assurance/drafts/{draft_id}` | Read claims, citations, gaps, binding identities, lineage identity, and approval state. |
+| POST | `/api/assurance/drafts/{draft_id}/validate` | Validate facts and evidence, detect gaps/staleness, and create an eligible exact approval preview. |
+| GET | `/api/assurance/drafts/{draft_id}/evidence-pack` | Return a structured traceability manifest with safe evidence metadata. |
+
+Source upload accepts company scope; optional site, period, and actor scope;
+source/file identity; bounded UTF-8 or base64 content; an optional SHA-256; an
+evidence type; metadata; and the synthetic marker. Its `201` response reports
+replay state, deterministic method IDs, decoded size, and safe source,
+document, and evidence metadata. Matching tenant/checksum uploads replay the
+stored result; response payloads do not expose document or evidence bodies.
+
+Standards use `company_id`, `active_only`, `limit`, and `offset` query values
+and return ordered requirements. Draft creation accepts company, standard,
+site, period, verified measurement, requester, idempotency key, and optional
+agent-run/title fields; its `201` response is the full draft view. Draft reads
+and evidence packs require `company_id` in the query. Validation accepts
+company, requester, idempotency key, and an optional expected context hash; it
+returns the full draft, a typed terminal state, support/gap counts, and replay
+state. Required unsupported claims or error gaps produce `unsupported` and no
+preview. An eligible draft stores an exact `disclosure_draft` preview in
+`core.approvals`; a numerical claim currently requires the draft's agent run
+for its persisted fact binding. Evidence packs include ordered claims, gaps,
+fact bindings, safe evidence summaries, hashes, and the POC disclaimer.
 
 ### Suppliers and Procurement
 
@@ -141,9 +172,11 @@ Approval persistence is now generic in `core.approvals`, but current list and
 decision services still join Procurement recommendations. Dispatch optimization
 creates and returns an exact preview in a generic approval row, but the shared
 approval queue/decision endpoints do not yet handle that target type. Assurance
-target handling and generic approval detail are also not implemented. The same
-shared agent-run requirement prevents direct non-agent Dispatch requests from
-persisting `ledger.fact_bindings` rows.
+validation likewise creates an exact generic `disclosure_draft` preview, but
+the shared queue/decision endpoints do not yet handle that target type, and
+generic approval detail is still missing. The same shared agent-run requirement
+prevents direct non-agent Dispatch requests from persisting
+`ledger.fact_bindings` rows.
 
 ## Important operation behavior
 
@@ -163,9 +196,9 @@ integration paths.
 
 The companion `data/demo/manifest-v1.json` and `expected-results.json` describe
 the complete synthetic four-module fixture and its deterministic golden values.
-They include an hourly Scope 2 result and Assurance claim outcomes, but those
-entries are replay expectations rather than implemented Scope 2 or Assurance
-HTTP workflows.
+The hourly Scope 2 entry remains a replay expectation rather than an implemented
+HTTP calculation; the Assurance claim outcomes are now exposed by the canonical
+draft and validation operations above.
 
 ### Imports
 
@@ -240,12 +273,11 @@ must treat terminal events as final and may fall back to bounded polling.
 
 ## Known contract gaps
 
-The current OpenAPI intentionally does not claim success endpoints for generic
-source upload, issue resolution, Scope 2 breakdown, Assurance, run resume,
-generic approval detail/decision support for every target, recursive ledger
-traversal, or agent-sustainability metrics. Their required paths and ownership
-are in [contract.md](contract.md) and the
-[implementation plan](../planning/implementation-plan.md).
+The current OpenAPI intentionally does not claim success endpoints for issue
+resolution, Scope 2 breakdown, run resume, generic approval detail/decision
+support for every target, recursive ledger traversal, or agent-sustainability
+metrics. Their required paths and ownership are in [contract.md](contract.md)
+and the [implementation plan](../planning/implementation-plan.md).
 
 ## Maintaining this document
 

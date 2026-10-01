@@ -5,10 +5,10 @@ Measurement, Assurance, Procurement, and advisory Dispatch. The modules share
 one deterministic control plane, evidence-backed ledger, bounded agent runtime,
 and human approval records.
 
-The repository is in an active transition. The database contract and the
-existing purchased-material Measurement, Procurement, grid integrations, and
-advisory Dispatch backend are implemented. Hourly Scope 2, Assurance services,
-generic approval decisions for every target type, and the full LangGraph
+The repository is in an active transition. The database contract,
+purchased-material Measurement, Assurance draft/evidence workflow, Procurement,
+grid integrations, and advisory Dispatch backend are implemented. Hourly Scope
+2, generic approval decisions for every target type, and the full LangGraph
 runtime are still assigned work. A table, fixture, or expected result appearing
 in the target architecture is not evidence that its business workflow already
 exists.
@@ -150,7 +150,12 @@ Implemented, substantive capabilities include:
 - guarded synthetic reset for Maverick Manufacturing, Plant B, Q3 2026;
 - semantic context resolution;
 - CSV/JSON activity and supplier imports with typed quality issues;
+- bounded text/CSV/JSON/PDF source upload with checksums, extraction, chunking,
+  deterministic embeddings, and tenant/context-filtered evidence retrieval;
 - deterministic purchased-material Measurement, evidence, lineage, and audit;
+- Assurance standards and requirements, immutable-context disclosure drafts,
+  atomic claims, fact bindings, citations, evidence gaps, staleness checks,
+  structured evidence packs, and eligible generic approval previews;
 - supplier exploration, hard-constraint Procurement scoring, impact, and
   hash-bound approval;
 - Electricity Maps historical sync persisted as timestamped
@@ -175,11 +180,9 @@ Still missing or incomplete:
 - hourly Scope 2 calculation and persistence using
   `carbon.grid_intensity_points`; its golden fixture result does not substitute
   for the missing service;
-- Assurance repositories/services, retrieval, citations, validation, and
-  approval workflow; the seeded templates and golden claims are fixture data;
 - generic approval list/detail/decision handling beyond the current
-  Procurement-specific queue and commit service; Dispatch currently creates and
-  returns an exact preview but cannot be decided through that shared endpoint;
+  Procurement-specific queue and commit service; Assurance and Dispatch create
+  exact previews but cannot be decided through that shared endpoint;
 - persisted fact bindings for direct non-agent Procurement and Dispatch calls;
 - five LangGraph graphs, 24 typed tools, durable resume, model-provider
   execution from the agent runtime, and persisted run-step telemetry;

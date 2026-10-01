@@ -8,6 +8,8 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.models.ai import AgentRun
+from app.db.models.assurance import DisclosureRequirement, Standard
 from app.db.models.carbon import (
     ActivityRecord,
     CalculationRun,
@@ -30,6 +32,7 @@ from app.db.models.dispatch import FlexibleLoad, OperatingConstraint
 from app.db.models.ledger import LedgerEvent, LedgerEventEvidence, LineageEdge
 from app.db.models.procurement import Supplier, SupplierProduct
 from app.db.models.semantic import MethodDefinition, MetricDefinition, PolicyDefinition
+from app.modules.sources.embedding import EMBEDDING_MODEL_ID, hash_embedding
 
 
 def _id(suffix: int) -> UUID:
@@ -50,6 +53,9 @@ class ApiE2ESeedIds:
     approver_id: UUID
     measurement_id: UUID
     measurement_ledger_event_id: UUID
+    assurance_standard_id: UUID
+    assurance_agent_run_id: UUID
+    assurance_evidence_id: UUID
     scoring_method_id: UUID
     current_product_id: UUID
     alternative_product_id: UUID
@@ -69,6 +75,9 @@ SEED_IDS = ApiE2ESeedIds(
     approver_id=_id(6),
     measurement_id=_id(40),
     measurement_ledger_event_id=_id(54),
+    assurance_standard_id=_id(90),
+    assurance_agent_run_id=_id(94),
+    assurance_evidence_id=_id(95),
     scoring_method_id=_id(22),
     current_product_id=_id(32),
     alternative_product_id=_id(33),
@@ -112,6 +121,10 @@ async def seed_api_e2e_data(session: AsyncSession) -> ApiE2ESeedIds:
     source_event_id = _id(51)
     factor_event_id = _id(52)
     calculation_event_id = _id(53)
+    assurance_support_text = (
+        "Maverick Manufacturing (synthetic) reports verified emissions of "
+        "86,000 kgCO2e for Plant B during Q3 2026."
+    )
 
     objects = [
         Company(
@@ -157,6 +170,28 @@ async def seed_api_e2e_data(session: AsyncSession) -> ApiE2ESeedIds:
             email="approver@synthetic.carbonmesh.invalid",
             display_name="Synthetic Approver",
             role="approver",
+        ),
+        AgentRun(
+            id=ids.assurance_agent_run_id,
+            company_id=ids.company_id,
+            actor_id=ids.analyst_id,
+            trace_id="synthetic-assurance-e2e-run",
+            workflow="assurance",
+            stage="seeded_context",
+            terminal_state="completed",
+            context_envelope={
+                "company_id": str(ids.company_id),
+                "site_id": str(ids.site_id),
+                "reporting_period_id": str(ids.reporting_period_id),
+                "measurement_id": str(ids.measurement_id),
+                "synthetic": True,
+            },
+            context_hash=_hash("synthetic-assurance-e2e-context"),
+            plan={"modules": ["assurance"]},
+            result={"seeded": True},
+            telemetry={"synthetic": True},
+            started_at=now,
+            completed_at=now,
         ),
         DataSource(
             id=source_id,
@@ -224,6 +259,28 @@ async def seed_api_e2e_data(session: AsyncSession) -> ApiE2ESeedIds:
             checksum=_hash("synthetic-expensive-product-evidence"),
             evidence_metadata={"synthetic": True, "verified": True},
         ),
+        EvidenceItem(
+            id=ids.assurance_evidence_id,
+            company_id=ids.company_id,
+            source_document_id=document_id,
+            evidence_type="disclosure_support",
+            locator="synthetic:assurance/q3-2026-emissions-summary",
+            content_text=assurance_support_text,
+            checksum=_hash(assurance_support_text),
+            evidence_metadata={
+                "synthetic": True,
+                "company_id": str(ids.company_id),
+                "company": "Maverick Manufacturing (synthetic)",
+                "site_id": str(ids.site_id),
+                "site": "Plant B",
+                "reporting_period_id": str(ids.reporting_period_id),
+                "reporting_period": "Q3 2026",
+                "requirement_codes": ["S2-BOUNDARY", "S2-TOTAL"],
+            },
+            embedding=hash_embedding(assurance_support_text),
+            embedding_model=EMBEDDING_MODEL_ID,
+            embedded_at=now,
+        ),
         MetricDefinition(
             id=carbon_metric_id,
             company_id=ids.company_id,
@@ -247,6 +304,63 @@ async def seed_api_e2e_data(session: AsyncSession) -> ApiE2ESeedIds:
             handler="integrations.electricity_maps",
             method_version="electricity-maps-v4",
             description="Native Electricity Maps grid intensity in gCO2e/kWh.",
+        ),
+        Standard(
+            id=ids.assurance_standard_id,
+            company_id=ids.company_id,
+            source_document_id=document_id,
+            code="GHG-PROTOCOL-SCOPE-2-DEMO",
+            version="2026-demo-v1",
+            name="Synthetic GHG Protocol emissions summary",
+            jurisdiction="GLOBAL",
+            description="Synthetic POC disclosure template; not an assurance opinion.",
+            template={"type": "scope_2_summary", "synthetic": True},
+            effective_from=date(2026, 1, 1),
+        ),
+        DisclosureRequirement(
+            id=_id(91),
+            company_id=ids.company_id,
+            standard_id=ids.assurance_standard_id,
+            requirement_code="S2-BOUNDARY",
+            title="Reporting boundary",
+            description="Identify the company, site, and reporting period.",
+            sequence=1,
+            claim_template=("{company} reports emissions for {site} during {reporting_period}."),
+            evidence_rules={"allowed_evidence_types": ["disclosure_support"]},
+            minimum_confidence=Decimal("0.80000"),
+        ),
+        DisclosureRequirement(
+            id=_id(92),
+            company_id=ids.company_id,
+            standard_id=ids.assurance_standard_id,
+            metric_definition_id=carbon_metric_id,
+            requirement_code="S2-TOTAL",
+            title="Verified emissions total",
+            description="Report the verified emissions total for the period.",
+            sequence=2,
+            claim_template="Verified emissions were {scope2_total}.",
+            evidence_rules={
+                "allowed_evidence_types": ["disclosure_support"],
+                "fact_binding_required": True,
+                "unit": "kgCO2e",
+            },
+            minimum_confidence=Decimal("0.90000"),
+        ),
+        DisclosureRequirement(
+            id=_id(93),
+            company_id=ids.company_id,
+            standard_id=ids.assurance_standard_id,
+            metric_definition_id=carbon_metric_id,
+            requirement_code="S2-PRIOR-PERIOD",
+            title="Prior-period comparison",
+            description="Compare emissions with a verified prior period.",
+            sequence=3,
+            claim_template="Emissions decreased from the prior reporting period.",
+            evidence_rules={
+                "allowed_evidence_types": ["disclosure_support"],
+                "comparable_prior_period_required": True,
+            },
+            minimum_confidence=Decimal("0.90000"),
         ),
         MethodDefinition(
             id=ids.scoring_method_id,
@@ -702,9 +816,17 @@ async def seed_api_e2e_data(session: AsyncSession) -> ApiE2ESeedIds:
     insert_phases = (
         (Company,),
         (Site, ReportingPeriod, Actor),
-        (DataSource, MetricDefinition, MethodDefinition, PolicyDefinition, Supplier),
+        (
+            AgentRun,
+            DataSource,
+            MetricDefinition,
+            MethodDefinition,
+            PolicyDefinition,
+            Supplier,
+        ),
         (SourceDocument,),
-        (EvidenceItem,),
+        (EvidenceItem, Standard),
+        (DisclosureRequirement,),
         (SupplierProduct,),
         (RawActivityRecord,),
         (ActivityRecord,),

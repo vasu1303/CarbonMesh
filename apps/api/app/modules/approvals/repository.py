@@ -10,9 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from app.db.models.carbon import CarbonMeasurement
-from app.db.models.core import Actor, EvidenceItem
+from app.db.models.core import Actor, Approval, EvidenceItem
 from app.db.models.procurement import (
-    Approval,
     ProcurementScenario,
     Recommendation,
     Supplier,
@@ -340,5 +339,38 @@ async def get_pending_approval(
             Approval.company_id == company_id,
             Approval.recommendation_id == recommendation_id,
             Approval.status == "pending",
+        )
+    )
+
+
+async def get_pending_approval_for_target(
+    session: AsyncSession,
+    *,
+    company_id: UUID,
+    target_type: str,
+    target_id: UUID,
+) -> Approval | None:
+    """Load the one pending generic preview for a tenant-scoped target."""
+    return await session.scalar(
+        select(Approval).where(
+            Approval.company_id == company_id,
+            Approval.target_type == target_type,
+            Approval.target_id == target_id,
+            Approval.status == "pending",
+        )
+    )
+
+
+async def get_approval_by_idempotency_key(
+    session: AsyncSession,
+    *,
+    company_id: UUID,
+    idempotency_key: str,
+) -> Approval | None:
+    """Load an approval command result by its tenant-scoped idempotency key."""
+    return await session.scalar(
+        select(Approval).where(
+            Approval.company_id == company_id,
+            Approval.idempotency_key == idempotency_key,
         )
     )
