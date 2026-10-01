@@ -22,8 +22,11 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+import app.db.models.ai
+import app.db.models.assurance
 import app.db.models.carbon
 import app.db.models.core
+import app.db.models.dispatch
 import app.db.models.ledger
 import app.db.models.procurement
 import app.db.models.semantic

@@ -79,8 +79,8 @@ async def reset_and_seed_demo(session: AsyncSession) -> DemoResetSummary:
         company_id=DEMO_COMPANY_ID,
         site_id=DEMO_SITE_ID,
         reporting_period_id=DEMO_PERIOD_ID,
-        metric_count=6,
+        metric_count=9,
         activity_record_count=1,
-        supplier_product_count=3,
+        supplier_product_count=4,
         emission_factor_count=1,
     )

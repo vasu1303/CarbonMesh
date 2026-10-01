@@ -16,7 +16,7 @@ from app.modules.procurement.schemas import (
     ProcurementScenarioResult,
     RecommendationDetail,
     ScoreScenarioRequest,
-    SupplierProductDetail,
+    SupplierList,
     SupplierProductList,
 )
 from app.modules.procurement.service import ProcurementService
@@ -36,13 +36,42 @@ def _http_error(error: ProcurementError, trace_id: str | None) -> HTTPException:
 
 
 @router.get(
-    "/suppliers",
+    "/procurement/suppliers",
+    response_model=SupplierList,
+    summary="List suppliers",
+)
+async def list_suppliers(
+    session: DatabaseSession,
+    company_id: Annotated[UUID, Query(description="Company tenant scope")],
+    country_code: Annotated[str | None, Query(pattern=r"^[A-Z]{2}$")] = None,
+    active_only: bool = True,
+    search: Annotated[str | None, Query(min_length=1, max_length=200)] = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    trace_id: TraceIdHeader = None,
+) -> SupplierList:
+    try:
+        return await ProcurementService(session).list_suppliers(
+            company_id=company_id,
+            country_code=country_code,
+            active_only=active_only,
+            search=search,
+            limit=limit,
+            offset=offset,
+        )
+    except ProcurementError as error:
+        raise _http_error(error, trace_id) from error
+
+
+@router.get(
+    "/procurement/products",
     response_model=SupplierProductList,
     summary="List supplier products",
 )
 async def list_supplier_products(
     session: DatabaseSession,
     company_id: Annotated[UUID, Query(description="Company tenant scope")],
+    supplier_id: UUID | None = None,
     material_code: Annotated[str | None, Query(max_length=100)] = None,
     category: Annotated[str | None, Query(max_length=100)] = None,
     active_only: bool = True,
@@ -54,31 +83,13 @@ async def list_supplier_products(
     try:
         return await ProcurementService(session).list_supplier_products(
             company_id=company_id,
+            supplier_id=supplier_id,
             material_code=material_code,
             category=category,
             active_only=active_only,
             search=search,
             limit=limit,
             offset=offset,
-        )
-    except ProcurementError as error:
-        raise _http_error(error, trace_id) from error
-
-
-@router.get(
-    "/suppliers/{product_id}",
-    response_model=SupplierProductDetail,
-    summary="Read supplier product and evidence",
-)
-async def get_supplier_product(
-    product_id: UUID,
-    session: DatabaseSession,
-    company_id: Annotated[UUID, Query(description="Company tenant scope")],
-    trace_id: TraceIdHeader = None,
-) -> SupplierProductDetail:
-    try:
-        return await ProcurementService(session).get_supplier_product(
-            company_id=company_id, product_id=product_id
         )
     except ProcurementError as error:
         raise _http_error(error, trace_id) from error
@@ -143,19 +154,19 @@ async def get_procurement_scenario(
 
 
 @router.get(
-    "/procurement/recommendations/{recommendation_id}",
+    "/procurement/scenarios/{scenario_id}/recommendation",
     response_model=RecommendationDetail,
     summary="Read recommendation facts, scores, evidence, and hashes",
 )
 async def get_procurement_recommendation(
-    recommendation_id: UUID,
+    scenario_id: UUID,
     session: DatabaseSession,
     company_id: Annotated[UUID, Query(description="Company tenant scope")],
     trace_id: TraceIdHeader = None,
 ) -> RecommendationDetail:
     try:
-        return await ProcurementService(session).get_recommendation(
-            company_id=company_id, recommendation_id=recommendation_id
+        return await ProcurementService(session).get_scenario_recommendation(
+            company_id=company_id, scenario_id=scenario_id
         )
     except ProcurementError as error:
         raise _http_error(error, trace_id) from error

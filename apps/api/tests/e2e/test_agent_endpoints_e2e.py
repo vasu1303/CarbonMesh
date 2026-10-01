@@ -32,7 +32,7 @@ async def test_agent_query_run_and_terminal_sse_replay(api_client, e2e_context) 
         "/api/agent/requests",
         json={
             "query": (
-                "Measure the Plant B packaging footprint and recommend a lower-carbon "
+                "Measure the Plant B recycled aluminium footprint and recommend a lower-carbon "
                 "supplier without increasing unit cost by more than five percent."
             ),
             "context": {
@@ -41,7 +41,7 @@ async def test_agent_query_run_and_terminal_sse_replay(api_client, e2e_context) 
                 "site_id": str(ids.site_id),
                 "reporting_period_id": str(ids.reporting_period_id),
                 "metric_keys": [],
-                "material_scope": ["packaging tray"],
+                "material_scope": ["RECYCLED-ALUMINIUM"],
                 "supplier_product_ids": [],
                 "constraints": {
                     "max_cost_increase_pct": "5",
@@ -73,8 +73,8 @@ async def test_agent_query_run_and_terminal_sse_replay(api_client, e2e_context) 
         "procurement.cost_delta_pct",
     }
     assert run["recommendation"]["recommended_product_id"] == str(ids.recommended_product_id)
-    assert run["recommendation"]["avoided_kgco2e"] == "10800.000000"
-    assert run["recommendation"]["cost_delta_pct"] == "3.2000"
+    assert run["recommendation"]["avoided_kgco2e"] == "62000.000000"
+    assert run["recommendation"]["cost_delta_pct"] == "4.0000"
     assert run["approval_requirement"]["required"] is True
     assert run["approval_requirement"]["approval_id"] is not None
     assert run["telemetry"]["provider"] == "none"
@@ -125,13 +125,13 @@ async def test_agent_no_feasible_run_omits_unexecuted_approval_tool(
     response = await api_client.post(
         "/api/agent/requests",
         json={
-            "query": "Measure packaging emissions and recommend a feasible supplier.",
+            "query": "Measure recycled aluminium emissions and recommend a feasible supplier.",
             "context": {
                 "company_id": str(ids.company_id),
                 "actor_id": str(ids.procurement_manager_id),
                 "site_id": str(ids.site_id),
                 "reporting_period_id": str(ids.reporting_period_id),
-                "material_scope": ["packaging tray"],
+                "material_scope": ["RECYCLED-ALUMINIUM"],
                 "constraints": {
                     "max_cost_increase_pct": "0",
                     "max_lead_time_days": 0,

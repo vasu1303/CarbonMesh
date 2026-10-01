@@ -1,0 +1,60 @@
+{
+  "manifest_version": "1.0.0",
+  "fixture_id": "maverick-q3-2026-v1",
+  "synthetic": true,
+  "generated_by": "scripts/generate_demo_fixtures.py",
+  "artifacts": [
+    {
+      "path": "data/demo/activity.csv",
+      "sha256": "94ed03b87f3da03816893c5061a9143f47e1f17fa50e73984d22ba1845ca756f"
+    },
+    {
+      "path": "data/demo/electricity-hourly.csv",
+      "sha256": "8097515d4c504e5304e24625acc96210b62cac5f15ebec7b641427ac12f797c2"
+    },
+    {
+      "path": "data/demo/suppliers.json",
+      "sha256": "7b2061272ee4412b2bf95ccff36458006c9502a6220faa5baee2e5441402601b"
+    },
+    {
+      "path": "data/demo/factor-evidence.txt",
+      "sha256": "f9d6f6355c286226d07ffc8d565b67fd3ae1ba796fbc04a9be9eb482919bdfa0"
+    },
+    {
+      "path": "data/demo/assurance-standard.json",
+      "sha256": "2c300fcd5f99f9266c80b55294a421354d55cbc0fbc790b4188776cbcc4449d2"
+    },
+    {
+      "path": "data/demo/assurance-evidence.md",
+      "sha256": "740342e9fe40c1284c6eb5c98f6304bee84a7636d411b60c135206d161d4175e"
+    },
+    {
+      "path": "data/demo/grid-history.json",
+      "sha256": "f4f77bbcdea4375db7c3d70ab4059006a687b34d9ad17f9b9f696739d326192d"
+    },
+    {
+      "path": "data/demo/grid-forecast-6h.json",
+      "sha256": "0b256604e32fc4ddafdeed0712d58d83f75c5cc72088e2ae9ea212b540ab4c43"
+    },
+    {
+      "path": "data/demo/grid-forecast-24h.json",
+      "sha256": "712ed91e2e435d2ceaa862d90fe06bc4b6c3537252147f2e8361ac14e814dee9"
+    },
+    {
+      "path": "data/demo/grid-forecast-48h.json",
+      "sha256": "b281d2310ef5206f2c7dbf2dcb607a225d4ed50c2833ef4dc34663f2989eb29d"
+    },
+    {
+      "path": "data/demo/grid-forecast-72h.json",
+      "sha256": "04c4830a7b4467a9c5c2c498a0aea93bd4064d252f0c3c1da34221b813f540db"
+    },
+    {
+      "path": "data/demo/expected-results.json",
+      "sha256": "c841d3c3a4cde9e2bb981008dfc21fe38a74cef3a1d9edcec431acd4905e23fd"
+    },
+    {
+      "path": "data/demo/api_e2e_expected.json",
+      "sha256": "b8091f8b78ed38296c92464b07ef2011ec9cc685f955cb7acd08fd31e50c59a2"
+    }
+  ]
+}

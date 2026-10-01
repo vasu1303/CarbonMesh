@@ -19,6 +19,14 @@ def test_requested_api_surface_is_registered() -> None:
         ("get", "/api/runs/{run_id}"),
         ("get", "/api/runs/{run_id}/events"),
         ("post", "/api/procurement/scenarios/{scenario_id}/score"),
+        ("get", "/api/procurement/suppliers"),
+        ("get", "/api/procurement/products"),
+        ("get", "/api/procurement/scenarios/{scenario_id}/recommendation"),
+        ("get", "/api/dispatch/loads"),
+        ("post", "/api/dispatch/forecasts/sync"),
+        ("post", "/api/dispatch/scenarios"),
+        ("post", "/api/dispatch/scenarios/{scenario_id}/optimize"),
+        ("get", "/api/dispatch/scenarios/{scenario_id}/recommendation"),
         ("post", "/api/measurement/grid/history/sync"),
         ("get", "/api/measurement/grid/latest"),
         ("get", "/api/ledger/events"),
@@ -77,3 +85,6 @@ def test_obsolete_routes_are_not_registered() -> None:
     assert "/api/measurements/calculate" not in paths
     assert "/api/agent/query" not in paths
     assert "/api/procurement/assessments/run" not in paths
+    assert "/api/suppliers" not in paths
+    assert "/api/suppliers/{product_id}" not in paths
+    assert "/api/procurement/recommendations/{recommendation_id}" not in paths

@@ -3,13 +3,15 @@
 CarbonMesh is a four-module carbon-operations proof of concept covering
 Measurement, Assurance, Procurement, and advisory Dispatch. The modules share
 one deterministic control plane, evidence-backed ledger, bounded agent runtime,
-and human Preview-Approve-Commit workflow.
+and human approval records.
 
 The repository is in an active transition. The database contract and the
-existing Measurement/Procurement backend are implemented; hourly Scope 2,
-Assurance services, Dispatch optimization, and the full LangGraph runtime are
-still assigned work. A table or route appearing in the target architecture is
-not evidence that its business workflow already exists.
+existing purchased-material Measurement, Procurement, grid integrations, and
+advisory Dispatch backend are implemented. Hourly Scope 2, Assurance services,
+generic approval decisions for every target type, and the full LangGraph
+runtime are still assigned work. A table, fixture, or expected result appearing
+in the target architecture is not evidence that its business workflow already
+exists.
 
 ## Start locally with Docker
 
@@ -138,34 +140,49 @@ approved local hosts use the bounded SQLAlchemy pool with pre-ping. See the
 ## API status
 
 The canonical API is exposed under stable `/api/...` resource paths. OpenAPI is
-the source of truth for implemented request and response shapes. Temporary
-hidden aliases preserve the previous prefixed paths while frontend integration
-is updated.
+the source of truth for implemented request and response shapes. Each
+implemented operation has one canonical path; obsolete supplier,
+recommendation, and module-prefixed aliases are not mounted.
 
 Implemented, substantive capabilities include:
 
 - health and sanitized database diagnostics;
-- synthetic reset for the existing Nova fixture;
+- guarded synthetic reset for Maverick Manufacturing, Plant B, Q3 2026;
 - semantic context resolution;
 - CSV/JSON activity and supplier imports with typed quality issues;
 - deterministic purchased-material Measurement, evidence, lineage, and audit;
 - supplier exploration, hard-constraint Procurement scoring, impact, and
   hash-bound approval;
+- Electricity Maps historical sync persisted as timestamped
+  `carbon.grid_intensity_points`, plus a provenance-aware latest-point read;
+- fixture and live Electricity Maps forecast adapters with immutable Dispatch
+  forecast persistence;
+- deterministic advisory Dispatch load discovery, frozen scenarios, complete
+  consecutive-window enumeration, hard constraints, impact, evidence, lineage,
+  and exact approval previews;
 - persisted bounded run state with SSE replay;
-- Electricity Maps historical retrieval using the existing factor cache;
 - tenant-scoped ledger event search and detail with safe evidence summaries and
   immediate lineage neighbors.
 
+The fully synthetic `data/demo` assets cover the four-module Maverick target:
+90 days of hourly electricity, recycled-aluminium Procurement inputs,
+Assurance source material, history and forecast snapshots, and Batch Process 7.
+The versioned manifest and expected-results file are generated deterministically
+and include fixture, method, input, output, context, and analysis hashes.
+
 Still missing or incomplete:
 
-- the Maverick four-module fixture and golden replay manifest;
-- hourly Scope 2 calculation using `carbon.grid_intensity_points`;
+- hourly Scope 2 calculation and persistence using
+  `carbon.grid_intensity_points`; its golden fixture result does not substitute
+  for the missing service;
 - Assurance repositories/services, retrieval, citations, validation, and
-  approval;
-- Dispatch forecast, constraint, optimizer, recommendation, and approval;
-- generic approval/fact-binding services beyond current Procurement use;
-- five LangGraph graphs, 24 typed tools, durable resume, real provider calls,
-  and persisted run-step telemetry;
+  approval workflow; the seeded templates and golden claims are fixture data;
+- generic approval list/detail/decision handling beyond the current
+  Procurement-specific queue and commit service; Dispatch currently creates and
+  returns an exact preview but cannot be decided through that shared endpoint;
+- persisted fact bindings for direct non-agent Procurement and Dispatch calls;
+- five LangGraph graphs, 24 typed tools, durable resume, model-provider
+  execution from the agent runtime, and persisted run-step telemetry;
 - dependency-aware readiness and agent-sustainability metrics.
 
 See the [current API reference](docs/api/reference.md),
@@ -186,15 +203,19 @@ Invoke-RestMethod -Method Post -Headers $headers http://localhost:8000/api/demo/
 ```
 
 It returns `409 demo_reset_blocked` when any non-synthetic company exists. The
-current fixture is the earlier Nova packaging scenario; replacing it with the
-four-module Maverick fixture is explicitly assigned to the Data/Dispatch/QA
-owner.
+reset installs the stable Maverick Manufacturing / Plant B / Q3 2026 seed,
+including recycled-aluminium products, Assurance definitions, and the advisory
+Batch Process 7 load and hard constraints. History and forecast points are
+loaded through their sync endpoints so their provider-snapshot provenance is
+preserved.
 
 ## Optional external providers
 
 Set `ELECTRICITY_MAPS_API_TOKEN` only in the backend environment. Provider
 responses are bounded and snapshotted as evidence; secrets and response bodies
-must not enter logs or API errors.
+must not enter logs or API errors. Dispatch forecast sync defaults to the
+credential-free packaged fixture; request `source_mode: "live"` to use the
+configured Electricity Maps v4 provider.
 
 The model layer has provider-neutral OpenAI, Gemini, Anthropic, and OpenRouter
 HTTP adapters. Configure exactly one provider and an explicit model identifier,

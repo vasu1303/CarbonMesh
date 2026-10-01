@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
@@ -18,6 +19,7 @@ from app.modules.approvals.service import (
     create_pending_approval,
     decide_approval,
 )
+from app.modules.integrations import repository as integration_repository
 from app.modules.integrations.electricity_maps import (
     ElectricityMapsHttpClient,
     ElectricityMapsProviderError,
@@ -61,6 +63,26 @@ def test_grid_sync_request_enforces_electricity_maps_hourly_limit() -> None:
 
     with pytest.raises(ValidationError, match="cannot exceed 240 hours"):
         GridIntensitySyncRequest(start=start, end=start + timedelta(hours=241))
+
+
+@pytest.mark.asyncio
+async def test_grid_history_persistence_uses_a_stable_company_advisory_lock() -> None:
+    company_id = UUID("00000000-0000-4000-8000-000000000001")
+    other_company_id = UUID("00000000-0000-4000-8000-000000000002")
+    lock_id = integration_repository.grid_history_lock_id(company_id)
+
+    assert lock_id == integration_repository.grid_history_lock_id(company_id)
+    assert lock_id != integration_repository.grid_history_lock_id(other_company_id)
+    assert -(2**63) <= lock_id < 2**63
+
+    session = AsyncMock()
+    await integration_repository.acquire_grid_history_lock(
+        session,
+        company_id=company_id,
+    )
+
+    statement = session.execute.await_args.args[0]
+    assert "pg_advisory_xact_lock" in str(statement)
 
 
 def test_command_payloads_reject_unknown_fields() -> None:

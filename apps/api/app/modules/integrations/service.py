@@ -10,7 +10,7 @@ from uuid import UUID
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models.carbon import EmissionFactor
+from app.db.models.carbon import GridIntensityPoint
 from app.db.models.core import DataSource, EvidenceItem, Site, SourceDocument
 from app.db.models.semantic import MetricDefinition
 from app.modules.integrations import repository
@@ -33,7 +33,7 @@ from app.modules.integrations.schemas import (
 MAX_HOURLY_RANGE = timedelta(hours=240)
 MAX_HOURLY_POINTS = 240
 KG_PER_GRAM = Decimal("0.001")
-FACTOR_QUANTUM = Decimal("0.000000000001")
+KG_INTENSITY_QUANTUM = Decimal("0.000000000001")
 
 
 class IntegrationServiceError(RuntimeError):
@@ -318,21 +318,39 @@ async def sync_grid_intensity(
             "Electricity Maps returned estimated data despite estimations being disabled."
         )
 
+    is_synthetic_provider = (
+        getattr(provider, "is_synthetic", False) is True
+        or raw_payload.get("synthetic") is True
+    )
+    # The provider call intentionally happens outside a transaction. Serialize
+    # only the persistence phase so concurrent syncs deterministically read back
+    # the rows committed by the first caller instead of racing unique keys.
+    await repository.acquire_grid_history_lock(session, company_id=site.company_id)
+    data_source = await repository.get_data_source(
+        session,
+        company_id=site.company_id,
+        site_id=site.id,
+        is_synthetic=is_synthetic_provider,
+    )
     if data_source is None:
+        fixture_suffix = " (synthetic fixture)" if is_synthetic_provider else ""
         data_source = DataSource(
             company_id=site.company_id,
             site_id=site.id,
-            name=f"Electricity Maps grid intensity - {site.code}",
-            source_type="api",
+            name=f"Electricity Maps grid intensity - {site.code}{fixture_suffix}",
+            source_type="synthetic" if is_synthetic_provider else "api",
             status="ready",
             external_reference=repository.ELECTRICITY_MAPS_EXTERNAL_REFERENCE,
             configuration={},
-            is_synthetic=False,
+            is_synthetic=is_synthetic_provider,
         )
         session.add(data_source)
     data_source.status = "ready"
+    data_source.is_synthetic = is_synthetic_provider
+    data_source.source_type = "synthetic" if is_synthetic_provider else "api"
     data_source.configuration = {
         "provider": "electricity_maps",
+        "provider_mode": "fixture" if is_synthetic_provider else "live",
         "api_version": "v4",
         "zone": zone,
         "endpoint": "/carbon-intensity/past-range",
@@ -346,6 +364,8 @@ async def sync_grid_intensity(
         site_id=site.id,
         requested_start=start,
         requested_end=end,
+        provider_mode="fixture" if is_synthetic_provider else "live",
+        synthetic=is_synthetic_provider,
         response=raw_payload,
     ).model_dump(mode="json")
     snapshot_bytes = _json_bytes(snapshot)
@@ -367,6 +387,8 @@ async def sync_grid_intensity(
             storage_uri=f"database://electricity-maps/{response_checksum}",
             document_metadata={
                 "provider": "electricity_maps",
+                "provider_mode": "fixture" if is_synthetic_provider else "live",
+                "synthetic": is_synthetic_provider,
                 "api_version": "v4",
                 "endpoint": "/carbon-intensity/past-range",
                 "zone": zone,
@@ -385,7 +407,7 @@ async def sync_grid_intensity(
             key=repository.GRID_INTENSITY_METRIC_KEY,
             version=repository.GRID_INTENSITY_METRIC_VERSION,
             name="Electricity grid carbon intensity",
-            canonical_unit="kgCO2e/kWh",
+            canonical_unit="gCO2e/kWh",
             dimensions={"site": True, "geography": "electricity_maps_zone", "time": "hourly"},
             handler="integrations.electricity_maps",
             method_version="electricity-maps-v4",
@@ -395,8 +417,8 @@ async def sync_grid_intensity(
         session.add(metric)
         await session.flush()
 
-    inserted_factors = 0
-    existing_factors = 0
+    inserted_points = 0
+    existing_points = 0
     estimated_points = 0
     for point in sorted(payload.data, key=lambda item: item.datetime):
         estimated_points += int(point.is_estimated)
@@ -420,6 +442,8 @@ async def sync_grid_intensity(
                 checksum=point_checksum,
                 evidence_metadata={
                     "provider": "electricity_maps",
+                    "provider_mode": "fixture" if is_synthetic_provider else "live",
+                    "synthetic": is_synthetic_provider,
                     "api_version": "v4",
                     "endpoint": "/carbon-intensity/past-range",
                     "zone": zone,
@@ -436,45 +460,60 @@ async def sync_grid_intensity(
             session.add(evidence)
             await session.flush()
 
-        version = _provider_version(point.datetime, point.updated_at)
-        existing = await repository.get_emission_factor(
+        point_version = _provider_version(point.datetime, point.updated_at)
+        method_version = f"{repository.GRID_POINT_METHOD_PREFIX}:{point_version}"
+        existing = await repository.get_grid_intensity_point(
             session,
             company_id=site.company_id,
-            version=version,
-            geography=zone,
+            site_id=site.id,
+            zone=zone,
+            observed_at=point.datetime,
+            temporal_granularity=point.temporal_granularity,
+            method_version=method_version,
         )
-        factor_value = (point.carbon_intensity * KG_PER_GRAM).quantize(
-            FACTOR_QUANTUM,
+        canonical_kg_intensity = (point.carbon_intensity * KG_PER_GRAM).quantize(
+            KG_INTENSITY_QUANTUM,
             rounding=ROUND_HALF_UP,
         )
         if existing is not None:
-            if existing.factor_value != factor_value:
+            if existing.point_hash != point_checksum:
                 raise InvalidProviderResponseError(
-                    "Electricity Maps reused a provider version with a different value."
+                    "Electricity Maps reused a provider point version with different content."
                 )
-            existing_factors += 1
+            existing_points += 1
             continue
         session.add(
-            EmissionFactor(
+            GridIntensityPoint(
                 company_id=site.company_id,
-                metric_definition_id=metric.id,
+                site_id=site.id,
+                source_document_id=source_document.id,
                 evidence_item_id=evidence.id,
-                factor_code=repository.GRID_FACTOR_CODE,
-                version=version,
-                name=f"Electricity Maps grid intensity {zone} {point.datetime.isoformat()}",
-                geography=zone,
-                factor_value=factor_value,
-                numerator_unit="kgCO2e",
-                denominator_unit="kWh",
-                effective_from=point.datetime.date(),
-                effective_to=point.datetime.date(),
-                source_quality=Decimal("0.85000") if point.is_estimated else Decimal("0.95000"),
-                factor_specificity=Decimal("1.00000"),
-                factor_recency=Decimal("1.00000"),
-                status="active",
+                metric_definition_id=metric.id,
+                provider="electricity_maps",
+                zone=zone,
+                observed_at=point.datetime,
+                provider_updated_at=point.updated_at,
+                temporal_granularity=point.temporal_granularity,
+                emission_factor_type=point.emission_factor_type,
+                flow_traced=point.flow_traced,
+                is_estimated=point.is_estimated,
+                intensity_gco2e_per_kwh=point.carbon_intensity,
+                method_version=method_version,
+                point_hash=point_checksum,
+                provider_metadata={
+                    "api_version": "v4",
+                    "endpoint": "/carbon-intensity/past-range",
+                    "created_at": (
+                        point.created_at.isoformat() if point.created_at is not None else None
+                    ),
+                    "estimation_method": point.estimation_method,
+                    "canonical_kgco2e_per_kwh": str(canonical_kg_intensity),
+                    "response_checksum": response_checksum,
+                    "synthetic": bool(data_source.is_synthetic),
+                },
             )
         )
-        inserted_factors += 1
+        inserted_points += 1
 
     await session.commit()
     return GridIntensitySyncResult(
@@ -484,8 +523,8 @@ async def sync_grid_intensity(
         requested_start=start,
         requested_end=end,
         received_points=len(payload.data),
-        inserted_factors=inserted_factors,
-        existing_factors=existing_factors,
+        inserted_points=inserted_points,
+        existing_points=existing_points,
         estimated_points=estimated_points,
         data_source_id=data_source.id,
         source_document_id=source_document.id,
@@ -524,41 +563,36 @@ async def get_latest_grid_intensity(
             "No cached Electricity Maps zone mapping exists for this site."
         )
 
-    record = await repository.get_latest_grid_factor(
+    record = await repository.get_latest_grid_intensity_point(
         session,
         company_id=company_id,
+        site_id=site_id,
         zone=zone,
     )
     if record is None:
         raise GridIntensityNotFoundError("No cached grid intensity exists for this site.")
-    factor, evidence, document, data_source = record
-    metadata = evidence.evidence_metadata
-    try:
-        provider_timestamp = datetime.fromisoformat(str(metadata["provider_datetime"]))
-        provider_updated_at = (
-            datetime.fromisoformat(str(metadata["provider_updated_at"]))
-            if metadata.get("provider_updated_at")
-            else None
-        )
-        provider_value = Decimal(str(metadata["provider_value_gco2eq_per_kwh"]))
-    except (KeyError, ValueError, TypeError) as error:
-        raise InvalidProviderResponseError(
-            "Cached grid intensity provenance is incomplete."
-        ) from error
+    point, evidence, document, data_source = record
 
     return LatestGridIntensityResult(
         site_id=site.id,
-        factor_id=factor.id,
-        zone=factor.geography,
-        value=factor.factor_value,
-        unit=f"{factor.numerator_unit}/{factor.denominator_unit}",
-        provider_value_gco2eq_per_kwh=provider_value,
-        provider_timestamp=provider_timestamp,
-        provider_updated_at=provider_updated_at,
-        is_estimated=bool(metadata.get("is_estimated", False)),
-        emission_factor_type=str(metadata.get("emission_factor_type", "lifecycle")),
-        temporal_granularity=str(metadata.get("temporal_granularity", "hourly")),
+        grid_intensity_point_id=point.id,
+        zone=point.zone,
+        value=(point.intensity_gco2e_per_kwh * KG_PER_GRAM).quantize(
+            KG_INTENSITY_QUANTUM,
+            rounding=ROUND_HALF_UP,
+        ),
+        unit="kgCO2e/kWh",
+        provider_value_gco2eq_per_kwh=point.intensity_gco2e_per_kwh,
+        provider_timestamp=point.observed_at,
+        provider_updated_at=point.provider_updated_at,
+        is_estimated=point.is_estimated,
+        emission_factor_type=point.emission_factor_type,
+        temporal_granularity=point.temporal_granularity,
         provenance=GridIntensityProvenance(
+            provider_mode=(
+                "fixture" if data_source.is_synthetic else "live"
+            ),
+            synthetic=data_source.is_synthetic,
             endpoint=str(data_source.configuration.get("endpoint", "")),
             source_site_id=data_source.site_id,
             source_document_id=document.id,

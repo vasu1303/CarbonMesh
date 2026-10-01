@@ -72,8 +72,8 @@ class GridIntensitySyncResult(BaseModel):
     requested_start: datetime
     requested_end: datetime
     received_points: int
-    inserted_factors: int
-    existing_factors: int
+    inserted_points: int
+    existing_points: int
     estimated_points: int
     data_source_id: UUID
     source_document_id: UUID
@@ -83,7 +83,9 @@ class GridIntensitySyncResult(BaseModel):
 class GridIntensityProvenance(BaseModel):
     provider: str = "electricity_maps"
     api_version: str = "v4"
-    cache_scope: Literal["company_zone"] = "company_zone"
+    provider_mode: Literal["fixture", "live"]
+    synthetic: bool
+    cache_scope: Literal["site_zone"] = "site_zone"
     endpoint: str
     source_site_id: UUID | None = None
     source_document_id: UUID
@@ -94,7 +96,7 @@ class GridIntensityProvenance(BaseModel):
 
 class LatestGridIntensityResult(BaseModel):
     site_id: UUID
-    factor_id: UUID
+    grid_intensity_point_id: UUID
     zone: str
     value: Decimal
     unit: str
@@ -121,9 +123,19 @@ class ElectricityMapsIntensityPoint(BaseModel):
     estimation_method: str | None = Field(default=None, alias="estimationMethod")
     temporal_granularity: str = Field(default="hourly", alias="temporalGranularity")
 
-    @field_validator("datetime", "updated_at", "created_at")
+    @field_validator("datetime")
     @classmethod
-    def normalize_provider_datetime(cls, value: datetime | None) -> datetime | None:
+    def normalize_provider_point_datetime(cls, value: datetime) -> datetime:
+        if value.tzinfo is None:
+            raise ValueError("Provider datetime must include a UTC offset.")
+        normalized = value.astimezone(UTC)
+        if any((normalized.minute, normalized.second, normalized.microsecond)):
+            raise ValueError("Hourly provider points must align to an exact UTC hour.")
+        return normalized
+
+    @field_validator("updated_at", "created_at")
+    @classmethod
+    def normalize_provider_metadata_datetime(cls, value: datetime | None) -> datetime | None:
         if value is None:
             return None
         if value.tzinfo is None:
@@ -140,8 +152,75 @@ class ElectricityMapsRangePayload(BaseModel):
     aggregation_period: str | None = Field(default=None, alias="aggregationPeriod")
 
 
+class ElectricityMapsForecastPoint(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    carbon_intensity: Decimal = Field(alias="carbonIntensity", ge=0)
+    datetime: datetime
+    is_estimated: bool = Field(default=True, alias="isEstimated")
+    estimation_method: str | None = Field(
+        default="electricity_maps_forecast",
+        alias="estimationMethod",
+    )
+    emission_factor_type: str = Field(default="lifecycle", alias="emissionFactorType")
+    flow_traced: bool = Field(default=True, alias="flowTraced")
+
+    @field_validator("datetime")
+    @classmethod
+    def normalize_forecast_datetime(cls, value: datetime) -> datetime:
+        if value.tzinfo is None:
+            raise ValueError("Forecast datetime must include a UTC offset.")
+        return value.astimezone(UTC)
+
+
+class ElectricityMapsForecastPayload(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+    zone: str
+    forecast: list[ElectricityMapsForecastPoint]
+    updated_at: datetime = Field(alias="updatedAt")
+    temporal_granularity: str = Field(default="hourly", alias="temporalGranularity")
+
+    @field_validator("zone")
+    @classmethod
+    def normalize_forecast_zone(cls, value: str) -> str:
+        return value.strip().upper()
+
+    @field_validator("updated_at")
+    @classmethod
+    def normalize_forecast_issued_at(cls, value: datetime) -> datetime:
+        if value.tzinfo is None:
+            raise ValueError("Forecast updatedAt must include a UTC offset.")
+        return value.astimezone(UTC)
+
+
+class NormalizedGridForecastPoint(BaseModel):
+    forecast_for: datetime
+    intensity_gco2e_per_kwh: Decimal
+    is_estimated: bool
+    estimation_method: str | None = None
+    emission_factor_type: str
+    flow_traced: bool
+
+
+class NormalizedGridForecast(BaseModel):
+    provider: Literal["electricity_maps"] = "electricity_maps"
+    api_version: Literal["v4"] = "v4"
+    endpoint: Literal["/carbon-intensity/forecast"] = "/carbon-intensity/forecast"
+    zone: str
+    horizon_hours: Literal[6, 24, 48, 72]
+    issued_at: datetime
+    retrieved_at: datetime
+    temporal_granularity: Literal["hourly"] = "hourly"
+    points: list[NormalizedGridForecastPoint]
+    response_checksum: str
+    source_snapshot: dict[str, Any]
+
+
 class SnapshotEnvelope(BaseModel):
     site_id: UUID
     requested_start: datetime
     requested_end: datetime
+    provider_mode: Literal["fixture", "live"]
+    synthetic: bool
     response: dict[str, Any]

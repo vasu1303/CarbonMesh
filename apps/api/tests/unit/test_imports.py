@@ -63,8 +63,8 @@ def test_json_parser_accepts_string_rows_and_products_envelope() -> None:
 
     assert from_string.records[0]["quantity"] == Decimal(12000)
     assert from_string.row_numbers == [1]
-    assert len(from_envelope.records) == 3
-    assert from_envelope.records[2]["product_code"] == "TRAY-ALT-B"
+    assert len(from_envelope.records) == 4
+    assert from_envelope.records[2]["product_code"] == "AL-RECYCLED-B"
 
 
 def test_json_parser_rejects_non_object_rows() -> None:
@@ -78,8 +78,8 @@ def test_supplier_contract_accepts_demo_aliases() -> None:
     product = SupplierProductRow.model_validate(fixture["products"][0])
 
     assert product.supplier_country_code == "IN"
-    assert product.product_name == "Current packaging tray"
-    assert product.pcf_kgco2e_per_unit == Decimal("2.8")
+    assert product.product_name == "Current recycled aluminium billet"
+    assert product.pcf_kgco2e_per_unit == Decimal("8.6")
 
 
 def test_import_envelope_does_not_mutate_content_before_checksum() -> None:
@@ -276,7 +276,7 @@ async def test_activity_csv_import_persists_raw_and_normalized_trace() -> None:
     assert result.rejected_count == 0
     assert repository.raw_records[0].row_number == 2
     assert repository.raw_records[0].import_status == "accepted"
-    assert repository.activities[0].normalized_quantity == Decimal("12000.000000")
+    assert repository.activities[0].normalized_quantity == Decimal("10000.000000")
     assert repository.activities[0].supplier_product_id == product_id
     assert repository.source.status == "ready"
     assert session.committed
@@ -537,7 +537,7 @@ class ActivityRepository(RowLimitRepository):
         self.product = SupplierProduct(
             id=product_id,
             company_id=company_id,
-            material_code="PACKAGING-TRAY",
+            material_code="RECYCLED-ALUMINIUM",
             is_active=True,
             created_at=now,
             updated_at=now,
@@ -563,8 +563,8 @@ class ActivityRepository(RowLimitRepository):
     ) -> SupplierProduct | None:
         if (
             company_id == self.company_id
-            and supplier_code == "CURRENT-SUPPLIER"
-            and product_code == "TRAY-CURRENT"
+            and supplier_code == "MAVERICK-CURRENT"
+            and product_code == "AL-CURRENT"
         ):
             return self.product
         return None
@@ -654,8 +654,8 @@ class InactiveSupplierRepository(SupplierRepository):
         self.supplier = Supplier(
             id=uuid4(),
             company_id=company_id,
-            supplier_code="CURRENT-SUPPLIER",
-            name="Current Packaging Co (Synthetic)",
+            supplier_code="MAVERICK-CURRENT",
+            name="Maverick Metals Baseline (Synthetic)",
             country_code="IN",
             status="inactive",
             supplier_metadata={},

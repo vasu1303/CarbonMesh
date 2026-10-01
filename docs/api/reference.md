@@ -4,7 +4,7 @@ Last updated: 2026-10-01
 
 ## Scope
 
-This document describes the 30 paths currently published in OpenAPI. Product
+This document describes the 35 paths currently published in OpenAPI. Product
 routes use one canonical `/api/...` path per implemented operation.
 
 OpenAPI at `http://localhost:8000/docs` is authoritative for complete Pydantic
@@ -56,23 +56,25 @@ the four-module operations that are still missing.
 | POST | `/api/measurement/calculate` | Existing deterministic purchased-material calculation. |
 | POST | `/api/integrations/electricity-maps/test` | Test the server-side provider credential/access safely. |
 | POST | `/api/measurement/grid/history/sync` | Synchronize history with explicit company and site query scope. |
-| GET | `/api/measurement/grid/latest` | Read the latest cached factor with explicit company and site query scope. |
+| GET | `/api/measurement/grid/latest` | Read the latest cached grid-intensity point with explicit company and site query scope. |
 
 The implemented calculation handles purchased-material mass. Hourly Scope 2 is
-not yet implemented, and the historical adapter still persists its cache through
-`carbon.emission_factors`; migration to timestamped
-`carbon.grid_intensity_points` is assigned work.
+not yet implemented. Historical sync stores versioned hourly points
+in `carbon.grid_intensity_points`; the latest-point query reads that store and
+returns both canonical kgCO2e/kWh and the original provider gCO2e/kWh value with
+source-document and evidence provenance, including explicit fixture/live and
+synthetic markers.
 
 ### Suppliers and Procurement
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| GET | `/api/suppliers` | Filter/paginate supplier products with commercial/carbon fields. |
-| GET | `/api/suppliers/{product_id}` | Read a product and its evidence detail. |
+| GET | `/api/procurement/suppliers` | Filter/paginate tenant-scoped suppliers with risk and product counts. |
+| GET | `/api/procurement/products` | Filter/paginate supplier products with commercial/carbon fields. |
 | POST | `/api/procurement/scenarios` | Freeze constraints, assess alternatives, and create a preview. |
 | POST | `/api/procurement/scenarios/{scenario_id}/score` | Re-run deterministic scoring for a frozen scenario. |
 | GET | `/api/procurement/scenarios/{scenario_id}` | Read frozen scenario and comparison matrix. |
-| GET | `/api/procurement/recommendations/{recommendation_id}` | Read recommendation facts, scores, bindings, evidence, and hashes. |
+| GET | `/api/procurement/scenarios/{scenario_id}/recommendation` | Read a scenario's recommendation facts, scores, bindings, evidence, and hashes. |
 
 Scoring applies hard constraints before the weighted 40/25/20/15 carbon,
 evidence, circularity, and operational-fit model. Cost is never a compensating
@@ -81,6 +83,34 @@ result without weakening constraints.
 
 The scenario score operation treats the path `scenario_id` as authoritative;
 its body contains only `company_id`, preventing conflicting scenario IDs.
+Recommendation review payloads retain deterministic binding snapshots, but the
+shared `ledger.fact_bindings` model currently requires an agent run. Direct
+non-agent Procurement requests therefore do not yet persist binding rows.
+
+### Advisory Dispatch
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/api/dispatch/loads` | Filter/paginate tenant-scoped flexible loads and their active operating constraints. |
+| POST | `/api/dispatch/forecasts/sync` | Normalize and persist one immutable 24-hour hourly forecast from the packaged fixture or live Electricity Maps v4. |
+| POST | `/api/dispatch/scenarios` | Freeze the load, method, optional policy, forecast, window, and hard constraints. |
+| POST | `/api/dispatch/scenarios/{scenario_id}/optimize` | Enumerate consecutive windows and persist either a recommendation preview or `no_feasible_option`. |
+| GET | `/api/dispatch/scenarios/{scenario_id}/recommendation` | Read the persisted advisory result and exact approval preview. |
+
+The deterministic optimizer requires whole-hour alignment and a complete
+forecast for every candidate interval. It checks the exact baseline and applies
+availability, duration, maximum-delay, capacity, and blackout constraints
+without interpolation or relaxation. It minimizes calculated emissions and
+uses the earliest feasible start as the tie-break. A recommendation persists
+impact, hashes, evidence, lineage, a ledger event, and a generic approval row;
+the response always has `actuation_authorized: false`. If no window is feasible,
+the typed outcome and rejected-window reasons are persisted and replayed.
+
+Forecast sync defaults to `source_mode: "fixture"`, so the golden path does not
+need a provider credential. `source_mode: "live"` uses Electricity Maps v4 with
+bounded responses and at most one retry for transient failures. Both modes pass
+through the same normalized forecast contract and store points in
+`dispatch.grid_forecasts`.
 
 ### Agent runs and SSE
 
@@ -91,8 +121,9 @@ its body contains only `company_id`, preventing conflicting scenario IDs.
 | GET | `/api/runs/{run_id}/events` | Replay/follow ordered run events as SSE. |
 
 The current workflow is a deterministic Measurement/Procurement router. It does
-not yet invoke the configured model provider, LangGraph, Assurance, or Dispatch.
-SSE is backed by committed run snapshots and supports replay; ordered
+not yet invoke the configured model provider or LangGraph, and it does not
+orchestrate Assurance or Dispatch. SSE is backed by committed run snapshots and
+supports replay; ordered
 `ai.agent_run_steps`, durable resume, provider events, and approval interrupts
 remain work.
 
@@ -107,8 +138,12 @@ remain work.
 | GET | `/api/ledger/events/{event_id}` | Ledger payload, safe evidence metadata, and immediate lineage. |
 
 Approval persistence is now generic in `core.approvals`, but current list and
-decision services still join Procurement recommendations. Assurance and
-Dispatch target handling and approval detail are not implemented.
+decision services still join Procurement recommendations. Dispatch optimization
+creates and returns an exact preview in a generic approval row, but the shared
+approval queue/decision endpoints do not yet handle that target type. Assurance
+target handling and generic approval detail are also not implemented. The same
+shared agent-run requirement prevents direct non-agent Dispatch requests from
+persisting `ledger.fact_bindings` rows.
 
 ## Important operation behavior
 
@@ -119,8 +154,18 @@ server secret. It is disabled when the secret is absent and returns
 `demo_reset_blocked` if any non-synthetic company exists. It replaces all
 synthetic rows atomically and must run only on a disposable rehearsal database.
 
-The current seed is the earlier Nova packaging scenario, not the target
-four-module Maverick scenario.
+The current seed is Maverick Manufacturing (synthetic), Plant B (synthetic), Q3
+2026. It includes the recycled-aluminium Procurement inputs, one Assurance
+template with supporting evidence, and Batch Process 7 with its hard Dispatch
+constraints. Grid history and forecasts are synchronized separately so their
+source snapshots, checksums, and evidence lineage are produced by the normal
+integration paths.
+
+The companion `data/demo/manifest-v1.json` and `expected-results.json` describe
+the complete synthetic four-module fixture and its deterministic golden values.
+They include an hourly Scope 2 result and Assurance claim outcomes, but those
+entries are replay expectations rather than implemented Scope 2 or Assurance
+HTTP workflows.
 
 ### Imports
 
@@ -155,6 +200,20 @@ Decision rechecks actor role, expiry, current payload hash, analysis signature,
 upstream facts/method/scenario, idempotency, and stale state inside the commit
 transaction. It never creates a purchase order.
 
+### Grid history and Dispatch forecast provenance
+
+Historical Electricity Maps points retain their provider timestamp and update
+timestamp, estimation flag, lifecycle/flow-traced method, native intensity,
+method version, point hash, response checksum, source document, and evidence
+item. Repeating an identical provider point version is idempotent; reusing a
+version with different content fails closed.
+
+Dispatch forecast sync requires exactly 24 contiguous hourly points for the
+implemented endpoint. Scenario creation freezes the selected source-document
+checksum and per-point hashes/evidence before optimization. Missing or changed
+forecast inputs, or changed frozen load/method/policy inputs, fail closed rather
+than silently changing a recommendation.
+
 ### Ledger search
 
 `GET /api/ledger/events` requires `company_id` and supports exact event/entity,
@@ -182,10 +241,10 @@ must treat terminal events as final and may fall back to bounded polling.
 ## Known contract gaps
 
 The current OpenAPI intentionally does not claim success endpoints for generic
-source upload, issue resolution, Scope 2 breakdown, Assurance, Dispatch, run
-resume, generic approval detail, recursive ledger traversal, or
-agent-sustainability metrics. Their required paths and ownership are in
-[contract.md](contract.md) and the
+source upload, issue resolution, Scope 2 breakdown, Assurance, run resume,
+generic approval detail/decision support for every target, recursive ledger
+traversal, or agent-sustainability metrics. Their required paths and ownership
+are in [contract.md](contract.md) and the
 [implementation plan](../planning/implementation-plan.md).
 
 ## Maintaining this document

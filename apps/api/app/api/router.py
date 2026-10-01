@@ -7,6 +7,7 @@ from app.api.routes.context import router as context_router
 from app.api.routes.data_quality import router as data_quality_router
 from app.api.routes.db import router as database_router
 from app.api.routes.demo import router as demo_router
+from app.api.routes.dispatch import router as dispatch_router
 from app.api.routes.health import router as health_router
 from app.api.routes.imports import router as imports_router
 from app.api.routes.integrations import router as integrations_router
@@ -27,6 +28,7 @@ api_router.include_router(data_quality_router)
 api_router.include_router(measurements_router)
 api_router.include_router(measurement_lineage_router, tags=["ledger"])
 api_router.include_router(procurement_router, tags=["procurement"])
+api_router.include_router(dispatch_router, tags=["dispatch"])
 api_router.include_router(agents_router)
 api_router.include_router(approvals_router, tags=["approvals"])
 api_router.include_router(audit_router, tags=["audit"])
