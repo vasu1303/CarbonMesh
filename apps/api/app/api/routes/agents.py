@@ -23,7 +23,7 @@ from app.modules.agents.service import AgentRunNotFoundError, AgentRunService
 from app.modules.agents.tasks import agent_task_registry
 from app.modules.agents.workflow import AgentWorkflowExecutor
 
-router = APIRouter(prefix="/agent", tags=["agent"])
+router = APIRouter(tags=["agent"])
 
 
 def _service(session: AsyncSession) -> AgentRunService:
@@ -45,7 +45,7 @@ async def _execute_agent_run(
 
 
 @router.post(
-    "/query",
+    "/agent/requests",
     response_model=AgentQueryAccepted,
     status_code=status.HTTP_202_ACCEPTED,
 )

@@ -32,24 +32,30 @@ from app.db.session import (
 )
 
 EXPECTED_TABLE_DISTRIBUTION: dict[str, int] = {
-    "core": 8,
+    "core": 9,
+    "semantic": 5,
+    "ai": 2,
     "carbon": 10,
-    "ledger": 3,
-    "semantic": 4,
-    "procurement": 7,
+    "ledger": 4,
+    "assurance": 6,
+    "procurement": 5,
+    "dispatch": 5,
 }
-EXPECTED_TABLE_COUNT = 32
+EXPECTED_TABLE_COUNT = 46
 EXPECTED_VECTOR_TYPE = "vector(768)"
 EXPECTED_VECTOR_INDEX = "ix_core_evidence_items_embedding_cosine_hnsw"
 ACTIVE_RECOMMENDATION_INDEX = "uq_proc_recommendations_active_scenario"
-PENDING_APPROVAL_INDEX = "uq_proc_approvals_pending_recommendation"
-BOOTSTRAP_LOCK_KEY = "carbonmesh.database.bootstrap.v1"
+PENDING_APPROVAL_INDEX = "uq_core_approvals_pending_target"
+BOOTSTRAP_LOCK_KEY = "carbonmesh.database.bootstrap"
 MODEL_MODULES = (
     "app.db.models.core",
+    "app.db.models.semantic",
+    "app.db.models.ai",
     "app.db.models.carbon",
     "app.db.models.ledger",
-    "app.db.models.semantic",
+    "app.db.models.assurance",
     "app.db.models.procurement",
+    "app.db.models.dispatch",
 )
 _DELETE_ACTION_CODES = {
     "NO ACTION": "a",
@@ -70,7 +76,7 @@ _VIEW_CONTRACTS = {
         None,
     ),
     "procurement.v_pending_approvals": (
-        "procurement.approvals",
+        "core.approvals",
         "approvals",
         "status = 'pending'",
     ),
@@ -121,7 +127,7 @@ def load_model_registry() -> MetaData:
         )
     if actual_distribution != EXPECTED_TABLE_DISTRIBUTION or unexpected_tables:
         raise DatabaseBootstrapError(
-            "ORM registry does not match the required five-schema table distribution."
+            "ORM registry does not match the required eight-schema table distribution."
         )
     return metadata
 
@@ -136,7 +142,9 @@ async def _fetch_schema_names(connection: AsyncConnection) -> set[str]:
             """
             SELECT nspname
             FROM pg_namespace
-            WHERE nspname IN ('core', 'carbon', 'ledger', 'semantic', 'procurement')
+            WHERE nspname IN
+                ('core', 'semantic', 'ai', 'carbon', 'ledger', 'assurance',
+                 'procurement', 'dispatch')
             """
         )
     )
@@ -150,7 +158,9 @@ async def _fetch_table_names(connection: AsyncConnection) -> set[str]:
             SELECT table_schema, table_name
             FROM information_schema.tables
             WHERE table_type = 'BASE TABLE'
-              AND table_schema IN ('core', 'carbon', 'ledger', 'semantic', 'procurement')
+              AND table_schema IN
+                  ('core', 'semantic', 'ai', 'carbon', 'ledger', 'assurance',
+                   'procurement', 'dispatch')
             """
         )
     )
@@ -163,7 +173,9 @@ async def _fetch_view_names(connection: AsyncConnection) -> set[str]:
             """
             SELECT schemaname, viewname
             FROM pg_views
-            WHERE schemaname IN ('core', 'carbon', 'ledger', 'semantic', 'procurement')
+            WHERE schemaname IN
+                ('core', 'semantic', 'ai', 'carbon', 'ledger', 'assurance',
+                 'procurement', 'dispatch')
             """
         )
     )
@@ -505,7 +517,9 @@ async def _verify_constraints_and_indexes(
             JOIN pg_namespace AS ns ON ns.oid = rel.relnamespace
             LEFT JOIN pg_class AS ref_rel ON ref_rel.oid = con.confrelid
             LEFT JOIN pg_namespace AS ref_ns ON ref_ns.oid = ref_rel.relnamespace
-            WHERE ns.nspname IN ('core', 'carbon', 'ledger', 'semantic', 'procurement')
+            WHERE ns.nspname IN
+                ('core', 'semantic', 'ai', 'carbon', 'ledger', 'assurance',
+                 'procurement', 'dispatch')
               AND con.contype IN ('p', 'u', 'f', 'c')
             """
         )
@@ -535,7 +549,9 @@ async def _verify_constraints_and_indexes(
             JOIN pg_class AS idx_rel ON idx_rel.oid = idx.indexrelid
             JOIN pg_namespace AS ns ON ns.oid = rel.relnamespace
             JOIN pg_am AS am ON am.oid = idx_rel.relam
-            WHERE ns.nspname IN ('core', 'carbon', 'ledger', 'semantic', 'procurement')
+            WHERE ns.nspname IN
+                ('core', 'semantic', 'ai', 'carbon', 'ledger', 'assurance',
+                 'procurement', 'dispatch')
               AND NOT EXISTS (
                   SELECT 1
                   FROM pg_constraint AS con
@@ -563,7 +579,8 @@ async def _verify_columns(connection: AsyncConnection, metadata: MetaData) -> No
               AND attr.attnum > 0
               AND NOT attr.attisdropped
               AND ns.nspname IN
-                  ('core', 'carbon', 'ledger', 'semantic', 'procurement')
+                  ('core', 'semantic', 'ai', 'carbon', 'ledger', 'assurance',
+                   'procurement', 'dispatch')
             """
         )
     )
@@ -654,7 +671,8 @@ async def _verify_uuid_defaults(connection: AsyncConnection, metadata: MetaData)
               AND attr.attname = 'id'
               AND typ.typname = 'uuid'
               AND ns.nspname IN
-                  ('core', 'carbon', 'ledger', 'semantic', 'procurement')
+                  ('core', 'semantic', 'ai', 'carbon', 'ledger', 'assurance',
+                   'procurement', 'dispatch')
             """
         )
     )
@@ -755,7 +773,9 @@ async def _verify_views(connection: AsyncConnection, metadata: MetaData) -> None
             FROM pg_class AS rel
             JOIN pg_namespace AS ns ON ns.oid = rel.relnamespace
             WHERE rel.relkind = 'v'
-              AND ns.nspname IN ('core', 'carbon', 'ledger', 'semantic', 'procurement')
+              AND ns.nspname IN
+                  ('core', 'semantic', 'ai', 'carbon', 'ledger', 'assurance',
+                   'procurement', 'dispatch')
             """
         )
     )
@@ -764,7 +784,9 @@ async def _verify_views(connection: AsyncConnection, metadata: MetaData) -> None
             """
             SELECT table_schema, table_name, column_name, ordinal_position
             FROM information_schema.columns
-            WHERE table_schema IN ('core', 'carbon', 'ledger', 'semantic', 'procurement')
+            WHERE table_schema IN
+                ('core', 'semantic', 'ai', 'carbon', 'ledger', 'assurance',
+                 'procurement', 'dispatch')
               AND (table_schema || '.' || table_name) IN
                   ('carbon.v_measurement_summary',
                    'procurement.v_supplier_comparison',
@@ -794,7 +816,7 @@ async def _verify_partial_unique_indexes(connection: AsyncConnection) -> None:
             JOIN pg_class AS idx_rel ON idx_rel.oid = idx.indexrelid
             JOIN pg_class AS tbl_rel ON tbl_rel.oid = idx.indrelid
             JOIN pg_namespace AS ns ON ns.oid = tbl_rel.relnamespace
-            WHERE ns.nspname = 'procurement'
+            WHERE ns.nspname IN ('core', 'procurement')
               AND idx_rel.relname IN (:recommendation_index, :approval_index)
             """
         ),
@@ -814,7 +836,7 @@ async def _verify_partial_unique_indexes(connection: AsyncConnection) -> None:
     rec_definition_normalized = "".join((rec_definition or "").lower().split())
     if (
         rec_schema != "procurement"
-        or rec_table != "recommendations"
+        or rec_table != "procurement_recommendations"
         or not rec_unique
         or "invalidated_at" not in rec_predicate_normalized
         or "is null" not in rec_predicate_normalized
@@ -831,13 +853,15 @@ async def _verify_partial_unique_indexes(connection: AsyncConnection) -> None:
     approval_predicate_normalized = " ".join((approval_predicate or "").lower().split())
     approval_definition_normalized = "".join((approval_definition or "").lower().split())
     if (
-        approval_schema != "procurement"
+        approval_schema != "core"
         or approval_table != "approvals"
         or not approval_unique
         or "status" not in approval_predicate_normalized
         or "'pending'" not in approval_predicate_normalized
         or "=" not in approval_predicate_normalized
-        or "(company_id,recommendation_id)" not in approval_definition_normalized
+        or "target_id" not in approval_predicate_normalized
+        or "is not null" not in approval_predicate_normalized
+        or "(company_id,target_type,target_id)" not in approval_definition_normalized
     ):
         raise DatabaseBootstrapError("The pending-approval unique index is incompatible.")
 
@@ -951,7 +975,7 @@ async def verify_database_contract(connection: AsyncConnection, metadata: MetaDa
     views = await _fetch_view_names(connection)
 
     if schemas != set(APPLICATION_SCHEMAS):
-        raise DatabaseBootstrapError("The five required application schemas are not installed.")
+        raise DatabaseBootstrapError("The eight required application schemas are not installed.")
     if tables != set(metadata.tables):
         raise DatabaseBootstrapError(
             f"Expected exactly {EXPECTED_TABLE_COUNT} CarbonMesh tables in the required schemas."
@@ -1034,7 +1058,7 @@ async def _run_cli(*, check_only: bool) -> int:
         f"{schema}={count}" for schema, count in EXPECTED_TABLE_DISTRIBUTION.items()
     )
     print(
-        f"CarbonMesh database contract {action}: 32 tables ({schema_summary}), "
+        f"CarbonMesh database contract {action}: 46 tables ({schema_summary}), "
         f"3 views, pgvector enabled. Target: endpoint={target.endpoint_id}, "
         f"database={target.database}."
     )

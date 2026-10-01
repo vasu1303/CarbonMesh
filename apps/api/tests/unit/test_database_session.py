@@ -45,20 +45,36 @@ def test_normalize_neon_url_for_asyncpg_and_tls() -> None:
     assert tls_context.verify_mode == ssl.CERT_REQUIRED
     assert tls_context.minimum_version == ssl.TLSVersion.TLSv1_2
     assert configuration.connect_args["statement_cache_size"] == 0
+    assert configuration.is_neon
+    assert configuration.uses_tls
     assert "do-not-print" not in str(configuration.url)
     assert "do-not-print" not in repr(configuration)
 
 
-def test_normalize_url_rejects_insecure_tls_without_disclosing_secret() -> None:
+def test_normalize_remote_url_rejects_insecure_tls_without_disclosing_secret() -> None:
     secret = "postgresql://owner:do-not-print@example.test/carbonmesh?sslmode=disable"
 
     try:
         normalize_database_url(secret)
     except DatabaseConfigurationError as error:
-        assert "sslmode=require" in str(error)
+        assert "must use sslmode=require" in str(error)
         assert "do-not-print" not in str(error)
     else:  # pragma: no cover - defensive assertion
         raise AssertionError("An insecure database URL must be rejected.")
+
+
+def test_normalize_local_url_allows_explicit_non_tls_connection() -> None:
+    configuration = normalize_database_url(
+        "postgresql://carbonmesh:local-only@db:5432/carbonmesh?sslmode=disable"
+    )
+
+    assert configuration.url.drivername == "postgresql+asyncpg"
+    assert configuration.url.host == "db"
+    assert "sslmode" not in configuration.url.query
+    assert "prepared_statement_cache_size" not in configuration.url.query
+    assert "ssl" not in configuration.connect_args
+    assert not configuration.is_neon
+    assert not configuration.uses_tls
 
 
 def test_normalize_url_rejects_markdown_wrapping_without_disclosing_secret() -> None:

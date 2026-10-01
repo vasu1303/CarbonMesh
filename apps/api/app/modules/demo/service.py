@@ -17,7 +17,7 @@ from app.modules.demo.fixtures import (
     build_demo_records,
 )
 
-DEMO_RESET_LOCK_KEY = "carbonmesh.demo.reset.v1"
+DEMO_RESET_LOCK_KEY = "carbonmesh.demo.reset"
 
 
 class DemoResetBlockedError(RuntimeError):

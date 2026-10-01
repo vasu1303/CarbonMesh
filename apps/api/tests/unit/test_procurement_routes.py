@@ -7,7 +7,7 @@ def test_procurement_router_exposes_the_six_domain_relative_paths() -> None:
     assert paths == {
         ("/suppliers", "GET"),
         ("/suppliers/{product_id}", "GET"),
-        ("/procurement/assessments/run", "POST"),
+        ("/procurement/scenarios/{scenario_id}/score", "POST"),
         ("/procurement/scenarios", "POST"),
         ("/procurement/scenarios/{scenario_id}", "GET"),
         ("/procurement/recommendations/{recommendation_id}", "GET"),

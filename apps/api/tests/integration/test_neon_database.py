@@ -294,7 +294,9 @@ async def _table_oids(connection: AsyncConnection) -> dict[str, int]:
             FROM pg_class AS rel
             JOIN pg_namespace AS ns ON ns.oid = rel.relnamespace
             WHERE rel.relkind IN ('r', 'p')
-              AND ns.nspname IN ('core', 'carbon', 'ledger', 'semantic', 'procurement')
+              AND ns.nspname IN
+                  ('core', 'semantic', 'ai', 'carbon', 'ledger', 'assurance',
+                   'procurement', 'dispatch')
             ORDER BY qualified_name
             """
         )
@@ -308,15 +310,15 @@ async def test_live_contract_is_complete(connection: AsyncConnection) -> None:
 
     await verify_database_contract(connection, metadata)
 
-    assert len(metadata.tables) == 32
-    assert len(await _table_oids(connection)) == 32
+    assert len(metadata.tables) == 46
+    assert len(await _table_oids(connection)) == 46
 
 
 PRESERVATION_COMPANY_ID = UUID("f976c3a6-9706-5abc-9537-f9bb2a167421")
 PRESERVATION_SOURCE_ID = UUID("12ec22c6-119e-56f8-ab04-7961e357b8d5")
 PRESERVATION_DOCUMENT_ID = UUID("d9074294-eae1-5b46-907a-68a2cd8e5d27")
 PRESERVATION_EVIDENCE_ID = UUID("1b3cde20-474c-59a6-b346-b07dc13bfb4a")
-PRESERVATION_COMPANY_CODE = "__carbonmesh_neon_integration_preservation_v1__"
+PRESERVATION_COMPANY_CODE = "__carbonmesh_neon_integration_preservation_initial__"
 
 
 async def _remove_preservation_rows(connection: AsyncConnection) -> None:
@@ -375,7 +377,7 @@ async def _install_preservation_row(connection: AsyncConnection) -> None:
             data_source_id=PRESERVATION_SOURCE_ID,
             filename="preservation.txt",
             content_type="text/plain",
-            checksum=_sha256("neon-bootstrap-preservation-document-v1"),
+            checksum=_sha256("neon-bootstrap-preservation-document-initial"),
             size_bytes=1,
             document_metadata={"integration_test": True},
         )
@@ -401,7 +403,7 @@ async def _install_preservation_row(connection: AsyncConnection) -> None:
                 :company_id,
                 :document_id,
                 'integration_test',
-                'integration:bootstrap-preservation-v1',
+                'integration:bootstrap-preservation-initial',
                 'bootstrap preservation vector',
                 :checksum,
                 '{"integration_test": true}'::jsonb,
@@ -415,7 +417,7 @@ async def _install_preservation_row(connection: AsyncConnection) -> None:
             "id": PRESERVATION_EVIDENCE_ID,
             "company_id": PRESERVATION_COMPANY_ID,
             "document_id": PRESERVATION_DOCUMENT_ID,
-            "checksum": _sha256("neon-bootstrap-preservation-evidence-v1"),
+            "checksum": _sha256("neon-bootstrap-preservation-evidence-initial"),
             "embedding": _vector_literal(axis=0),
             "embedded_at": datetime.now(UTC),
         },
@@ -768,7 +770,7 @@ async def _create_procurement_context(
     )
     recommendation_id = await _insert_row(
         connection,
-        "procurement.recommendations",
+        "procurement.procurement_recommendations",
         company_id=company_id,
         scenario_id=scenario_id,
         recommended_product_id=recommended_product_id,
@@ -794,7 +796,7 @@ async def test_active_recommendation_and_pending_approval_are_unique(
 ) -> None:
     token = uuid4().hex
     context = await _create_procurement_context(connection, token)
-    recommendation = _table("procurement.recommendations")
+    recommendation = _table("procurement.procurement_recommendations")
     existing = (
         await connection.execute(
             select(recommendation).where(recommendation.c.id == context.recommendation_id)
@@ -830,27 +832,27 @@ async def test_active_recommendation_and_pending_approval_are_unique(
     with pytest.raises(IntegrityError) as hash_binding_error:
         async with connection.begin_nested():
             await connection.execute(
-                insert(_table("procurement.approvals")).values(**approval_values)
+                insert(_table("core.approvals")).values(**approval_values)
             )
     assert _sqlstate(hash_binding_error.value) == "23503"
     assert (
         _constraint_name(hash_binding_error.value)
-        == "fk_proc_approvals_recommendation_preview"
+        == "fk_core_approvals_recommendation_preview"
     )
 
     approval_values["preview_hash"] = existing["payload_hash"]
-    await connection.execute(insert(_table("procurement.approvals")).values(**approval_values))
+    await connection.execute(insert(_table("core.approvals")).values(**approval_values))
 
     approval_values["idempotency_key"] = f"approval-{token}-two"
     with pytest.raises(IntegrityError) as approval_error:
         async with connection.begin_nested():
             await connection.execute(
-                insert(_table("procurement.approvals")).values(**approval_values)
+                insert(_table("core.approvals")).values(**approval_values)
             )
     assert _sqlstate(approval_error.value) == "23505"
     assert (
         _constraint_name(approval_error.value)
-        == "uq_proc_approvals_pending_recommendation"
+        == "uq_core_approvals_pending_recommendation"
     )
 
 

@@ -3,13 +3,21 @@ from uuid import UUID
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.modules.semantic.dependencies import get_semantic_service
 
 
 def test_request_validation_errors_are_typed_and_do_not_echo_inputs() -> None:
-    response = TestClient(app).post(
-        "/api/v1/context/resolve",
-        json={"company_id": "do-not-reflect-this-value"},
-    )
+    # Request validation must be tested independently of database configuration.
+    # FastAPI may resolve route dependencies before formatting an invalid body,
+    # so CI without DATABASE_URL would otherwise return the dependency's safe 503.
+    app.dependency_overrides[get_semantic_service] = lambda: object()
+    try:
+        response = TestClient(app).post(
+            "/api/context/resolve",
+            json={"company_id": "do-not-reflect-this-value"},
+        )
+    finally:
+        app.dependency_overrides.pop(get_semantic_service, None)
 
     assert response.status_code == 422
     body = response.json()

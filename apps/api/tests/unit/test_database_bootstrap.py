@@ -78,7 +78,7 @@ def test_bootstrap_registry_matches_authoritative_distribution() -> None:
     }
 
     assert distribution == EXPECTED_TABLE_DISTRIBUTION
-    assert len(metadata.tables) == 32
+    assert len(metadata.tables) == 46
 
 
 def test_non_table_ddl_declares_views_and_immutable_ledger_trigger() -> None:
@@ -144,24 +144,25 @@ def _partial_index_rows(*, recommendation_unique: bool = True) -> list[tuple[Any
     return [
         (
             "procurement",
-            "recommendations",
+            "procurement_recommendations",
             ACTIVE_RECOMMENDATION_INDEX,
             recommendation_unique,
             "invalidated_at IS NULL AND status IN ('pending_approval', 'approved')",
             (
-                "CREATE UNIQUE INDEX x ON procurement.recommendations "
+                "CREATE UNIQUE INDEX x ON procurement.procurement_recommendations "
                 "(company_id, scenario_id) WHERE invalidated_at IS NULL"
             ),
         ),
         (
-            "procurement",
+            "core",
             "approvals",
             PENDING_APPROVAL_INDEX,
             True,
-            "status = 'pending'",
+            "status = 'pending' AND target_id IS NOT NULL",
             (
-                "CREATE UNIQUE INDEX x ON procurement.approvals "
-                "(company_id, recommendation_id) WHERE status = 'pending'"
+                "CREATE UNIQUE INDEX x ON core.approvals "
+                "(company_id, target_type, target_id) WHERE status = 'pending' "
+                "AND target_id IS NOT NULL"
             ),
         ),
     ]
@@ -350,7 +351,7 @@ def _view_rows() -> tuple[list[tuple[Any, ...]], list[tuple[Any, ...]]]:
             None,
         ),
         "procurement.v_pending_approvals": (
-            "procurement.approvals",
+            "core.approvals",
             "approvals",
             "(approvals.status)::text = 'pending'::text",
         ),

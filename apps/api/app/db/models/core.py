@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
@@ -15,6 +16,7 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     Index,
     Integer,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -46,6 +48,14 @@ class Site(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         UniqueConstraint("company_id", "id", name="uq_core_sites_company_id_id"),
         UniqueConstraint("company_id", "code", name="uq_core_sites_company_code"),
         CheckConstraint("country_code ~ '^[A-Z]{2}$'", name="country_code_iso2"),
+        CheckConstraint(
+            "latitude IS NULL OR latitude BETWEEN -90 AND 90",
+            name="latitude_range",
+        ),
+        CheckConstraint(
+            "longitude IS NULL OR longitude BETWEEN -180 AND 180",
+            name="longitude_range",
+        ),
         Index("ix_core_sites_company_active", "company_id", "is_active"),
         {"schema": "core"},
     )
@@ -59,6 +69,9 @@ class Site(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     country_code: Mapped[str] = mapped_column(String(2), nullable=False)
     timezone: Mapped[str] = mapped_column(String(64), nullable=False, server_default="UTC")
+    latitude: Mapped[Decimal | None] = mapped_column(Numeric(9, 6))
+    longitude: Mapped[Decimal | None] = mapped_column(Numeric(9, 6))
+    electricity_maps_zone: Mapped[str | None] = mapped_column(String(100))
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
 
 
@@ -242,6 +255,129 @@ class EvidenceItem(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     embedded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class Approval(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
+    """Generic Preview-Approve-Commit record for every consequential module action.
+
+    ``recommendation_id`` preserves the current procurement service contract while
+    ``target_type``/``target_id`` provide the cross-module approval boundary.
+    New assurance and dispatch services populate the generic target fields; legacy
+    procurement writes remain valid until that service is migrated.
+    """
+
+    __tablename__ = "approvals"
+    __table_args__ = (
+        UniqueConstraint("company_id", "id", name="uq_core_approvals_company_id_id"),
+        UniqueConstraint(
+            "company_id", "idempotency_key", name="uq_core_approvals_idempotency"
+        ),
+        ForeignKeyConstraint(
+            ["company_id", "recommendation_id", "preview_hash", "analysis_signature"],
+            [
+                "procurement.procurement_recommendations.company_id",
+                "procurement.procurement_recommendations.id",
+                "procurement.procurement_recommendations.payload_hash",
+                "procurement.procurement_recommendations.analysis_signature",
+            ],
+            name="fk_core_approvals_recommendation_preview",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["company_id", "requested_by"],
+            ["core.actors.company_id", "core.actors.id"],
+            name="fk_core_approvals_company_requester",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["company_id", "decided_by"],
+            ["core.actors.company_id", "core.actors.id"],
+            name="fk_core_approvals_company_decider",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["company_id", "ledger_event_id"],
+            ["ledger.ledger_events.company_id", "ledger.ledger_events.id"],
+            name="fk_core_approvals_company_ledger",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["company_id", "policy_definition_id"],
+            ["semantic.policy_definitions.company_id", "semantic.policy_definitions.id"],
+            name="fk_core_approvals_company_policy",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint(
+            "target_id IS NOT NULL OR recommendation_id IS NOT NULL",
+            name="target_present",
+        ),
+        CheckConstraint("preview_hash ~ '^[0-9a-f]{64}$'", name="preview_hash_sha256"),
+        CheckConstraint(
+            "analysis_signature ~ '^[0-9a-f]{64}$'", name="signature_sha256"
+        ),
+        CheckConstraint(
+            "context_hash IS NULL OR context_hash ~ '^[0-9a-f]{64}$'",
+            name="context_hash_sha256",
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'approved', 'rejected', 'invalidated', 'expired')",
+            name="status_allowed",
+        ),
+        CheckConstraint(
+            "(status = 'pending' AND decided_by IS NULL AND decided_at IS NULL "
+            "AND ledger_event_id IS NULL) OR "
+            "(status IN ('approved', 'rejected') AND decided_by IS NOT NULL "
+            "AND decided_at IS NOT NULL AND ledger_event_id IS NOT NULL) OR "
+            "(status IN ('invalidated', 'expired') AND decided_by IS NULL "
+            "AND decided_at IS NULL)",
+            name="decision_fields_consistent",
+        ),
+        Index(
+            "uq_core_approvals_pending_target",
+            "company_id",
+            "target_type",
+            "target_id",
+            unique=True,
+            postgresql_where=text("status = 'pending' AND target_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_core_approvals_pending_recommendation",
+            "company_id",
+            "recommendation_id",
+            unique=True,
+            postgresql_where=text(
+                "status = 'pending' AND recommendation_id IS NOT NULL"
+            ),
+        ),
+        Index("ix_core_approvals_status", "company_id", "status"),
+        {"schema": "core"},
+    )
+
+    company_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("core.companies.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    target_type: Mapped[str] = mapped_column(
+        String(100), nullable=False, server_default="procurement_recommendation"
+    )
+    target_id: Mapped[UUID | None] = mapped_column(PostgreSQLUUID(as_uuid=True))
+    recommendation_id: Mapped[UUID | None] = mapped_column(PostgreSQLUUID(as_uuid=True))
+    requested_by: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), nullable=False)
+    decided_by: Mapped[UUID | None] = mapped_column(PostgreSQLUUID(as_uuid=True))
+    ledger_event_id: Mapped[UUID | None] = mapped_column(PostgreSQLUUID(as_uuid=True))
+    policy_definition_id: Mapped[UUID | None] = mapped_column(PostgreSQLUUID(as_uuid=True))
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="pending")
+    preview_payload: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    preview_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    analysis_signature: Mapped[str] = mapped_column(String(64), nullable=False)
+    context_hash: Mapped[str | None] = mapped_column(String(64))
+    idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    decision_note: Mapped[str | None] = mapped_column(Text)
+
+
 class AuditLog(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     __tablename__ = "audit_log"
     __table_args__ = (
@@ -254,7 +390,7 @@ class AuditLog(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
         ),
         ForeignKeyConstraint(
             ["company_id", "agent_run_id"],
-            ["carbon.agent_runs.company_id", "carbon.agent_runs.id"],
+            ["ai.agent_runs.company_id", "ai.agent_runs.id"],
             name="fk_core_audit_company_agent_run",
             ondelete="RESTRICT",
         ),

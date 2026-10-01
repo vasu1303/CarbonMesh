@@ -938,7 +938,7 @@ class ProcurementService:
     ) -> dict[str, Any]:
         product = current_product.product
         return {
-            "schema_version": "procurement-scenario.v1",
+            "schema_version": "procurement-scenario.initial",
             "company_id": request.company_id,
             "site_id": request.site_id,
             "reporting_period_id": request.reporting_period_id,
@@ -1164,7 +1164,7 @@ class ProcurementService:
             key=str,
         )
         return BoundNarrative(
-            template_id="procurement-recommendation.v1",
+            template_id="procurement-recommendation.initial",
             template=recommendation.rationale_template,
             resolved_text=resolved,
             fact_bindings=views,

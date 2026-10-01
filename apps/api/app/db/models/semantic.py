@@ -29,7 +29,8 @@ class SemanticEntity(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         UniqueConstraint("company_id", "id", name="uq_sem_entities_company_id_id"),
         UniqueConstraint("company_id", "entity_type", "key", name="uq_sem_entities_type_key"),
         CheckConstraint(
-            "entity_type IN ('standard', 'material', 'unit', 'supplier', 'product', 'metric')",
+            "entity_type IN ('standard', 'material', 'unit', 'supplier', 'product', "
+            "'metric', 'site', 'load', 'grid_zone', 'requirement')",
             name="entity_type_allowed",
         ),
         Index("ix_sem_entities_company_type", "company_id", "entity_type", "is_active"),
@@ -120,7 +121,8 @@ class MethodDefinition(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "company_id", "method_type", "key", "version", name="uq_sem_methods_type_key_version"
         ),
         CheckConstraint(
-            "method_type IN ('measurement', 'confidence', 'supplier_scoring', 'fact_binding')",
+            "method_type IN ('measurement', 'confidence', 'supplier_scoring', "
+            "'fact_binding', 'claim_validation', 'dispatch_optimization')",
             name="method_type_allowed",
         ),
         CheckConstraint(
@@ -140,6 +142,42 @@ class MethodDefinition(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     version: Mapped[str] = mapped_column(String(50), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     code_version: Mapped[str] = mapped_column(String(100), nullable=False)
+    configuration: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    effective_from: Mapped[date] = mapped_column(Date, nullable=False)
+    effective_to: Mapped[date | None] = mapped_column(Date)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+
+
+class PolicyDefinition(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "policy_definitions"
+    __table_args__ = (
+        UniqueConstraint("company_id", "id", name="uq_sem_policies_company_id_id"),
+        UniqueConstraint(
+            "company_id", "policy_type", "key", "version", name="uq_sem_policies_key_version"
+        ),
+        CheckConstraint(
+            "policy_type IN ('approval', 'evidence', 'data_quality', 'agent_budget', "
+            "'dispatch', 'assurance')",
+            name="policy_type_allowed",
+        ),
+        CheckConstraint(
+            "effective_to IS NULL OR effective_to >= effective_from",
+            name="effective_dates_valid",
+        ),
+        Index("ix_sem_policies_company_type", "company_id", "policy_type", "is_active"),
+        {"schema": "semantic"},
+    )
+
+    company_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("core.companies.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    policy_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    key: Mapped[str] = mapped_column(String(150), nullable=False)
+    version: Mapped[str] = mapped_column(String(50), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
     configuration: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     effective_from: Mapped[date] = mapped_column(Date, nullable=False)
     effective_to: Mapped[date | None] = mapped_column(Date)

@@ -6,6 +6,7 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     Date,
     DateTime,
@@ -24,6 +25,9 @@ from sqlalchemy.dialects.postgresql import UUID as PostgreSQLUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, CreatedAtMixin, TimestampMixin, UUIDPrimaryKeyMixin
+from app.db.models.ai import AgentRun as _AgentRun
+
+AgentRun = _AgentRun
 
 
 class RawActivityRecord(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
@@ -206,6 +210,89 @@ class EmissionFactor(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="active")
 
 
+class GridIntensityPoint(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
+    """Immutable historical grid-intensity point selected by Scope 2 calculations."""
+
+    __tablename__ = "grid_intensity_points"
+    __table_args__ = (
+        UniqueConstraint("company_id", "id", name="uq_carbon_grid_points_company_id_id"),
+        UniqueConstraint(
+            "company_id",
+            "site_id",
+            "zone",
+            "observed_at",
+            "temporal_granularity",
+            "method_version",
+            name="uq_carbon_grid_points_identity",
+        ),
+        UniqueConstraint(
+            "company_id", "source_document_id", "point_hash", name="uq_carbon_grid_points_hash"
+        ),
+        ForeignKeyConstraint(
+            ["company_id", "site_id"],
+            ["core.sites.company_id", "core.sites.id"],
+            name="fk_carbon_grid_points_company_site",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["company_id", "source_document_id"],
+            ["core.source_documents.company_id", "core.source_documents.id"],
+            name="fk_carbon_grid_points_company_document",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["company_id", "evidence_item_id"],
+            ["core.evidence_items.company_id", "core.evidence_items.id"],
+            name="fk_carbon_grid_points_company_evidence",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["company_id", "metric_definition_id"],
+            ["semantic.metric_definitions.company_id", "semantic.metric_definitions.id"],
+            name="fk_carbon_grid_points_company_metric",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint("intensity_gco2e_per_kwh >= 0", name="intensity_nonnegative"),
+        CheckConstraint("point_hash ~ '^[0-9a-f]{64}$'", name="point_hash_sha256"),
+        CheckConstraint(
+            "temporal_granularity IN ('hourly', 'half_hourly', 'quarter_hourly')",
+            name="granularity_allowed",
+        ),
+        Index(
+            "ix_carbon_grid_points_lookup",
+            "company_id",
+            "site_id",
+            "zone",
+            "observed_at",
+        ),
+        {"schema": "carbon"},
+    )
+
+    company_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("core.companies.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    site_id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), nullable=False)
+    source_document_id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), nullable=False)
+    evidence_item_id: Mapped[UUID | None] = mapped_column(PostgreSQLUUID(as_uuid=True))
+    metric_definition_id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), nullable=False)
+    provider: Mapped[str] = mapped_column(String(100), nullable=False)
+    zone: Mapped[str] = mapped_column(String(100), nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    provider_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    temporal_granularity: Mapped[str] = mapped_column(String(30), nullable=False)
+    emission_factor_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    flow_traced: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    is_estimated: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    intensity_gco2e_per_kwh: Mapped[Decimal] = mapped_column(Numeric(24, 9), nullable=False)
+    method_version: Mapped[str] = mapped_column(String(100), nullable=False)
+    point_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    provider_metadata: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+
+
 class CalculationRun(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     __tablename__ = "calculation_runs"
     __table_args__ = (
@@ -213,7 +300,7 @@ class CalculationRun(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
         UniqueConstraint("company_id", "input_hash", name="uq_carbon_calc_runs_input_hash"),
         ForeignKeyConstraint(
             ["company_id", "agent_run_id"],
-            ["carbon.agent_runs.company_id", "carbon.agent_runs.id"],
+            ["ai.agent_runs.company_id", "ai.agent_runs.id"],
             name="fk_carbon_calc_runs_company_agent",
             ondelete="RESTRICT",
         ),
@@ -287,6 +374,17 @@ class EmissionCalculation(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
             name="fk_carbon_calc_company_factor",
             ondelete="RESTRICT",
         ),
+        ForeignKeyConstraint(
+            ["company_id", "grid_intensity_point_id"],
+            ["carbon.grid_intensity_points.company_id", "carbon.grid_intensity_points.id"],
+            name="fk_carbon_calc_company_grid_point",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint(
+            "(emission_factor_id IS NOT NULL AND grid_intensity_point_id IS NULL) OR "
+            "(emission_factor_id IS NULL AND grid_intensity_point_id IS NOT NULL)",
+            name="single_factor_source",
+        ),
         CheckConstraint("normalized_quantity >= 0", name="quantity_nonnegative"),
         CheckConstraint("factor_value >= 0", name="factor_nonnegative"),
         CheckConstraint("emissions_kgco2e >= 0", name="emissions_nonnegative"),
@@ -302,7 +400,8 @@ class EmissionCalculation(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     )
     calculation_run_id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), nullable=False)
     activity_record_id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), nullable=False)
-    emission_factor_id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), nullable=False)
+    emission_factor_id: Mapped[UUID | None] = mapped_column(PostgreSQLUUID(as_uuid=True))
+    grid_intensity_point_id: Mapped[UUID | None] = mapped_column(PostgreSQLUUID(as_uuid=True))
     normalized_quantity: Mapped[Decimal] = mapped_column(Numeric(24, 6), nullable=False)
     quantity_unit: Mapped[str] = mapped_column(String(50), nullable=False)
     factor_value: Mapped[Decimal] = mapped_column(Numeric(24, 12), nullable=False)
@@ -520,61 +619,3 @@ class VarianceAlert(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     variance_pct: Mapped[Decimal | None] = mapped_column(Numeric(9, 4))
     severity: Mapped[str] = mapped_column(String(20), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="open")
-
-
-class AgentRun(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
-    __tablename__ = "agent_runs"
-    __table_args__ = (
-        UniqueConstraint("company_id", "id", name="uq_carbon_agent_runs_company_id_id"),
-        UniqueConstraint("company_id", "trace_id", name="uq_carbon_agent_runs_trace"),
-        ForeignKeyConstraint(
-            ["company_id", "actor_id"],
-            ["core.actors.company_id", "core.actors.id"],
-            name="fk_carbon_agent_company_actor",
-            ondelete="RESTRICT",
-        ),
-        ForeignKeyConstraint(
-            ["company_id", "parent_run_id"],
-            ["carbon.agent_runs.company_id", "carbon.agent_runs.id"],
-            name="fk_carbon_agent_company_parent",
-            ondelete="RESTRICT",
-        ),
-        CheckConstraint(
-            "terminal_state IN ('needs_clarification', 'no_data', 'validation_error', "
-            "'unsupported', 'no_feasible_option', 'failed_validation', 'budget_exhausted', "
-            "'approval_invalidated', 'completed', 'running', 'failed')",
-            name="terminal_state_allowed",
-        ),
-        CheckConstraint("model_calls >= 0 AND model_calls <= 3", name="model_calls_budget"),
-        CheckConstraint("tool_calls >= 0 AND tool_calls <= 6", name="tool_calls_budget"),
-        CheckConstraint("retry_count >= 0 AND retry_count <= 1", name="retry_budget"),
-        Index("ix_carbon_agent_runs_trace", "trace_id"),
-        Index("ix_carbon_agent_runs_state", "company_id", "terminal_state"),
-        {"schema": "carbon"},
-    )
-
-    company_id: Mapped[UUID] = mapped_column(
-        PostgreSQLUUID(as_uuid=True),
-        ForeignKey("core.companies.id", ondelete="RESTRICT"),
-        nullable=False,
-    )
-    actor_id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), nullable=False)
-    parent_run_id: Mapped[UUID | None] = mapped_column(PostgreSQLUUID(as_uuid=True))
-    trace_id: Mapped[str] = mapped_column(String(100), nullable=False)
-    workflow: Mapped[str] = mapped_column(String(50), nullable=False)
-    stage: Mapped[str] = mapped_column(String(100), nullable=False)
-    terminal_state: Mapped[str] = mapped_column(String(40), nullable=False, server_default="running")
-    context_envelope: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
-    plan: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
-    result: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
-    telemetry: Mapped[dict[str, Any]] = mapped_column(
-        JSONB, nullable=False, server_default=text("'{}'::jsonb")
-    )
-    model_calls: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
-    tool_calls: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
-    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
-    started_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")
-    )
-    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    error_code: Mapped[str | None] = mapped_column(String(100))

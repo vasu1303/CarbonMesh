@@ -434,7 +434,7 @@ def build_demo_records() -> Sequence[DeclarativeBase]:
             company_id=DEMO_COMPANY_ID,
             source_document_id=FACTOR_DOCUMENT_ID,
             evidence_type="emission_factor",
-            locator="factor:TRAY-CURRENT-PCF:v1.0.0",
+            locator="factor:TRAY-CURRENT-PCF:initial",
             content_text=factor_evidence_content,
             checksum=hashlib.sha256(factor_document).hexdigest(),
             evidence_metadata={"synthetic": True, "geography": "IN"},

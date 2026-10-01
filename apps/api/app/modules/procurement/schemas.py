@@ -159,6 +159,12 @@ class AssessmentRunRequest(ProcurementSchema):
     scenario_id: UUID
 
 
+class ScoreScenarioRequest(ProcurementSchema):
+    """Tenant scope for a scenario identified authoritatively by the URL path."""
+
+    company_id: UUID
+
+
 class AssessmentRunResult(ProcurementSchema):
     scenario_id: UUID
     method: ScoringMethod
