@@ -246,6 +246,7 @@ def test_maverick_fixture_generator_replays_byte_for_byte(tmp_path: Path) -> Non
     for artifact in manifest["artifacts"]:
         filename = Path(artifact["path"]).name
         assert (tmp_path / filename).read_bytes() == (fixture_directory / filename).read_bytes()
+    assert b"\r\n" not in (tmp_path / "electricity-hourly.csv").read_bytes()
 
     expected = json.loads((tmp_path / "expected-results.json").read_text(encoding="utf-8"))
     assert expected["fixture_id"] == "maverick-q3-2026-v1"

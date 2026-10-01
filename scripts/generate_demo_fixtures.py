@@ -140,7 +140,7 @@ def build_electricity_fixture() -> tuple[int, Decimal]:
 
     path = DEMO / "electricity-hourly.csv"
     with path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
+        writer = csv.DictWriter(handle, fieldnames=list(rows[0]), lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
     return len(rows), valid_scope2.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)

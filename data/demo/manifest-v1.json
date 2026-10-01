@@ -10,7 +10,7 @@
     },
     {
       "path": "data/demo/electricity-hourly.csv",
-      "sha256": "8097515d4c504e5304e24625acc96210b62cac5f15ebec7b641427ac12f797c2"
+      "sha256": "5496f6af762f4be2ddb73b4ae92e9fce6e9be2ab45df9fe16b0b8953bae3ceef"
     },
     {
       "path": "data/demo/suppliers.json",
@@ -50,7 +50,7 @@
     },
     {
       "path": "data/demo/expected-results.json",
-      "sha256": "c841d3c3a4cde9e2bb981008dfc21fe38a74cef3a1d9edcec431acd4905e23fd"
+      "sha256": "de9e322dd3b2425b9a97376b0c5cd2d48225d0397ee05beb82a26c2d6fb89de5"
     },
     {
       "path": "data/demo/api_e2e_expected.json",

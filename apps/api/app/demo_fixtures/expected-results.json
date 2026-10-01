@@ -8,7 +8,7 @@
   },
   "fixture_inputs": {
     "activity.csv": "94ed03b87f3da03816893c5061a9143f47e1f17fa50e73984d22ba1845ca756f",
-    "electricity-hourly.csv": "8097515d4c504e5304e24625acc96210b62cac5f15ebec7b641427ac12f797c2",
+    "electricity-hourly.csv": "5496f6af762f4be2ddb73b4ae92e9fce6e9be2ab45df9fe16b0b8953bae3ceef",
     "suppliers.json": "7b2061272ee4412b2bf95ccff36458006c9502a6220faa5baee2e5441402601b",
     "factor-evidence.txt": "f9d6f6355c286226d07ffc8d565b67fd3ae1ba796fbc04a9be9eb482919bdfa0",
     "assurance-standard.json": "2c300fcd5f99f9266c80b55294a421354d55cbc0fbc790b4188776cbcc4449d2",
@@ -19,7 +19,7 @@
     "grid-forecast-48h.json": "b281d2310ef5206f2c7dbf2dcb607a225d4ed50c2833ef4dc34663f2989eb29d",
     "grid-forecast-72h.json": "04c4830a7b4467a9c5c2c498a0aea93bd4064d252f0c3c1da34221b813f540db"
   },
-  "fixture_input_hash": "b0ad9b41ffc4116e7cdd3de92cea85b38638aa51a46fccee0492cc040b25dd96",
+  "fixture_input_hash": "02e3525a1f7ab92d9642bf2b84abd3f1ea2ebc9f7a275788f9b167bb9580952b",
   "synthetic": true,
   "company": "Maverick Manufacturing (synthetic)",
   "site": "Plant B (synthetic)",
@@ -51,7 +51,7 @@
       "missing_grid_intervals": 1,
       "estimated_grid_points": 1
     },
-    "input_hash": "e49814918851087c39cbde01ace8d69814f3ab24f9f90a448caa7e2b2a15e354",
+    "input_hash": "ab59a97a16d76d2d721d60635dafe5afdf24a7898acd2082126e9797d5a98ac0",
     "output_hash": "3319998d8baea3bee816b0fce735dfef6f3eb13025337704732ac3cc0c51c073"
   },
   "assurance": {
