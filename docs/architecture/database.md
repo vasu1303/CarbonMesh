@@ -189,9 +189,10 @@ single-module run and the four-module path.
 | `carbon_baselines` | Context/metric baseline value, method and effective dates. |
 | `variance_alerts` | Measurement-to-baseline variance, threshold and workflow state. |
 
-The existing Electricity Maps adapter still writes an `emission_factors`
-cache. Moving that service to `grid_intensity_points`, then using exact
-timestamp alignment for Scope 2, is remaining application work.
+The Electricity Maps history adapter writes immutable, timestamped
+`grid_intensity_points` with source-document and evidence provenance. Exact
+timestamp alignment and calculation of hourly Scope 2 measurements remain
+application work.
 
 ### `ledger`
 

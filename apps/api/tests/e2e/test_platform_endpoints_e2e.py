@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import func, select
 
-from app.db.models.core import Site
+from app.db.models.carbon import EmissionFactor, GridIntensityPoint
+from app.db.models.core import DataSource, Site
 from app.main import app
+from app.modules.integrations import repository as integration_repository
 from app.modules.integrations.electricity_maps import get_electricity_maps_client
 from tests.e2e.conftest import E2EContext
 
@@ -76,7 +80,7 @@ async def test_approval_decision_validates_hash_and_is_idempotent(
             "carbon_measurement_id": str(ids.measurement_id),
             "method_definition_id": str(ids.scoring_method_id),
             "requested_by": str(ids.procurement_manager_id),
-            "quantity": "12000",
+            "quantity": "10000",
             "quantity_unit": "kg",
             "max_cost_increase_pct": "5",
             "max_lead_time_days": 20,
@@ -178,7 +182,7 @@ async def test_approval_decision_validates_hash_and_is_idempotent(
 
 
 @pytest.mark.asyncio
-async def test_electricity_maps_company_zone_cache_is_shared_across_sites(
+async def test_electricity_maps_history_points_are_immutable_and_site_scoped(
     api_client,
     e2e_context: E2EContext,
 ) -> None:
@@ -213,17 +217,33 @@ async def test_electricity_maps_company_zone_cache_is_shared_across_sites(
             "start": "2026-09-29T00:00:00Z",
             "end": "2026-09-29T03:00:00Z",
         }
-        sync_response = await api_client.post(
-            "/api/measurement/grid/history/sync",
-            params={**company_query, "site_id": str(ids.site_id)},
-            json=sync_payload,
+        first_response, concurrent_response = await asyncio.gather(
+            api_client.post(
+                "/api/measurement/grid/history/sync",
+                params={**company_query, "site_id": str(ids.site_id)},
+                json=sync_payload,
+            ),
+            api_client.post(
+                "/api/measurement/grid/history/sync",
+                params={**company_query, "site_id": str(ids.site_id)},
+                json=sync_payload,
+            ),
+        )
+        responses = [first_response, concurrent_response]
+        assert all(response.status_code == 200 for response in responses), [
+            response.text for response in responses
+        ]
+        assert sorted(response.json()["inserted_points"] for response in responses) == [0, 2]
+        assert sorted(response.json()["existing_points"] for response in responses) == [0, 2]
+        sync_response = next(
+            response for response in responses if response.json()["inserted_points"] == 2
         )
         assert sync_response.status_code == 200, sync_response.text
         sync = sync_response.json()
         assert sync["zone"] == "IN"
         assert sync["zone_resolution"] == "configured"
         assert sync["received_points"] == 2
-        assert sync["inserted_factors"] == 2
+        assert sync["inserted_points"] == 2
         assert sync["estimated_points"] == 1
 
         repeated_response = await api_client.post(
@@ -232,8 +252,8 @@ async def test_electricity_maps_company_zone_cache_is_shared_across_sites(
             json=sync_payload,
         )
         assert repeated_response.status_code == 200, repeated_response.text
-        assert repeated_response.json()["inserted_factors"] == 0
-        assert repeated_response.json()["existing_factors"] == 2
+        assert repeated_response.json()["inserted_points"] == 0
+        assert repeated_response.json()["existing_points"] == 2
 
         second_site_sync = await api_client.post(
             "/api/measurement/grid/history/sync",
@@ -243,8 +263,30 @@ async def test_electricity_maps_company_zone_cache_is_shared_across_sites(
         assert second_site_sync.status_code == 200, second_site_sync.text
         assert second_site_sync.json()["zone"] == "IN"
         assert second_site_sync.json()["zone_resolution"] == "country_exact"
-        assert second_site_sync.json()["inserted_factors"] == 0
-        assert second_site_sync.json()["existing_factors"] == 2
+        assert second_site_sync.json()["inserted_points"] == 2
+        assert second_site_sync.json()["existing_points"] == 0
+
+        async with e2e_context.session_factory() as session:
+            assert (
+                await session.scalar(select(func.count()).select_from(GridIntensityPoint))
+                == 4
+            )
+            assert (
+                await session.scalar(
+                    select(func.count())
+                    .select_from(DataSource)
+                    .where(
+                        DataSource.company_id == ids.company_id,
+                        DataSource.site_id == ids.site_id,
+                        DataSource.external_reference
+                        == integration_repository.ELECTRICITY_MAPS_EXTERNAL_REFERENCE,
+                    )
+                )
+                == 1
+            )
+            # Historical provider points must not be smuggled back into the
+            # generic purchased-material factor catalogue.
+            assert await session.scalar(select(func.count()).select_from(EmissionFactor)) == 1
 
         latest_response = await api_client.get(
             "/api/measurement/grid/latest",
@@ -257,7 +299,7 @@ async def test_electricity_maps_company_zone_cache_is_shared_across_sites(
         assert latest["provider_value_gco2eq_per_kwh"] == "480"
         assert latest["is_estimated"] is True
         assert latest["provenance"]["response_checksum"] == sync["response_checksum"]
-        assert latest["provenance"]["cache_scope"] == "company_zone"
+        assert latest["provenance"]["cache_scope"] == "site_zone"
 
         second_site_latest_response = await api_client.get(
             "/api/measurement/grid/latest",
@@ -265,10 +307,12 @@ async def test_electricity_maps_company_zone_cache_is_shared_across_sites(
         )
         assert second_site_latest_response.status_code == 200, second_site_latest_response.text
         second_site_latest = second_site_latest_response.json()
-        assert second_site_latest["factor_id"] == latest["factor_id"]
+        assert second_site_latest["grid_intensity_point_id"] != latest[
+            "grid_intensity_point_id"
+        ]
         assert second_site_latest["value"] == latest["value"]
         assert second_site_latest["zone"] == "IN"
-        assert second_site_latest["provenance"]["source_site_id"] == str(ids.site_id)
+        assert second_site_latest["provenance"]["source_site_id"] == str(second_site_id)
 
         wrong_tenant_response = await api_client.get(
             "/api/measurement/grid/latest",

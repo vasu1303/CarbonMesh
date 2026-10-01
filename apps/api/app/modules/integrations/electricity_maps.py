@@ -5,7 +5,7 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Protocol
+from typing import Any, ClassVar, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -32,6 +32,8 @@ class ElectricityMapsProviderError(RuntimeError):
 
 
 class ElectricityMapsProvider(Protocol):
+    is_synthetic: bool
+
     async def list_zones(self) -> Mapping[str, Any]: ...
 
     async def get_carbon_intensity_range(
@@ -43,6 +45,14 @@ class ElectricityMapsProvider(Protocol):
         disable_estimations: bool = False,
     ) -> Mapping[str, Any]: ...
 
+    async def get_carbon_intensity_forecast(
+        self,
+        *,
+        zone: str,
+        horizon_hours: int = 24,
+        disable_estimations: bool = False,
+    ) -> Mapping[str, Any]: ...
+
 
 @dataclass(frozen=True, slots=True)
 class ElectricityMapsHttpClient:
@@ -50,6 +60,7 @@ class ElectricityMapsHttpClient:
 
     token: SecretStr | None
     timeout_seconds: float = 10.0
+    is_synthetic: ClassVar[bool] = False
 
     async def list_zones(self) -> Mapping[str, Any]:
         return await self._get_json("/zones")
@@ -73,6 +84,37 @@ class ElectricityMapsHttpClient:
                 "flowTraced": "true",
                 "disableCallerLookup": "true",
                 "disableEstimations": str(disable_estimations).lower(),
+            },
+        )
+
+    async def get_carbon_intensity_forecast(
+        self,
+        *,
+        zone: str,
+        horizon_hours: int = 24,
+        disable_estimations: bool = False,
+    ) -> Mapping[str, Any]:
+        if horizon_hours not in {6, 24, 48, 72}:
+            raise ElectricityMapsProviderError(
+                "Electricity Maps forecast horizon must be 6, 24, 48, or 72 hours.",
+                code="integration_invalid_forecast_horizon",
+                retryable=False,
+            )
+        if disable_estimations:
+            # Forecast values are estimates by definition and the v4 forecast
+            # endpoint does not expose the historical disableEstimations filter.
+            raise ElectricityMapsProviderError(
+                "Electricity Maps forecasts require estimated values.",
+                code="integration_forecast_estimations_required",
+                retryable=False,
+            )
+        return await self._get_json(
+            "/carbon-intensity/forecast",
+            params={
+                "zone": zone,
+                "horizonHours": str(horizon_hours),
+                "temporalGranularity": "hourly",
+                "disableCallerLookup": "true",
             },
         )
 
@@ -122,6 +164,12 @@ class ElectricityMapsHttpClient:
                         "Electricity Maps rate limited the request.",
                         code="integration_rate_limited",
                     ) from None
+                if 400 <= error.code < 500:
+                    raise ElectricityMapsProviderError(
+                        "Electricity Maps rejected the request.",
+                        code="integration_request_rejected",
+                        retryable=False,
+                    ) from None
                 raise ElectricityMapsProviderError(
                     "Electricity Maps returned an unsuccessful response."
                 ) from None
@@ -152,15 +200,21 @@ class ElectricityMapsHttpClient:
                 )
             return payload
 
-        try:
-            return await asyncio.wait_for(
-                asyncio.to_thread(request_json),
-                timeout=self.timeout_seconds + 1,
-            )
-        except TimeoutError:
-            raise ElectricityMapsProviderError(
-                "Electricity Maps could not be reached within the configured timeout."
-            ) from None
+        for attempt in range(2):
+            try:
+                return await asyncio.wait_for(
+                    asyncio.to_thread(request_json),
+                    timeout=self.timeout_seconds + 1,
+                )
+            except ElectricityMapsProviderError as error:
+                if not error.retryable or attempt == 1:
+                    raise
+            except TimeoutError:
+                if attempt == 1:
+                    raise ElectricityMapsProviderError(
+                        "Electricity Maps could not be reached within the configured timeout."
+                    ) from None
+        raise AssertionError("bounded provider retry loop did not terminate")  # pragma: no cover
 
 
 def get_electricity_maps_client() -> ElectricityMapsProvider:

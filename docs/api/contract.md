@@ -26,7 +26,7 @@ Status meanings:
 | # | Method | Route | Priority | Current status | Owner |
 | ---: | --- | --- | --- | --- | --- |
 | 1 | GET | `/api/health` | P0 | Implemented process health; dependency readiness partial | Dev 2 |
-| 2 | POST | `/api/demo/reset` | P0 | Implemented for the earlier fixture; target seed missing | Dev 2 |
+| 2 | POST | `/api/demo/reset` | P0 | Implemented for the Maverick synthetic seed | Dev 2 |
 | 3 | POST | `/api/sources/upload` | P0 | Missing generic document/evidence upload | Dev 3 |
 | 4 | POST | `/api/activities/import` | P0 | Implemented for existing activity input; hourly electricity partial | Dev 2 |
 | 5 | GET | `/api/quality/issues` | P0 | Implemented | Dev 2 |
@@ -35,8 +35,8 @@ Status meanings:
 | 8 | GET | `/api/runs/{run_id}` | P0 | Implemented | Dev 5 |
 | 9 | GET | `/api/runs/{run_id}/events` | P0 | Implemented persisted SSE; node/interrupt events partial | Dev 5 |
 | 10 | POST | `/api/runs/{run_id}/resume` | P0 | Missing durable resume/revalidation | Dev 5 |
-| 11 | POST | `/api/measurement/grid/history/sync` | P0 | Implemented existing history adapter; timestamped-point persistence missing | Dev 4 |
-| 12 | GET | `/api/measurement/grid/latest` | P1 | Implemented existing factor-cache read | Dev 4 |
+| 11 | POST | `/api/measurement/grid/history/sync` | P0 | Implemented with timestamped `carbon.grid_intensity_points` and evidence provenance | Dev 4 |
+| 12 | GET | `/api/measurement/grid/latest` | P1 | Implemented timestamped-point read with provenance | Dev 4 |
 | 13 | POST | `/api/measurement/calculate` | P0 | Implemented purchased-material calculation; Scope 2 missing | Dev 2 |
 | 14 | GET | `/api/measurements` | P0 | Implemented | Dev 2 |
 | 15 | GET | `/api/measurements/{measurement_id}` | P0 | Implemented | Dev 2 |
@@ -47,22 +47,31 @@ Status meanings:
 | 20 | GET | `/api/assurance/drafts/{draft_id}` | P0 | Missing | Dev 3 |
 | 21 | POST | `/api/assurance/drafts/{draft_id}/validate` | P0 | Missing | Dev 3 |
 | 22 | GET | `/api/assurance/drafts/{draft_id}/evidence-pack` | P1 | Missing | Dev 3 |
-| 23 | GET | `/api/procurement/suppliers` | P0 | Partial: combined supplier/product query exists under `/api/suppliers` | Dev 4 |
-| 24 | GET | `/api/procurement/products` | P0 | Partial: combined supplier/product query exists under `/api/suppliers` | Dev 4 |
+| 23 | GET | `/api/procurement/suppliers` | P0 | Implemented | Dev 4 |
+| 24 | GET | `/api/procurement/products` | P0 | Implemented | Dev 4 |
 | 25 | POST | `/api/procurement/scenarios` | P0 | Implemented | Dev 4 |
 | 26 | POST | `/api/procurement/scenarios/{scenario_id}/score` | P0 | Implemented | Dev 4 |
-| 27 | GET | `/api/procurement/scenarios/{scenario_id}/recommendation` | P0 | Partial: current detail query reads by recommendation ID | Dev 4 |
-| 28 | GET | `/api/dispatch/loads` | P0 | Storage exists; API/service missing | Dev 4 |
-| 29 | POST | `/api/dispatch/forecasts/sync` | P0 | Storage exists; API/service missing | Dev 4 |
-| 30 | POST | `/api/dispatch/scenarios` | P0 | Storage exists; API/service missing | Dev 4 |
-| 31 | POST | `/api/dispatch/scenarios/{scenario_id}/optimize` | P0 | Missing | Dev 4 |
-| 32 | GET | `/api/dispatch/scenarios/{scenario_id}/recommendation` | P0 | Missing | Dev 4 |
+| 27 | GET | `/api/procurement/scenarios/{scenario_id}/recommendation` | P0 | Implemented | Dev 4 |
+| 28 | GET | `/api/dispatch/loads` | P0 | Implemented advisory load/constraint query | Dev 4 |
+| 29 | POST | `/api/dispatch/forecasts/sync` | P0 | Implemented 24-hour fixture/live sync and immutable forecast persistence | Dev 4 |
+| 30 | POST | `/api/dispatch/scenarios` | P0 | Implemented frozen advisory scenario creation | Dev 4 |
+| 31 | POST | `/api/dispatch/scenarios/{scenario_id}/optimize` | P0 | Implemented deterministic optimization, preview, and no-feasible result | Dev 4 |
+| 32 | GET | `/api/dispatch/scenarios/{scenario_id}/recommendation` | P0 | Implemented advisory result and embedded preview read | Dev 4 |
 | 33 | GET | `/api/approvals` | P0 | Implemented for Procurement; generic queue partial | Dev 2 |
 | 34 | GET | `/api/approvals/{approval_id}` | P0 | Missing exact preview detail | Dev 2 |
 | 35 | POST | `/api/approvals/{approval_id}/decision` | P0 | Implemented for Procurement; generic targets partial | Dev 2 |
 | 36 | GET | `/api/ledger/events` | P0 | Implemented tenant-scoped bounded search | Dev 2 |
 | 37 | GET | `/api/ledger/events/{event_id}` | P0 | Implemented safe evidence and immediate-neighbor detail | Dev 2 |
 | 38 | GET | `/api/metrics/agent-sustainability` | P0 | Missing | Dev 5 |
+
+The implemented Dispatch routes are advisory only. Optimization creates an
+exact `dispatch_recommendation` preview in `core.approvals`, but rows 33-35
+remain the shared approval owner's contract: the current queue and decision
+service are still Procurement-specific, and generic approval detail is missing.
+The shared `ledger.fact_bindings` model also still requires an agent run, so
+direct non-agent Procurement and Dispatch commands retain binding snapshots but
+cannot persist binding rows. No Dispatch route purchases, schedules, controls,
+or actuates equipment.
 
 ## Commands and idempotency
 

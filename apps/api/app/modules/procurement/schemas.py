@@ -33,6 +33,27 @@ class EvidenceDetail(EvidenceSummary):
     updated_at: datetime
 
 
+class SupplierSummary(ProcurementSchema):
+    id: UUID
+    supplier_code: str
+    name: str
+    country_code: str
+    status: str
+    risk: str
+    metadata: dict[str, Any]
+    product_count: int = Field(ge=0)
+    active_product_count: int = Field(ge=0)
+    created_at: datetime
+    updated_at: datetime
+
+
+class SupplierList(ProcurementSchema):
+    items: list[SupplierSummary]
+    total: int = Field(ge=0)
+    limit: int = Field(ge=1)
+    offset: int = Field(ge=0)
+
+
 class SupplierProductSummary(ProcurementSchema):
     id: UUID
     supplier_id: UUID

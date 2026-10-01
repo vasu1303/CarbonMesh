@@ -30,6 +30,7 @@ from app.modules.procurement.repository import (
     ProcurementRepository,
     ProductRecord,
     ScenarioDependencies,
+    SupplierRecord,
 )
 from app.modules.procurement.review import (
     REVIEW_SNAPSHOT_VERSION,
@@ -59,9 +60,11 @@ from app.modules.procurement.schemas import (
     ScoreComponents,
     ScoringMethod,
     ScoringWeights,
+    SupplierList,
     SupplierProductDetail,
     SupplierProductList,
     SupplierProductSummary,
+    SupplierSummary,
 )
 from app.modules.procurement.scoring import (
     CARBON_QUANTUM,
@@ -95,10 +98,39 @@ class ProcurementService:
         self.session = session
         self.repository = ProcurementRepository(session)
 
+    async def list_suppliers(
+        self,
+        *,
+        company_id: UUID,
+        country_code: str | None,
+        active_only: bool,
+        search: str | None,
+        limit: int,
+        offset: int,
+    ) -> SupplierList:
+        try:
+            rows, total = await self.repository.list_suppliers(
+                company_id=company_id,
+                country_code=country_code,
+                active_only=active_only,
+                search=search,
+                limit=limit,
+                offset=offset,
+            )
+        except SQLAlchemyError as error:
+            raise self._database_unavailable() from error
+        return SupplierList(
+            items=[self._supplier_summary(row) for row in rows],
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
+
     async def list_supplier_products(
         self,
         *,
         company_id: UUID,
+        supplier_id: UUID | None,
         material_code: str | None,
         category: str | None,
         active_only: bool,
@@ -109,6 +141,7 @@ class ProcurementService:
         try:
             rows, total = await self.repository.list_products(
                 company_id=company_id,
+                supplier_id=supplier_id,
                 material_code=material_code,
                 category=category,
                 active_only=active_only,
@@ -320,6 +353,45 @@ class ProcurementService:
             )
             if recommendation is None:
                 raise not_found("recommendation", recommendation_id)
+            return await self._recommendation_detail(recommendation)
+        except ProcurementError:
+            raise
+        except SQLAlchemyError as error:
+            raise self._database_unavailable() from error
+
+    async def get_scenario_recommendation(
+        self, *, company_id: UUID, scenario_id: UUID
+    ) -> RecommendationDetail:
+        try:
+            recommendation = await self.repository.get_recommendation_for_scenario(
+                company_id=company_id,
+                scenario_id=scenario_id,
+            )
+            if recommendation is None:
+                scenario = await self.repository.get_scenario(
+                    company_id=company_id,
+                    scenario_id=scenario_id,
+                )
+                if scenario is None:
+                    raise not_found("procurement_scenario", scenario_id)
+                raise ProcurementError(
+                    code="recommendation_not_found",
+                    message="The procurement scenario does not have a recommendation.",
+                    status_code=404,
+                    field_details=[{"field": "scenario_id", "value": str(scenario_id)}],
+                )
+            return await self._recommendation_detail(recommendation)
+        except ProcurementError:
+            raise
+        except SQLAlchemyError as error:
+            raise self._database_unavailable() from error
+
+    async def _recommendation_detail(
+        self, recommendation: Recommendation
+    ) -> RecommendationDetail:
+        recommendation_id = recommendation.id
+        company_id = recommendation.company_id
+        try:
             if (
                 payload_sha256(stored_recommendation_payload(recommendation))[1]
                 != recommendation.payload_hash
@@ -1007,6 +1079,22 @@ class ProcurementService:
             is_active=product.is_active,
             evidence_item_id=product.evidence_item_id,
             evidence_available=product.evidence_item_id is not None,
+        )
+
+    def _supplier_summary(self, record: SupplierRecord) -> SupplierSummary:
+        supplier = record.supplier
+        return SupplierSummary(
+            id=supplier.id,
+            supplier_code=supplier.supplier_code,
+            name=supplier.name,
+            country_code=supplier.country_code,
+            status=supplier.status,
+            risk=infer_supplier_risk(supplier.supplier_metadata),
+            metadata=supplier.supplier_metadata,
+            product_count=record.product_count,
+            active_product_count=record.active_product_count,
+            created_at=supplier.created_at,
+            updated_at=supplier.updated_at,
         )
 
     def _product_facts(self, record: ProductRecord) -> ProductFacts:

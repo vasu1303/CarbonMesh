@@ -107,25 +107,24 @@ async def test_all_requested_apis_as_one_synthetic_journey(
         }
 
         suppliers_response = await api_client.get(
-            "/api/suppliers",
-            params={**company_params, "material_code": "PACKAGING-TRAY"},
+            "/api/procurement/products",
+            params={**company_params, "material_code": "RECYCLED-ALUMINIUM"},
         )
         assert suppliers_response.status_code == 200
         suppliers = suppliers_response.json()
-        assert suppliers["total"] == 3
+        assert suppliers["total"] == 4
         assert all(item["evidence_available"] for item in suppliers["items"])
         assert {item["risk"] for item in suppliers["items"]} == {"low", "medium"}
 
-        supplier_response = await api_client.get(
-            f"/api/suppliers/{ids.recommended_product_id}",
-            params=company_params,
+        supplier = next(
+            item
+            for item in suppliers["items"]
+            if item["id"] == str(ids.recommended_product_id)
         )
-        assert supplier_response.status_code == 200
-        supplier = supplier_response.json()
         assert Decimal(supplier["pcf_kgco2e_per_unit"]) == Decimal(
             str(expected["recommended_product_pcf_kgco2e_per_kg"])
         )
-        assert supplier["evidence"]["metadata"]["synthetic"] is True
+        assert supplier["evidence_available"] is True
 
         scenario_response = await api_client.post(
             "/api/procurement/scenarios",
@@ -137,19 +136,21 @@ async def test_all_requested_apis_as_one_synthetic_journey(
                 "carbon_measurement_id": str(ids.measurement_id),
                 "method_definition_id": str(ids.scoring_method_id),
                 "requested_by": str(ids.procurement_manager_id),
-                "quantity": "12000",
+                "quantity": "10000",
                 "quantity_unit": "kg",
                 "max_cost_increase_pct": "5",
                 "max_lead_time_days": 20,
                 "minimum_circularity_score": "50",
-                "material_constraints": {"allowed_material_codes": ["PACKAGING-TRAY"]},
+                "material_constraints": {
+                    "allowed_material_codes": ["RECYCLED-ALUMINIUM"]
+                },
             },
         )
         assert scenario_response.status_code == 201
         scenario = scenario_response.json()
         assert scenario["terminal_state"] == "completed"
         assert scenario["status"] == "recommended"
-        assert len(scenario["alternatives"]) == 2
+        assert len(scenario["alternatives"]) == 3
         selected = scenario["selected_recommendation"]
         assert selected["recommended_product_id"] == str(ids.recommended_product_id)
         assert Decimal(selected["impact"]["projected_footprint_kgco2e"]) == Decimal(
@@ -192,20 +193,20 @@ async def test_all_requested_apis_as_one_synthetic_journey(
         assert scenario_read_response.json()["analysis_signature"] == scenario["analysis_signature"]
 
         recommendation_response = await api_client.get(
-            f"/api/procurement/recommendations/{recommendation_id}",
+            f"/api/procurement/scenarios/{scenario_id}/recommendation",
             params=company_params,
         )
         assert recommendation_response.status_code == 200
         recommendation = recommendation_response.json()
         assert len(recommendation["payload_hash"]) == 64
         assert recommendation["narrative"]["unsupported_fragments"] == []
-        assert "10800" in recommendation["narrative"]["resolved_text"]
+        assert "62000" in recommendation["narrative"]["resolved_text"]
 
         agent_response = await api_client.post(
             "/api/agent/requests",
             json={
                 "query": (
-                    "Measure the Plant B packaging footprint and recommend a lower-carbon "
+                    "Measure the Plant B recycled aluminium footprint and recommend a lower-carbon "
                     "supplier under the cost constraint."
                 ),
                 "context": {
@@ -214,7 +215,7 @@ async def test_all_requested_apis_as_one_synthetic_journey(
                     "site_id": str(ids.site_id),
                     "reporting_period_id": str(ids.reporting_period_id),
                     "metric_keys": [],
-                    "material_scope": ["PACKAGING-TRAY"],
+                    "material_scope": ["RECYCLED-ALUMINIUM"],
                     "supplier_product_ids": [],
                     "constraints": {
                         "max_cost_increase_pct": "5",
@@ -332,7 +333,7 @@ async def test_all_requested_apis_as_one_synthetic_journey(
         assert sync_response.status_code == 200
         sync = sync_response.json()
         assert sync["received_points"] == 2
-        assert sync["inserted_factors"] == 2
+        assert sync["inserted_points"] == 2
         assert sync["estimated_points"] == 1
         assert len(sync["response_checksum"]) == 64
 
@@ -346,5 +347,87 @@ async def test_all_requested_apis_as_one_synthetic_journey(
         assert Decimal(latest["provider_value_gco2eq_per_kwh"]) == Decimal(550)
         assert latest["is_estimated"] is True
         assert latest["provenance"]["provider"] == "electricity_maps"
+
+        loads_response = await api_client.get(
+            "/api/dispatch/loads",
+            params={**company_params, "site_id": str(ids.site_id)},
+        )
+        assert loads_response.status_code == 200
+        loads = loads_response.json()
+        assert loads["total"] == 1
+        assert loads["items"][0]["id"] == str(ids.flexible_load_id)
+        assert loads["items"][0]["metadata"]["actuation_authorized"] is False
+
+        forecast_response = await api_client.post(
+            "/api/dispatch/forecasts/sync",
+            json={
+                "company_id": str(ids.company_id),
+                "site_id": str(ids.site_id),
+                "zone": "IN",
+                "horizon_hours": 24,
+                "source_mode": "fixture",
+            },
+        )
+        assert forecast_response.status_code == 200, forecast_response.text
+        forecast = forecast_response.json()
+        assert forecast["received_points"] == 24
+        assert forecast["inserted_points"] == 24
+
+        dispatch_scenario_response = await api_client.post(
+            "/api/dispatch/scenarios",
+            json={
+                "company_id": str(ids.company_id),
+                "site_id": str(ids.site_id),
+                "flexible_load_id": str(ids.flexible_load_id),
+                "method_definition_id": str(ids.dispatch_method_id),
+                "policy_definition_id": str(ids.dispatch_policy_id),
+                "forecast_source_document_id": forecast["source_document_id"],
+                "requested_by": str(ids.analyst_id),
+                "window_start": "2026-10-01T08:00:00Z",
+                "window_end": "2026-10-01T20:00:00Z",
+                "baseline_start": "2026-10-01T08:00:00Z",
+                "maximum_delay_minutes": 240,
+            },
+        )
+        assert dispatch_scenario_response.status_code == 201
+        dispatch_scenario = dispatch_scenario_response.json()
+
+        optimize_response = await api_client.post(
+            f"/api/dispatch/scenarios/{dispatch_scenario['id']}/optimize",
+            json={"company_id": str(ids.company_id)},
+        )
+        assert optimize_response.status_code == 200, optimize_response.text
+        optimized = optimize_response.json()
+        assert optimized["terminal_state"] == "approval_required"
+        dispatch_recommendation = optimized["recommendation"]
+        dispatch_expected = expected["dispatch"]
+        for field in (
+            "baseline_start",
+            "baseline_end",
+            "recommended_start",
+            "recommended_end",
+            "baseline_emissions_kgco2e",
+            "expected_emissions_kgco2e",
+            "avoided_kgco2e",
+            "reduction_pct",
+        ):
+            assert dispatch_recommendation[field] == dispatch_expected[field]
+        assert dispatch_recommendation["actuation_authorized"] is False
+        assert (
+            dispatch_recommendation["approval"]["preview_payload"][
+                "actuation_authorized"
+            ]
+            is False
+        )
+
+        dispatch_read_response = await api_client.get(
+            f"/api/dispatch/scenarios/{dispatch_scenario['id']}/recommendation",
+            params=company_params,
+        )
+        assert dispatch_read_response.status_code == 200
+        assert (
+            dispatch_read_response.json()["recommendation"]["id"]
+            == dispatch_recommendation["id"]
+        )
     finally:
         app.dependency_overrides.pop(get_electricity_maps_client, None)

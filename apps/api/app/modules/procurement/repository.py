@@ -28,6 +28,13 @@ class ProductRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class SupplierRecord:
+    supplier: Supplier
+    product_count: int
+    active_product_count: int
+
+
+@dataclass(frozen=True, slots=True)
 class ScenarioDependencies:
     site: Site
     period: ReportingPeriod
@@ -43,10 +50,80 @@ class ProcurementRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
+    async def list_suppliers(
+        self,
+        *,
+        company_id: UUID,
+        country_code: str | None,
+        active_only: bool,
+        search: str | None,
+        limit: int,
+        offset: int,
+    ) -> tuple[list[SupplierRecord], int]:
+        predicates = [Supplier.company_id == company_id]
+        if country_code:
+            predicates.append(Supplier.country_code == country_code)
+        if active_only:
+            predicates.append(Supplier.status == "active")
+        if search:
+            pattern = f"%{search.strip()}%"
+            predicates.append(
+                or_(
+                    Supplier.name.ilike(pattern),
+                    Supplier.supplier_code.ilike(pattern),
+                )
+            )
+
+        product_count = (
+            select(func.count(SupplierProduct.id))
+            .where(
+                SupplierProduct.company_id == Supplier.company_id,
+                SupplierProduct.supplier_id == Supplier.id,
+            )
+            .correlate(Supplier)
+            .scalar_subquery()
+        )
+        active_product_count = (
+            select(func.count(SupplierProduct.id))
+            .where(
+                SupplierProduct.company_id == Supplier.company_id,
+                SupplierProduct.supplier_id == Supplier.id,
+                SupplierProduct.is_active.is_(True),
+            )
+            .correlate(Supplier)
+            .scalar_subquery()
+        )
+        total = await self.session.scalar(select(func.count(Supplier.id)).where(*predicates))
+        rows = (
+            await self.session.execute(
+                select(
+                    Supplier,
+                    product_count.label("product_count"),
+                    active_product_count.label("active_product_count"),
+                )
+                .where(*predicates)
+                .order_by(Supplier.name, Supplier.id)
+                .limit(limit)
+                .offset(offset)
+            )
+        ).all()
+        return (
+            [
+                SupplierRecord(
+                    supplier=row[0],
+                    product_count=int(row[1] or 0),
+                    active_product_count=int(row[2] or 0),
+                )
+                for row in rows
+            ],
+            int(total or 0),
+        )
+
     async def list_products(
         self,
         *,
         company_id: UUID,
+        supplier_id: UUID | None,
         material_code: str | None,
         category: str | None,
         active_only: bool,
@@ -55,6 +132,8 @@ class ProcurementRepository:
         offset: int,
     ) -> tuple[list[ProductRecord], int]:
         predicates = [SupplierProduct.company_id == company_id]
+        if supplier_id:
+            predicates.append(SupplierProduct.supplier_id == supplier_id)
         if material_code:
             predicates.append(SupplierProduct.material_code == material_code)
         if category:
@@ -305,7 +384,7 @@ class ProcurementRepository:
                 Recommendation.company_id == company_id,
                 Recommendation.scenario_id == scenario_id,
             )
-            .order_by(Recommendation.created_at.desc())
+            .order_by(Recommendation.created_at.desc(), Recommendation.id.desc())
             .limit(1)
         )
 
@@ -350,6 +429,6 @@ class ProcurementRepository:
                 Approval.company_id == company_id,
                 Approval.recommendation_id == recommendation_id,
             )
-            .order_by(Approval.created_at.desc())
+            .order_by(Approval.created_at.desc(), Approval.id.desc())
             .limit(1)
         )
