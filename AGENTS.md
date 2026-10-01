@@ -1,10 +1,15 @@
 # CarbonMesh Project Context
 
-## Purpose of this file
+Last updated: 2026-10-01
 
-This is the shared implementation context for the CarbonMesh hackathon team. Give this file to every teammate and to any coding agent working on the repository. It records the agreed product scope, architecture, stack, engineering rules, current repository state, and four-day delivery plan.
+## Purpose
 
-This file is context, not an instruction to implement everything at once. Every coding task must still follow the latest explicit request from the developer assigning that task and must first inspect the current repository state.
+This is the shared implementation contract for developers and coding agents
+working in this repository. It records the approved four-module direction,
+the actual transition state of the code, ownership boundaries, and engineering
+rules. It is context, not permission to implement the whole roadmap in one task.
+Always follow the latest explicit user/developer request and inspect the current
+worktree before editing.
 
 ## Source precedence
 
@@ -12,532 +17,327 @@ When sources disagree, use this order:
 
 1. The latest explicit instruction from the team/user.
 2. This `AGENTS.md` file.
-3. `CarbonMesh_4_Day_Hackathon_POC_Plan_v3.docx` for the four-day implementation scope.
-4. `CarbonMesh_Technology_Stack_and_Architecture.docx` for technology decisions.
-5. `CarbonMesh_Problem_and_Solution.pdf` for the broader product vision and problem framing.
-6. The frontend and backend architecture Markdown files as structural references only.
-7. `frontend-design-system.md` as a design-principles reference, subject to the shadcn/ui rule below.
+3. The attached four-module hackathon implementation blueprint.
+4. [docs/architecture/system.md](docs/architecture/system.md).
+5. [docs/architecture/database.md](docs/architecture/database.md).
+6. [docs/api/contract.md](docs/api/contract.md).
+7. Earlier POC plans and architecture documents as historical references only.
 
-Important conflict resolutions:
+Repository code and tests determine what is currently implemented. Planning
+documents determine the target; they do not prove that a feature exists.
 
-- The broad vision describes four agents. The four-day POC builds only Measurement and Procurement, joined through one ledger and one human approval flow.
-- Assurance and Dispatch are Phase 2. Do not create placeholder screens, tables, or agents for them during the hackathon.
-- Backend examples using Flask and MongoDB are patterns only. CarbonMesh uses FastAPI, Pydantic, SQLAlchemy, asyncpg, PostgreSQL, and pgvector.
-- The approved five-schema, 32-table code-first model in `docs/architecture/database.md` supersedes older database catalogues. The POC uses explicit SQLAlchemy bootstrap commands and no Alembic migrations.
-- The frontend reference describes a custom component catalogue. The current team decision is to use shadcn/ui components and not build a replacement custom design-system component library.
-- The POC plan is more specific and newer than the broad solution brief. It is authoritative for what must ship.
+## Decisions that supersede the previous POC contract
 
-## One-sentence product definition
+- P0 now includes Measurement, Assurance, Procurement, and Dispatch in one
+  connected golden path. Assurance and Dispatch are no longer Phase 2.
+- The implemented database contract is eight schemas and 46 tables. The prior
+  five-schema, 32-table layout is historical and matters only if an operator
+  must preserve data from an older live database.
+- The target agent runtime is one orchestrator plus four bounded specialist
+  graphs and 24 allowlisted tools.
+- The target experience contains 16 role-oriented screens.
+- The target API catalog contains 38 operations. Each implemented operation has
+  one canonical `/api/...` route; do not add duplicate legacy aliases.
+- The target demo is Maverick Manufacturing, Plant B, Q3 2026, with hourly
+  electricity, a 10,000 kg recycled-aluminium decision, one Assurance template,
+  and one flexible load.
+- Keep the existing `apps/api` repository layout. The blueprint's `services/api`
+  path is illustrative and does not justify a churn-only move.
+- The connection layer, SQLAlchemy model, bootstrap verifier, and clean-database
+  creation path are complete. Do not allocate a feature owner to database
+  migration work. If old live data must be retained, treat its transition as a
+  separate reviewed operator activity. FastAPI startup still must never run
+  DDL, migration, reset, or seed.
+- Local Docker PostgreSQL and hosted Neon are both supported. Remote database
+  connections require authenticated TLS; non-TLS is allowed only for approved
+  loopback/Docker hosts.
+- Confidence changes must use a new method version. Never silently reinterpret
+  previously persisted measurements.
 
-CarbonMesh is an agent-assisted carbon operations application that turns purchased-material activity into a traceable emissions measurement, uses that verified measurement to compare lower-carbon supplier products, and requires a human to approve or reject the resulting procurement recommendation.
+## Product definition
 
-## Problem and users
+CarbonMesh is an agent-assisted carbon operations application that converts
+activity and grid data into traceable emissions, turns verified facts into
+evidence-supported disclosure claims and procurement/dispatch recommendations,
+and requires a human to approve or reject consequential outputs.
 
-Sustainability and procurement work is fragmented across spreadsheets, carbon tools, supplier documents, and sourcing workflows. Emissions are often calculated after decisions are made, evidence is difficult to trace, and the same facts are repeatedly entered or re-estimated.
+The differentiator is one lineage-tracked ledger reused across four workflows,
+not four unrelated dashboards.
 
-Primary users:
+## Primary users
 
-- Sustainability analyst: imports activity data, validates factors, calculates emissions, and investigates data-quality issues.
-- Procurement manager: compares supplier products under cost, lead-time, material, and circularity constraints.
-- Approver: reviews exact facts, evidence, scores, hashes, and trade-offs before approving or rejecting a recommendation.
-- Judge/auditor: traces any displayed value back to its source, method, evidence, ledger event, and decision history.
+- Sustainability analyst: imports activity, resolves quality issues, calculates
+  emissions, and investigates confidence and lineage.
+- ESG/compliance reviewer: reviews atomic claims, citations, gaps, and stale
+  disclosure artifacts.
+- Procurement manager: compares supplier products under hard commercial and
+  material constraints.
+- Operations planner: reviews an advisory lower-carbon operating window under
+  unchanged hard constraints.
+- Approver: reviews the exact payload, facts, evidence, hashes, expiry, and
+  trade-offs before deciding.
+- Judge/auditor: traces every numerical value to source, method, calculation,
+  ledger event, and decision history.
 
-The key differentiation is not another carbon dashboard. It is the handoff between measurement and procurement through one lineage-tracked ledger.
+## Golden path
 
-## Four-day POC objective
+The connected golden flow is:
 
-Build one connected vertical slice:
+1. Upload synthetic hourly electricity, purchased-material, supplier/evidence,
+   standard, and flexible-load data.
+2. Validate and normalize records, preserving raw rows and typed issues.
+3. Resolve Plant B to a grid zone and cache historical grid-intensity points.
+4. Calculate hourly Scope 2 and purchased-material emissions deterministically.
+5. Persist calculations, measurements, evidence links, ledger facts, and
+   lineage.
+6. Draft atomic disclosure claims, bind facts, validate citations, and visibly
+   block at least one unsupported claim.
+7. Apply hard procurement constraints, score feasible recycled-aluminium
+   products, calculate impact, and create a fact-bound recommendation.
+8. Cache a 24-hour forecast, enumerate feasible windows, optimize a two-hour
+   flexible load, and create an advisory recommendation.
+9. Create exact approval previews for disclosure, procurement, and dispatch.
+10. Approve/reject, append decision events, and invalidate stale artifacts.
+11. Show one run trace with model/tool/provider/cache/token/retry/latency and
+    documented footprint-proxy telemetry.
 
-1. Upload synthetic purchased-material activity and supplier/product evidence.
-2. Validate and normalize the activity data.
-3. Select a versioned emissions factor.
-4. Calculate emissions deterministically.
-5. Persist calculations, evidence links, facts, lineage, and audit information.
-6. Compare feasible supplier alternatives with a versioned deterministic scoring model.
-7. Calculate projected footprint, avoided emissions, cost delta, and lead-time delta.
-8. Generate an evidence-bound explanation.
-9. Require a human approval or rejection.
-10. Show the complete run trace, including model calls, tool calls, retries, tokens, latency, and terminal state.
+## Synthetic demo contract
 
-The judge-facing question is:
+All data is synthetic unless a public/open source is explicitly declared. Every
+file and screen must say so.
 
-> What is the verified emissions baseline for Plant B's packaging purchase, and which feasible supplier/product would reduce it the most without increasing unit cost by more than 5%?
-
-## Success criterion
-
-A judge can select any displayed carbon number and follow it back to:
-
-- the uploaded source row;
-- normalized activity;
-- factor and evidence source;
-- deterministic formula and calculation run;
-- ledger event and lineage edges;
-- recommendation and component scores;
-- approval record and audit history.
-
-The result must be reproducible after a database reset and seed import. Important values must never be hard-coded in the frontend.
-
-## Demo dataset and expected result
-
-All demo data is synthetic and must be visibly labelled as synthetic.
-
-| Item | Expected value |
+| Element | Demo value |
 | --- | --- |
-| Company | Nova Components Ltd |
-| Site | Plant B |
-| Reporting period | Q3 2026 |
-| Purchased material | 12,000 kg packaging tray |
-| Current product factor | 2.8 kgCO2e/kg |
-| Current measured footprint | 33,600 kgCO2e |
-| Alternative product factor | 1.9 kgCO2e/kg |
-| Projected alternative footprint | 22,800 kgCO2e |
-| Projected avoided emissions | 10,800 kgCO2e, or 32.1% |
-| Maximum cost increase | 5% |
-| Expected alternative cost delta | +3.2% |
+| Company | Maverick Manufacturing (synthetic) |
+| Site | Plant B (synthetic) |
+| Period | Q3 2026 |
+| Electricity | 90 days of hourly kWh with missing, duplicate, and estimated-factor cases |
+| Supplier need | 10,000 kg recycled aluminium; 3-5 products |
+| Flexible load | Batch Process 7, 500 kW, two hours |
+| Dispatch bounds | 12-hour allowed interval; four-hour maximum delay |
+| Assurance | GHG Protocol Scope 2 summary plus limited ESRS-style evidence mapping |
+| Grid source | Electricity Maps-shaped fixture by default; optional live mode |
 
-These are expected fixture results, not UI constants. The application must calculate them from imported records.
+Do not hard-code a winning supplier, carbon total, or dispatch window. Golden
+results are generated by deterministic services and versioned with fixture and
+method identifiers.
 
-## Scope
+## P0/P1/P2 scope
 
-### Build now
+### P0
 
-- React application with the 12 POC routes described below.
-- FastAPI modular monolith.
-- PostgreSQL as the structured source of truth.
-- pgvector for small, metadata-filtered evidence retrieval when needed.
-- CSV/JSON activity and supplier/product import.
-- Synthetic evidence text or PDF content represented as evidence items.
-- Deterministic Measurement workflow.
-- Deterministic Procurement workflow.
-- Shared append-oriented ledger and lineage.
-- Bounded LangGraph orchestration.
-- REST commands/queries and SSE progress events.
-- Human approval/rejection with preview hash validation.
-- Audit trail and agent-run telemetry.
-- Reproducible seed/reset path.
+- One synthetic tenant/site/period and one connected four-module run.
+- CSV/JSON ingestion plus evidence documents needed by the demo.
+- Scope 2 and purchased-material Measurement.
+- One Assurance template with supported and unsupported claims.
+- Three to five supplier products and one deterministic recommendation.
+- One flexible load, 24-hour forecast, deterministic advisory optimizer.
+- Generic Preview-Approve-Commit for all consequential artifacts.
+- Live lineage, run trace, reset/seed, fixture mode, and clean local setup.
 
-### Explicitly out of scope for the four-day build
+### P1
 
-- Assurance/disclosure workflows.
-- Dispatch, grid forecasting, scheduling, or equipment actuation.
-- Generic natural-language-to-SQL.
-- Arbitrary dashboard generation.
-- Autonomous purchasing or supplier contact.
-- Enterprise SSO, full RBAC, or production multi-tenancy.
-- Live ERP, IoT, or customer integrations.
-- Redis, Celery, Kafka, or a distributed task queue.
-- A separate vector database.
-- Microservices.
-- Next.js or server-side frontend rendering.
-- Redux.
-- CrewAI or AutoGen as the core orchestrator.
-- Model-generated calculations, scores, filters, or raw SQL.
+- Evidence-pack export.
+- Measurement chart breakdown endpoint.
+- Latest live-grid card.
+- Resolve/waive quality issues.
+- Richer ledger/audit search.
 
-If delivery is behind, cut PDF extraction automation, generic charts, multi-period forecasting, complex circularity taxonomies, live external APIs, custom authentication, and polished animations before cutting traceability or deterministic calculations.
+### P2
 
-## Product principles
+- Full standards library and formal assurance opinion.
+- Market-based Scope 2 instruments.
+- Enterprise SSO/RBAC and production multi-tenancy.
+- Generic onboarding and live ERP/IoT integrations.
+- Distributed task queues and scale hardening.
+- Any automated purchasing or equipment actuation.
+
+## Non-negotiable product rules
 
 1. The model proposes; software validates, authorizes, executes, and verifies.
-2. Generative output is never the source of numerical truth.
-3. Structured facts and generated judgments are visually and structurally separate.
-4. Every displayed number is bound to a verified fact.
-5. Constraints are never silently relaxed to force a recommendation.
-6. Ledger history is append-oriented. Corrections create new events and supersession links.
-7. Approval binds the exact reviewed payload, facts, context, method versions, and hashes.
-8. A failed or unsupported state is an acceptable result and must be explicit.
-9. Keep infrastructure minimal enough to finish the four-day POC.
-10. Every day ends with a runnable vertical slice.
+2. The model never calculates business values, writes raw SQL, invents a source
+   ID, relaxes a hard constraint, or commits an approval.
+3. Every displayed numerical value is bound to a verified fact and lineage.
+4. Structured facts and generated judgments are visibly separate.
+5. Unknown placeholders, unbound numbers, context mismatch, incompatible units,
+   stale facts, and unsupported citations fail closed.
+6. Ledger history is append-only. Corrections create new events and
+   supersession/staleness links.
+7. Approval binds exact payload, facts, context, methods, hashes, actor, expiry,
+   and idempotency key.
+8. A `no_data`, `unsupported`, `provider_unavailable`, `no_feasible_option`, or
+   `stale` result is valid and must not trigger silent fallback.
+9. Dispatch is advisory only. The repository contains no actuation endpoint,
+   equipment credential, or control tool.
+10. Traceability and deterministic replay take priority over visual polish.
 
 ## Target architecture
 
 ```text
 React 19 + TypeScript + Vite
         |
-        | REST commands/queries + SSE progress
+        | REST commands/queries + SSE
         v
-FastAPI modular monolith
+FastAPI + Pydantic v2 modular monolith
         |
-        +-- API routes and Pydantic contracts
-        +-- Measurement services
-        +-- Procurement services
-        +-- Ledger, evidence, approval, and audit services
-        +-- LangGraph orchestrator and bounded subgraphs
-        |
-        v
-SQLAlchemy 2.0 + asyncpg
+        +-- context, policy, idempotency, safe errors
+        +-- five bounded LangGraph graphs
+        +-- typed tools -> deterministic application services
+        +-- Measurement / Assurance / Procurement / Dispatch
+        +-- generic approvals, ledger, evidence, audit, telemetry
         |
         v
-PostgreSQL + pgvector
+SQLAlchemy 2 async + asyncpg
+        |
+        v
+PostgreSQL 16+ + pgvector (8 schemas / 46 tables)
 ```
 
-The model provider is called only through the agent layer. Agent tools call typed application services, not SQLAlchemy sessions directly. FastAPI is the only application boundary that talks to the frontend.
+The detailed diagram and boundaries are in
+[system.md](docs/architecture/system.md).
 
-## Technology stack
+## Technology choices
 
 ### Frontend
 
-- React 19 and TypeScript.
-- Vite.
-- Tailwind CSS v4 through the Vite plugin.
-- shadcn/ui for UI components.
-- Lucide icons through the shadcn ecosystem.
-- TanStack Query for server state, caching, loading/error states, and mutations.
-- Zustand only for small client-only state.
-- React Router for SPA routing.
-- React Hook Form for form state.
-- Zod for form, API, and runtime payload validation.
-- Recharts for deterministic charts when the dashboard requires them.
-- React Flow for lineage visualization when the measurement detail screen requires it.
-- Native `EventSource` for SSE, with terminal-state handling and fallback polling if needed.
-
-Do not add Recharts, React Flow, or another dependency until a real screen uses it.
+- React 19, TypeScript, Vite, Tailwind CSS v4.
+- shadcn/ui primitives and Lucide icons; do not create a parallel component
+  library.
+- React Router, TanStack Query, React Hook Form, Zod.
+- Zustand only for small client-only shared state; never duplicate server data.
+- Recharts and React Flow only where real screens use them.
+- Native `EventSource` with terminal-state handling and fallback polling.
 
 ### Backend
 
-- Python 3.12 or newer.
-- FastAPI.
-- Pydantic v2.
-- SQLAlchemy 2.0 async ORM/SQL toolkit.
-- asyncpg PostgreSQL driver.
-- Pydantic v2 settings with secret-safe `DATABASE_URL` validation.
-- Neon PostgreSQL with pgvector and `VECTOR(768)` evidence embeddings.
-- LangChain for model/tool abstractions only where useful.
-- LangGraph for explicit bounded workflow state.
-- Gemini API model for planning, tool selection, structured output, and explanation.
-- Gemini embeddings for evidence retrieval if the P1 retrieval feature is implemented.
-- Python `Decimal` for money, quantity, carbon, scoring, and percentage calculations.
-- pytest, httpx, and Ruff for backend quality checks.
+- Python 3.12+, FastAPI, Pydantic v2.
+- SQLAlchemy 2.0 async ORM/toolkit and asyncpg.
+- PostgreSQL and pgvector `VECTOR(768)`.
+- `Decimal` for quantity, money, carbon, percentage, score, and optimization.
+- LangGraph for bounded orchestration; provider abstractions stay behind the
+  agent layer.
+- Gemini is the intended demo provider, but exact model identifiers remain
+  configuration and must be verified before integration.
+- pytest/httpx/Ruff; add type, contract, replay, and browser gates as they become
+  executable.
 
-The source documents name `Gemini 3.8 Flash` and `Gemini Embedding 2`. Treat those as the current intended choices, but confirm exact provider model identifiers before integration because model catalog names can change. Keep model identifiers in configuration, not business code.
+## Current repository state (audited 2026-10-01)
 
-### Deployment direction
+The repository has a working old-scope backend, not an empty skeleton:
 
-- Docker and Docker Compose for a reproducible local multi-service run once the database is introduced.
-- Vercel is the intended frontend hosting option.
-- A Python container host is the intended backend deployment option.
-- Managed PostgreSQL or a PostgreSQL container is the intended database.
+- The pre-transition audit found 29 OpenAPI paths. The current branch exposes
+  30 canonical `/api/...` paths with no duplicate legacy mounts. Implemented
+  behavior includes imports, data quality,
+  deterministic purchased-material Measurement, supplier exploration,
+  Procurement, approvals, ledger lineage/audit, persistent SSE runs, demo
+  reset, and Electricity Maps historical sync.
+- The purchased-material Measurement engine uses `Decimal`, factor specificity,
+  confidence, baselines/variance, transactionally persisted calculations,
+  ledger events, evidence, and lineage.
+- Procurement applies hard constraints, deterministic weighted scoring,
+  projected impact, fact-bound narrative, preview hashes, staleness, and
+  idempotent approval decisions.
+- The provider-neutral OpenAI/Gemini/Anthropic/OpenRouter HTTP wrappers exist,
+  but the active agent runtime does not invoke them.
+- The active agent is a deterministic keyword router for Measurement and
+  Procurement. It returns an existing verified Measurement and explicitly
+  rejects Assurance and Dispatch. LangGraph, RAG, interrupts/resume, and live
+  model telemetry are not implemented yet.
+- Historical Electricity Maps data is cached as emission factors; hourly Scope
+  2 calculation and forecast/Dispatch are not implemented.
+- SQLAlchemy and bootstrap now implement the exact 46-table/eight-schema
+  contract. This is storage scaffolding, not completed Assurance or Dispatch
+  business behavior.
+- Tenant-scoped, bounded ledger event search and detail endpoints are
+  implemented with safe evidence summaries and immediate lineage neighbors.
+- The previous demo is Nova Components / 12,000 kg packaging and must be replaced
+  by the approved fixture contract.
+- The frontend in the audited baseline is a health shell; Dev 1 is actively
+  building the four-module experience.
 
-Do not add deployment infrastructure until it supports a runnable vertical slice.
+Quality baseline before the architecture transition:
 
-## Current repository state
+- `ruff check app tests`: passed.
+- backend: 176 passed, 8 opt-in Neon tests skipped.
+- frontend typecheck, lint, and production build: passed.
 
-The repository contains the lightweight frontend/API foundation, the implemented database foundation, and the P0 procurement, agent, lineage, approval, audit, and grid-integration API slices. Import APIs, measurement calculation, an explicit demo reset/seed command, and most feature screens remain staged work.
+Preserve these tests as regression coverage while changing the contract.
+After canonical-route consolidation, the combined backend result is 195 passed
+with eight opt-in live-Neon tests skipped; Ruff also passes.
 
-Current working functionality:
+## Database foundation and optional legacy transition
 
-- The React/Vite app runs on `http://localhost:3000`.
-- The FastAPI app runs on `http://localhost:8000`.
-- Vite proxies `/api` to FastAPI.
-- `GET /api/health` returns a typed health response.
-- The frontend calls the health endpoint through TanStack Query and validates it with Zod.
-- The page displays `CarbonMesh` and the API connection state.
-- Tailwind CSS v4 and shadcn/ui configuration are initialized.
-- SQLAlchemy defines the authoritative 32-table model across five PostgreSQL schemas.
-- The backend uses one lazy asyncpg engine and async SQLAlchemy session factory for Neon.
-- Explicit bootstrap commands enable pgvector, create tables, views, and the immutable-ledger trigger, and verify compatibility.
-- The shared development Neon database is already provisioned. Bootstrap remains an operator-only workflow for new or reset disposable databases; normal contributors install dependencies, configure the shared `DATABASE_URL`, and start development without rerunning DDL.
-- FastAPI startup never bootstraps, resets, or seeds application data; synthetic E2E prerequisites are created only inside a disposable test database.
-- `GET /api/db/demo` checks connectivity asynchronously and sanitizes failures.
-- Placeholder feature folders are retained where business workflows have not yet been built.
+The implemented table distribution is:
 
-Current repository shape:
+| Schema | Tables |
+| --- | ---: |
+| `core` | 9 |
+| `semantic` | 5 |
+| `ai` | 2 |
+| `carbon` | 10 |
+| `ledger` | 4 |
+| `assurance` | 6 |
+| `procurement` | 5 |
+| `dispatch` | 5 |
 
-```text
-carbonmesh/
-  apps/
-    web/
-      src/
-        app/providers/
-        components/ui/
-        features/
-          agent/
-          approvals/
-          audit/
-          dashboard/
-          data/
-          measurements/
-          procurement/
-          runs/
-          suppliers/
-        hooks/
-        lib/
-        pages/
-        routes/
-        schemas/
-        services/
-        stores/
-        types/
-    api/
-      app/
-        api/routes/
-        core/
-        db/
-          bootstrap.py
-          ddl.py
-          session.py
-          models/
-        dependencies/
-        middleware/
-        modules/
-          agents/
-          approvals/
-          evidence/
-          ledger/
-          measurement/
-          procurement/
-          semantic/
-        schemas/
-        services/
-      tests/integration/
-      tests/unit/
-  data/demo/
-  docs/api/
-  docs/architecture/
-  infra/
-  scripts/
-  tests/e2e/
-```
+The physical table catalog and lifecycle rules are in
+[database.md](docs/architecture/database.md). The implemented changes are:
 
-`data/demo` is reserved for synthetic fixtures and their expected deterministic results. `infra` is reserved for Docker/deployment files when they become necessary. Both currently contain only placeholders.
+- `carbon.agent_runs` -> `ai.agent_runs`, plus `ai.agent_run_steps`.
+- `procurement.approvals` -> generic `core.approvals`.
+- `procurement.fact_bindings` -> generic `ledger.fact_bindings`.
+- `procurement.recommendations` ->
+  `procurement.procurement_recommendations`.
+- Add timestamped `carbon.grid_intensity_points`, six Assurance tables, and
+  five Dispatch tables.
 
-Frontend dependencies and `package-lock.json` live under `apps/web`. There should be no root `node_modules`. Root npm scripts delegate to `apps/web`.
+Database rules:
 
-Backend dependencies are declared in `apps/api/pyproject.toml`. A `requirements.txt` is not currently used because `pyproject.toml` is the single dependency source.
+- FastAPI startup performs no DDL, migration, reset, or seed.
+- New development and demo environments use the completed clean bootstrap on a
+  fresh or disposable target database.
+- Database migration is not part of the remaining feature backlog. Only when
+  old live data must be preserved should an operator design and rehearse a
+  reviewed 32-to-46-table transition with explicit target confirmation and a
+  rollback branch or backup.
+- `create_all()` cannot update existing tables and must never be presented as an
+  in-place upgrade mechanism.
+- Keep UUID server defaults, UTC timestamps, exact NUMERIC types, tenant-aligned
+  foreign keys, `ON DELETE RESTRICT`, checked states, and stable indexes.
+- `ledger.ledger_events` rejects UPDATE/DELETE. Corrections append events.
+- Evidence embeddings, model ID, and embedded timestamp are all present or all
+  absent; HNSW cosine index and metadata filtering remain required.
+- Local non-TLS database URLs are accepted only for approved loopback/Docker
+  hosts. Remote URLs require verified TLS.
 
-Database schema details, including the table catalogue and vector index, are documented in `docs/architecture/database.md`.
+## Module engineering contracts
 
-## Local setup
+### Measurement
 
-Prerequisites:
-
-- Node.js 22.12 or newer.
-- npm 10 or newer.
-- Python 3.12 or newer.
-
-Install frontend dependencies from the repository root:
-
-```bash
-npm --prefix apps/web install
-```
-
-Create and install the backend environment on Windows:
-
-```powershell
-cd apps/api
-py -m venv .venv
-.venv\Scripts\Activate.ps1
-python -m pip install -e ".[dev]"
-```
-
-Copy `apps/api/.env.example` to `apps/api/.env` and replace its placeholder with the shared development database's pooled Neon URL obtained through the approved secret channel:
-
-```powershell
-Copy-Item .env.example .env
-```
-
-The shared database is already provisioned; normal contributors must not rerun bootstrap during startup. `python -m app.db.bootstrap` is reserved for an operator provisioning a new or reset disposable database, while `python -m app.db.bootstrap --check` is an optional read-only diagnostic. Never commit or log a real database URL. FastAPI startup does not create or alter database objects and does not seed or reset application data.
-
-Run the backend from `apps/api`:
-
-```powershell
-uvicorn app.main:app --reload --port 8000
-```
-
-Run the frontend from the repository root:
-
-```bash
-npm run dev
-```
-
-Useful URLs:
-
-- Frontend: `http://localhost:3000`
-- API health: `http://localhost:8000/api/health`
-- OpenAPI UI: `http://localhost:8000/docs`
-
-Root frontend checks:
-
-```bash
-npm run typecheck
-npm run lint
-npm run build
-```
-
-Backend checks from `apps/api`:
-
-```powershell
-ruff check app tests
-pytest
-```
-
-## Frontend architecture rules
-
-Use feature-oriented organization without unnecessary abstractions.
-
-- Pages/routes own screen orchestration.
-- TanStack Query owns remote/server state.
-- Zustand owns only small client-only state that must be shared.
-- React Hook Form owns form state.
-- Zod owns runtime validation of external data and forms.
-- Services own HTTP details. Pages and UI components do not call `fetch` directly.
-- Schemas and types define API contracts at the frontend boundary.
-- Prefer generated OpenAPI types when the backend contracts stabilize.
-- Route paths and query keys should be centralized when repetition appears.
-- Do not duplicate server data into Zustand.
-- Do not add React Context for state already handled by TanStack Query or Zustand.
-- Do not create speculative hooks, stores, components, or abstractions.
-
-### UI component rule
-
-Use shadcn/ui registry components as the base UI primitives. Do not build a parallel custom component library containing replacement buttons, inputs, cards, dialogs, tables, badges, or similar primitives.
-
-Feature-level composition is allowed when it represents CarbonMesh behavior, such as a measurement lineage view or approval workflow, but it should compose shadcn primitives rather than replace them. Add a shared abstraction only after real reuse appears.
-
-UI expectations:
-
-- Desktop-first responsive application shell.
-- Left navigation rail, top context bar, and right-side evidence/run drawer when those screens are built.
-- Green for verified facts/success, purple for generated judgment, amber for warnings, and red for failed/unsupported states.
-- Every numeric value comes from structured API facts, not prose parsing or UI constants.
-- Loading, empty, error, no-data, unsupported, and terminal agent states are first-class UI states.
-- Use accessible semantic controls and labels.
-- Keep the application operational and information-dense, not marketing-oriented.
-
-## Backend architecture rules
-
-Use a modular monolith. Each domain should have a clear public service boundary, typed schemas, database access, and tests, but do not reproduce a deep enterprise template before it is needed.
-
-Request flow:
+Support two deterministic paths:
 
 ```text
-FastAPI route
-  -> Pydantic request validation
-  -> domain/application service
-  -> deterministic domain logic and repository calls
-  -> SQLAlchemy transaction
-  -> Pydantic response
+Scope 2 row kgCO2e = kWh * gCO2e_per_kWh / 1000
+purchased material kgCO2e = kg * kgCO2e_per_kg
 ```
 
-Rules:
+Hourly Scope 2 requires timestamp alignment and cannot interpolate a missing
+grid interval. Confidence v2 uses source quality 35%, method fit 25%, temporal
+match 20%, and completeness 20%. Persist method/code/input/output hashes and
+complete source-to-measurement lineage.
 
-- Routes handle HTTP concerns only.
-- Services orchestrate use cases and transaction boundaries.
-- Repositories contain persistence operations, not business decisions.
-- Database models do not leak into API responses.
-- Pydantic schemas are the API/tool boundary.
-- The LLM and LangGraph nodes call typed services/tools, never raw database sessions.
-- Use `AsyncSession` and async database access; transaction owners commit explicitly and session helpers roll back on failure.
-- Do not run DDL during application startup. Only an operator provisioning a new or reset disposable database runs `python -m app.db.bootstrap`; normal contributors use the already-provisioned shared database.
-- SQLAlchemy `create_all()` does not alter existing tables. Rebuild a disposable branch for POC schema changes or deliberately introduce migrations before persistent environments require in-place evolution.
-- Use `Decimal`, never float, for carbon, quantity, percentage, score, and money arithmetic.
-- Store timestamps in UTC.
-- Use ISO currency codes.
-- Use UUID or ULID strings generated server-side; fixtures may use stable IDs.
-- Return typed safe errors with code, message, trace ID, retryability, and field details where applicable.
-- Logs are structured and must redact secrets and document bodies.
-- Keep imports directed inward. Domain code must not import application entrypoints.
-- Prefer straightforward functions/classes over speculative framework abstractions.
+### Assurance
 
-## Semantic layer and context
+Implement one GHG Protocol Scope 2 summary with limited ESRS evidence mapping.
+Claims are atomic. Numerical support comes from ledger facts; unstructured
+support comes from metadata-filtered evidence retrieval. Runtime code selects
+citation IDs and validates existence, tenant, context, requirement relevance,
+comparability, and support threshold. One unsupported reduction claim must be
+blocked. Outputs are POC drafts, not assurance opinions or filings.
 
-The semantic layer is intentionally small. It defines only the POC metrics, units, aliases, standards, and scoring methods required to keep the model from guessing terms such as footprint, PCF, avoided emissions, or best supplier.
+### Procurement
 
-Initial metric definitions:
-
-| Metric key | Canonical unit | Main context |
-| --- | --- | --- |
-| `activity.purchased_material_mass` | kg | company, site, period, material, supplier product |
-| `emissions.scope3.category1` | kgCO2e | company, site, period, material |
-| `supplier.product_carbon_footprint` | kgCO2e/kg | supplier, product, effective period |
-| `supplier.circularity_score` | score 0-100 | supplier product, scoring model |
-| `procurement.projected_avoided_emissions` | kgCO2e | scenario, recommended product |
-| `procurement.cost_delta_pct` | percent | scenario, recommended product |
-
-Every agent run receives one frozen context envelope containing:
-
-- company ID;
-- site ID;
-- reporting-period ID;
-- workflow;
-- metric keys;
-- supplier/material scope;
-- actor and role;
-- explicit cost, lead-time, and circularity constraints;
-- analysis signature.
-
-Only the contextualizer may inspect limited conversation history. Tools receive the frozen structured context, not an unbounded transcript.
-
-## Deterministic fact binding
-
-The model may produce a narrative template containing placeholders, for example:
-
-```text
-Switching from {fact_current_product} to {fact_recommended_product}
-could avoid {fact_avoided_kgco2e} while changing unit cost by
-{fact_cost_delta_pct}.
-```
-
-Application code resolves placeholders from verified facts, ledger events, calculations, and evidence.
-
-Validation rules:
-
-- Unknown placeholders fail validation.
-- Unbound numbers fail validation.
-- Stale facts or context mismatches fail validation.
-- The binder owns units, percentages, display formatting, and rounding.
-- Every displayed number has a fact binding.
-- Recommendation previews store an analysis signature and SHA-256 payload/preview hash.
-- A changed scenario, measurement, factor, scoring model, or recommendation invalidates the approval preview.
-
-## Measurement workflow
-
-Objective: convert purchased-material activity and factor evidence into a verified Scope 3 Category 1 measurement with confidence, baseline comparison, data-quality issues, evidence, and lineage.
-
-Steps:
-
-1. Import CSV/JSON activity and factor/evidence data.
-2. Validate required fields, signs, units, period, site, supplier/product references, duplicates, and checksums.
-3. Normalize activity to the metric's canonical unit.
-4. Resolve the most specific valid factor for product, geography, unit, and period.
-5. Stop for clarification or return unsupported when factor selection is ambiguous or impossible.
-6. Calculate emissions with `Decimal`.
-7. Calculate transparent confidence components.
-8. Persist calculation, measurement, evidence links, ledger event, lineage, and audit records transactionally.
-9. Bind a concise explanation to verified fact IDs.
-
-Core formulas:
-
-```text
-normalized_quantity = convert(activity.quantity, activity.unit, canonical_unit)
-measurement_kgco2e = normalized_quantity * emission_factor.value
-variance_pct = ((measurement_kgco2e - baseline_kgco2e) / baseline_kgco2e) * 100
-confidence =
-  0.40 * source_quality +
-  0.30 * factor_specificity +
-  0.20 * factor_recency +
-  0.10 * record_completeness
-```
-
-The calculation run records method version, code version, input IDs, factor ID, rounding policy, and output hash.
-
-## Procurement workflow
-
-Objective: use the verified measurement to compare feasible supplier products, calculate carbon and commercial impact, explain trade-offs, and require human approval.
-
-Steps:
-
-1. Freeze the current product, quantity, site, period, cost ceiling, lead-time ceiling, material compatibility, and circularity requirement.
-2. Load active alternatives with valid compatible evidence.
-3. Normalize carbon, evidence quality, circularity, and operational-fit criteria to deterministic 0-100 scores.
-4. Apply a versioned scoring model.
-5. Remove options violating cost or any other hard constraint. Never soften constraints or score cost as a compensating benefit.
-6. Calculate projected footprint, avoided emissions, reduction percentage, cost delta, and lead-time delta.
-7. Select the highest-scoring feasible option.
-8. Create an explanation template and bind verified facts.
-9. Create an approval preview with analysis signature and hash.
-10. Record approve/reject. Never create a purchase order.
-
-Initial scoring model:
+Hard constraints run before scoring and are never softened. Initial weights:
 
 | Criterion | Weight |
 | --- | ---: |
@@ -546,305 +346,210 @@ Initial scoring model:
 | Circularity | 20% |
 | Operational fit | 15% |
 
-Cost is a hard feasibility constraint, not a weighted scoring component.
+Cost is a hard feasibility constraint, not a score. All scenarios, including
+non-agent calls, persist required fact bindings.
 
-Core formulas:
+### Dispatch
 
-```text
-total_score =
-  0.40 * carbon_score +
-  0.25 * evidence_score +
-  0.20 * circularity_score +
-  0.15 * operational_fit_score
+Use immutable 24-hour forecast points, enumerate all consecutive two-hour
+windows, apply earliest start/latest finish/duration/delay/capacity/blackout
+constraints, and minimize emissions. Earliest feasible start is the primary
+tie-break. Missing forecast intervals invalidate a candidate; do not
+interpolate. Persist baseline/recommended windows and impact. Approval remains
+advisory and cannot actuate equipment.
 
-avoided_kgco2e = quantity * (current_pcf - alternative_pcf)
+## Shared semantic, fact, and approval contracts
 
-cost_delta_pct =
-  ((alternative_unit_cost - current_unit_cost) / current_unit_cost) * 100
-```
+The semantic layer contains only required entities, aliases, metric definitions,
+method definitions, and policy definitions. Each run receives one immutable
+`ContextEnvelope` with company, site, period, entities, metric/method scope,
+actor/role, hard constraints, request hash, and analysis signature.
 
-If no option is feasible, return `no_feasible_option` without changing the constraints.
+Generated prose uses templates with verified placeholders. The deterministic
+binder owns unit conversion, display formatting, rounding, citation IDs, and
+unknown-placeholder rejection.
+
+Generic Preview-Approve-Commit stores target type/ID, exact payload and preview
+hash, analysis signature, expiry, requester, decider, decision note,
+idempotency key, and ledger decision event. Revalidate upstream facts,
+evidence, method, forecast, and constraints immediately before commit.
 
 ## Agent design
 
-Use three bounded graphs:
+Use five bounded graphs:
 
-- Orchestrator: resolve context, classify intent, create a structured plan, choose Measurement, Procurement, or the cross-module sequence, enforce budgets, and assemble the response.
-- Measurement subgraph: validate/normalize, resolve factors, call deterministic calculations, write ledger/lineage, and bind facts.
-- Procurement subgraph: freeze the scenario, retrieve feasible alternatives, score deterministically, calculate impact, create a preview, request approval, and bind facts.
+- Orchestrator: contextualize, plan module order, enforce policy/budget, manage
+  handoffs, and synthesize a facts/judgments/unsupported-items response.
+- Measurement: validate, normalize, sync/select factors, calculate, confidence,
+  ledger.
+- Assurance: map requirements, decompose atomic claims, retrieve, bind, cite,
+  detect gaps, preview approval.
+- Procurement: freeze constraints, feasibility, score, impact, bind, preview.
+- Dispatch: sync forecast, apply constraints, optimize, impact, bind, preview.
 
-Allowlisted tools:
+The 24 tool IDs are frozen as:
 
-| ID | Tool | Responsibility |
-| --- | --- | --- |
-| T01 | `resolve_context` | Resolve company, site, period, metric, scope, and constraints. |
-| T02 | `get_metric_definition` | Return canonical unit, dimensions, handler, and method version. |
-| T03 | `find_activity_records` | Retrieve authorized activity records for frozen context. |
-| T04 | `validate_normalize_activity` | Return normalized records and typed issues. |
-| T05 | `lookup_emission_factor` | Select the most specific valid factor and evidence. |
-| T06 | `calculate_emissions` | Perform Decimal calculation and confidence scoring. |
-| T07 | `write_ledger_event` | Persist event, evidence, and lineage transactionally. |
-| T08 | `trace_lineage` | Return output-to-source lineage graph. |
-| T09 | `list_supplier_alternatives` | Retrieve compatible active products and constraints. |
-| T10 | `score_supplier_products` | Calculate versioned component and total scores. |
-| T11 | `calculate_procurement_impact` | Calculate feasibility and projected impact. |
-| T12 | `create_approval_preview` | Freeze payload, signature, hash, and approval record. |
+`resolve_context`, `resolve_entity`, `retrieve_ledger_facts`,
+`retrieve_evidence`, `write_ledger_event`, `create_approval_preview`,
+`validate_activity`, `normalize_unit`, `sync_grid_history`,
+`select_emission_factor`, `calculate_emissions`, `calculate_confidence`,
+`map_standard_requirement`, `decompose_claim`, `bind_claim_facts`,
+`validate_citations`, `detect_evidence_gaps`, `load_supplier_candidates`,
+`score_supplier`, `calculate_procurement_impact`,
+`build_procurement_recommendation`, `sync_grid_forecast`,
+`optimize_dispatch_window`, and `calculate_dispatch_impact`.
 
-Budgets per user request:
+Budgets:
 
-- Maximum 3 model calls.
-- Maximum 6 tool calls.
-- Maximum 1 structured-output or transient-tool repair.
-- Maximum 6 recent turns or 4,000 context tokens for the contextualizer.
-- Target 15 seconds end-to-end.
-- Explicit row and retrieval limits.
+- Single module: at most 3 model calls, 8 tool calls, one repair per stage,
+  target 15 seconds.
+- Four-module golden path: at most 6 model calls, 20 tool calls, one repair per
+  stage, target 45 seconds.
+- Approval resume: 0-1 model call, at most 3 tools, no repair, target 10 seconds.
 
-Typed terminal states:
+Terminal states include `success`, `needs_clarification`, `no_data`,
+`unsupported`, `policy_blocked`, `provider_unavailable`, `budget_exhausted`,
+`validation_failed`, `approval_required`, `no_feasible_option`, and `stale`.
+Every graph path must stop in a typed state; no autonomous retry loop exists.
 
-- `needs_clarification`
-- `no_data`
-- `validation_error`
-- `unsupported`
-- `no_feasible_option`
-- `failed_validation`
-- `budget_exhausted`
-- `approval_invalidated`
-- `completed`
+## API and frontend contracts
 
-No autonomous retry loop is allowed.
+The target API is documented in [docs/api/contract.md](docs/api/contract.md).
+Use only the canonical stable `/api/...` routes. New Assurance, Dispatch,
+generic approval, run-resume, recursive lineage, and sustainability behavior
+requires real services, not placeholder 200 responses. Bounded ledger search
+and immediate-neighbor detail are already implemented.
 
-## Core API contracts
+Target frontend routes:
 
-- `ContextEnvelope`: frozen tenant/site/period/metric/constraints plus analysis signature.
-- `ImportResult`: source IDs, accepted/rejected counts, and data-quality issues.
-- `MeasurementResult`: value, unit, formula, factor, confidence, fact/ledger IDs, baseline, and variance.
-- `ProcurementScenarioResult`: current product, constraints, alternatives, scores, feasibility, and selected recommendation.
-- `BoundNarrative`: template ID, resolved text, fact bindings, evidence links, and unsupported fragments.
-- `AgentRunResult`: plan, stage, terminal state, facts, judgments, telemetry, and approval requirement.
-- `ApprovalPreview`: entity, payload hash, analysis signature, expiration, facts, and evidence.
+1. `/dashboard`
+2. `/ask`
+3. `/data`
+4. `/quality`
+5. `/measurement`
+6. `/measurement/:id`
+7. `/assurance`
+8. `/assurance/:draftId`
+9. `/procurement/suppliers`
+10. `/procurement/scenarios/:id`
+11. `/dispatch`
+12. `/dispatch/:scenarioId`
+13. `/approvals`
+14. `/runs/:runId`
+15. `/ledger`
+16. `/demo`
 
-## Planned API surface
-
-The POC plan defines versioned routes under `/api/v1`. The current bootstrap route `/api/health` is temporary. New domain APIs should use `/api/v1`, and health should move or be aliased to `/api/v1/health` when API versioning is introduced.
-
-| Method | Path | Purpose |
-| --- | --- | --- |
-| GET | `/api/v1/health` | Readiness check. |
-| POST | `/api/v1/demo/reset` | Reset and reseed the demo. P1. |
-| GET | `/api/v1/semantic/metrics` | List metric definitions and versions. |
-| POST | `/api/v1/context/resolve` | Preview resolved context. P1. |
-| POST | `/api/v1/imports/activity` | Import activity CSV/JSON. |
-| POST | `/api/v1/imports/suppliers` | Import supplier products and evidence. |
-| GET | `/api/v1/imports/{id}` | Read import status and issues. P1. |
-| GET | `/api/v1/data-quality/issues` | List/filter data-quality issues. |
-| POST | `/api/v1/measurements/calculate` | Run deterministic measurement. |
-| GET | `/api/v1/measurements` | List measurements. |
-| GET | `/api/v1/measurements/{id}` | Read measurement facts and formula. |
-| GET | `/api/v1/measurements/{id}/lineage` | Read lineage graph. |
-| GET | `/api/v1/suppliers` | List supplier products. |
-| GET | `/api/v1/suppliers/{id}` | Read supplier/product evidence. |
-| POST | `/api/v1/procurement/assessments/run` | Calculate deterministic supplier/product assessments. |
-| POST | `/api/v1/procurement/scenarios` | Create a frozen scenario. |
-| GET | `/api/v1/procurement/scenarios/{id}` | Read scenario and comparison. |
-| GET | `/api/v1/procurement/recommendations/{id}` | Read recommendation facts, scores, and hashes. |
-| POST | `/api/v1/agent/query` | Start bounded agent workflow. |
-| GET | `/api/v1/agent/runs/{id}` | Read run state and telemetry. |
-| GET | `/api/v1/agent/runs/{id}/events` | Stream SSE run events. |
-| GET | `/api/v1/approvals` | List pending/decided approvals. |
-| POST | `/api/v1/approvals/{id}/decision` | Approve/reject with hash validation. |
-| GET | `/api/v1/audit/{entity_type}/{entity_id}` | Read chronological audit/lineage summary. |
-
-SSE event names:
-
-- `run.started`
-- `stage.started`
-- `stage.completed`
-- `tool.started`
-- `tool.completed`
-- `validation.warning`
-- `fact.created`
-- `approval.required`
-- `run.completed`
-- `run.stopped`
-
-## Planned frontend routes
-
-| ID | Route | Screen | Main responsibility |
-| --- | --- | --- | --- |
-| S01 | `/` | POC Dashboard | Outcome, quality, approvals, recent runs, and efficiency summary. |
-| S02 | `/ask` | Agent Workspace | Request, structured plan, live steps, verified answer, evidence, telemetry. |
-| S03 | `/data/import` | Data Import | Upload and preview activity/supplier data. |
-| S04 | `/data/quality` | Data Quality Review | Filter and resolve typed issues. |
-| S05 | `/measurements` | Measurement Overview | Totals, confidence, variance, status, drill-down. |
-| S06 | `/measurements/:id` | Measurement Detail | Formula, inputs, factor, confidence, evidence, lineage, supersession. |
-| S07 | `/suppliers` | Supplier Explorer | Product PCF, circularity, cost, lead time, and evidence quality. |
-| S08 | `/procurement/scenario` | Scenario Builder | Constraints, scoring version, comparison, and impact. |
-| S09 | `/procurement/recommendations/:id` | Recommendation Detail | Bound facts, scores, impact, evidence, explanation, preview hash. |
-| S10 | `/approvals` | Approval Queue | Review and approve/reject exact recommendation payloads. |
-| S11 | `/runs/:id` | Agent Run Trace | Graph stages, tools, tokens, retries, latency, and terminal state. |
-| S12 | `/audit/:type/:id` | Audit Explorer | Timeline of imports, calculations, events, recommendation, and approval. |
-
-Build these as the POC requires them. Do not create all screens as empty placeholders just to satisfy the route count.
-
-## Implemented database model
-
-The SQLAlchemy metadata contains exactly 32 relational tables across five PostgreSQL schemas. This five-schema model is authoritative over older unqualified table catalogues.
-
-| Schema | Tables |
-| --- | --- |
-| `core` | `companies`, `sites`, `reporting_periods`, `actors`, `data_sources`, `source_documents`, `evidence_items`, `audit_log` |
-| `carbon` | `raw_activity_records`, `activity_records`, `emission_factors`, `calculation_runs`, `emission_calculations`, `carbon_measurements`, `data_quality_issues`, `carbon_baselines`, `variance_alerts`, `agent_runs` |
-| `ledger` | `ledger_events`, `lineage_edges`, `ledger_event_evidence` |
-| `semantic` | `semantic_entities`, `semantic_aliases`, `metric_definitions`, `method_definitions` |
-| `procurement` | `suppliers`, `supplier_products`, `procurement_scenarios`, `supplier_scores`, `recommendations`, `fact_bindings`, `approvals` |
-
-Database rules:
-
-- PostgreSQL UUID primary keys are server-generated; timestamps are UTC-aware; carbon, quantity, money, percentages, confidence, and scores use fixed-precision numerics and Python `Decimal`.
-- Tenant-owned rows carry `company_id`, and composite foreign keys prevent cross-company references through sites, sources, products, ledger events, recommendations, and approvals.
-- Core relationships remain relational. JSONB is limited to raw/frozen/configuration payloads, constraints, weights, trace summaries, and snapshots.
-- Domain statuses use named `VARCHAR` checks instead of PostgreSQL enum types. Foreign keys use `ON DELETE RESTRICT`, and ORM relationships do not cascade deletes.
-- Checks enforce non-negative quantities and factors, confidence `0..1`, percentages and scores `0..100`, lowercase SHA-256 hashes, and valid evidence-embedding metadata.
-- Important facts are append-oriented. `ledger.prevent_ledger_event_mutation()` and `trg_ledger_events_immutable` reject update/delete operations on `ledger.ledger_events` with SQLSTATE `55000`.
-- `core.evidence_items.embedding` is nullable `VECTOR(768)`. Embedding, model identifier, and timestamp must all be present or all absent. A partial cosine HNSW index uses `m = 16` and `ef_construction = 64`; a B-tree metadata index supports company/document/type filtering.
-- Uniqueness and partial indexes enforce source and row idempotency, versioned definitions, one active recommendation per scenario, one pending approval per recommendation, fact-placeholder uniqueness, and approval decision idempotency.
-- Approval composite foreign keys bind each reviewed preview hash and analysis signature to the exact recommendation payload.
-- Read models are `carbon.v_measurement_summary`, `procurement.v_supplier_comparison`, and `procurement.v_pending_approvals`.
-
-For a new or reset disposable database, an operator runs `python -m app.db.bootstrap` to enable pgvector and create compatible missing objects, then may run the read-only `python -m app.db.bootstrap --check` verification. Normal contributors connect to the already-provisioned shared database and do not bootstrap it. API startup never performs DDL. `create_all()` does not migrate existing tables; rebuild a disposable branch for POC structural changes or reintroduce migrations for persistent environments. The full data dictionary is in `docs/architecture/database.md`.
+Every screen has loading, empty, error, unsupported, stale, and terminal states
+as applicable. Numbers come from typed API facts, never parsed narrative or UI
+constants.
 
 ## Team ownership
 
-| Developer | Primary ownership |
+| Person | Primary ownership |
 | --- | --- |
-| Dev 1 - Frontend | React shell, routes, POC screens, queries/forms, lineage/charts, SSE client, approval UX, frontend tests. |
-| Dev 2 - Backend | FastAPI contracts, imports, measurement engine, procurement engine, REST/SSE services, deterministic unit tests. |
-| Dev 3 - Agentic AI | LangGraph state, context/intent planner, tool schemas, budgets, fact-template synthesis, grounding validation, evals. |
-| Dev 4 - Database/Platform | Neon/PostgreSQL code-first schema, async sessions, ledger/lineage, approvals/audit, pgvector, Docker, deployment, logging/tracing. |
-| Dev 5 - Data/QA | Synthetic fixtures/evidence, seed/reset, expected values, integration/e2e tests, README, deck, and video coordination. |
+| Dev 1 - Frontend | React shell and 16 screens, generated client, charts/lineage, SSE and approval UX, Playwright. Already in progress. |
+| Dev 2 - Backend foundation and Measurement | Sole ownership of shared routing/contracts, activity/hourly import, data quality, Scope 2 timestamp alignment, ledger/audit, generic approval lifecycle, and the reset transaction. |
+| Dev 3 - Assurance backend | Generic document/evidence upload plus Assurance standards, requirements, drafts, atomic claims, retrieval, citation/gap validation, staleness, domain handlers under Dev 2's shared API contract, and approval-preview integration. |
+| Dev 4 - Procurement, Dispatch, integrations, and QA | Electricity Maps/grid-point and forecast sync, Procurement contract gaps, deterministic Dispatch, canonical fixture builders, golden replay, cross-module E2E, and demo readiness. |
+| Dev 5 - Agentic runtime | Context/planning, five LangGraph graphs, 24 typed tools, model-provider execution, persisted run steps, interrupts/resume, SSE, evaluations, and agent telemetry. |
 
-Critical handoffs:
+Detailed remaining tasks, dependencies, and acceptance gates live in
+[docs/planning/implementation-plan.md](docs/planning/implementation-plan.md).
 
-- Hour 4: Dev 2 and Dev 4 freeze table names, IDs, core Pydantic contracts, and transaction boundaries.
-- Hour 6: Dev 3 freezes graph state, tool signatures, terminal states, and SSE event names.
-- End of Day 1: Dev 5 publishes seed files, expected calculations, expected recommendation, and stable IDs.
-- Day 2 morning: Dev 2 publishes OpenAPI and working Measurement endpoints/tools.
-- Day 3 morning: Dev 2 and Dev 4 publish Procurement, approval, and audit endpoints/tools.
-- Day 4 noon: code freeze; only fixes, documentation, demo, and packaging.
+## Four-day delivery sequence
 
-## Four-day build sequence
+### Day 1 - contract and platform
 
-### Day 1 - Foundation
+Freeze IDs, API and tool contracts, terminal states, and the fixture manifest.
+Verify the completed 46-table clean bootstrap, seed a skeleton, and prove upload
+-> run record -> persisted SSE. No feature developer is assigned an old-database
+migration.
 
-- Freeze contracts and identifiers.
-- Bootstrap Neon PostgreSQL, pgvector, the code-first tables, and the seed/reset path.
-- Build frontend shell and data import entry point.
-- Build agent graph skeleton and terminal states.
-- Exit gate: bootstrap verification and seed run, services boot, frontend reaches health, and the agent can return a structured plan.
+### Day 2 - Measurement and Assurance
 
-### Day 2 - Measurement
+Complete hourly Scope 2, history fixture/live parity, confidence v2, lineage,
+atomic claims, citations/gaps, and a blocked unsupported claim. End with live
+source-to-claim trace-back and deterministic replay.
 
-- Import and normalize activity.
-- Resolve factors.
-- Implement Decimal calculation, confidence, ledger write, evidence links, and lineage.
-- Build measurement list/detail and data-quality screens.
-- Exit gate: source CSV produces 33,600 kgCO2e and trace-back reaches source row and factor.
+### Day 3 - Procurement and Dispatch
 
-### Day 3 - Procurement
+Complete aluminium fixtures, constraints/scoring/impact, forecast fixture/live
+parity, optimizer, generic previews, stale checks, and all-four orchestration.
+Feature-freeze after P0 E2E passes.
 
-- Import supplier products/evidence.
-- Implement scoring, hard constraints, impact calculation, recommendation, fact binding, and approval.
-- Build supplier, scenario, recommendation, and approval screens.
-- Exit gate: Alternative B is selected with 10,800 kgCO2e avoided and +3.2% cost, then approved/rejected and audited.
+### Day 4 - hardening and submission
 
-### Day 4 - Integration and submission
-
-- Complete cross-module agent flow, SSE, telemetry, e2e checks, polish, README, deployment, deck, and video.
-- Exit gate: fresh clone/reset works and the main demo succeeds twice without manual database edits.
+Bug fixes only, provider failure paths, telemetry, clean-machine rehearsal,
+three dry runs, documentation, architecture/deck, video, tag, and early upload.
 
 ## Release-blocking journeys
 
-1. Fresh Neon setup, explicit code-first bootstrap verification, and seed complete without manual database changes.
-2. Happy measurement returns 33,600 kgCO2e with expected factor, confidence, fact, and ledger IDs.
-3. Measurement trace-back resolves every graph node to real source/evidence records.
-4. Wrong units and missing supplier data create typed issues and no verified measurement.
-5. Happy procurement recommends Alternative B with 10,800 kgCO2e avoided and +3.2% cost.
-6. Tight cost constraints return `no_feasible_option` without relaxation.
-7. Unknown fact placeholders fail grounding validation.
-8. Changed scenarios invalidate approval previews; repeated decisions are idempotent.
+1. Clean local setup creates/verifies 46 tables and seeds without manual SQL.
+2. Reset is safe, reproducible, and rejects non-synthetic data.
+3. Hourly Scope 2 and purchased-material outputs reproduce golden Decimal values
+   and hashes.
+4. Every displayed numerical fact traces to a real raw row/provider snapshot,
+   calculation, evidence, and ledger event.
+5. Missing/duplicate data creates typed issues and blocks invalid verification.
+6. Assurance supports valid claims and blocks an unsupported reduction claim.
+7. Procurement preserves hard constraints and returns no feasible option rather
+   than relaxing them.
+8. Dispatch selects a complete feasible lower-carbon window and never actuates.
+9. Generic previews cover disclosure, procurement, and dispatch.
+10. Changed fact/evidence/forecast/method/constraint invalidates a preview.
+11. Repeated decisions are idempotent and create one commit event.
+12. The four-module run respects budgets and exposes a complete replayable trace.
 
 ## Definition of done
 
-- A fresh clone can be installed, reset, seeded, run, and demonstrated from documented commands.
-- The connected Measurement to Procurement to Approval flow works end to end.
-- The frontend contains no hard-coded result values.
-- Deterministic formulas, scoring, constraints, and hashes pass unit tests.
-- Every final number is traceable through facts, ledger events, evidence, and source records.
-- Agent runs have bounded plans, tools, retries, and typed stopping states.
-- Run telemetry displays model, tokens, tools, retries, latency, and impact metrics.
-- The recommendation requires human approval and cannot autonomously purchase.
-- No confidential, customer, or personal data appears in fixtures, prompts, logs, or traces.
-- README, architecture explanation, limitations, pitch deck, and demo video are complete.
-
-## Privacy, safety, and responsible AI
-
-- Use only public, open, or synthetic data.
-- Label synthetic data in files and screens.
-- Do not use customer code, branding, invoices, supplier contracts, personal data, or secrets.
-- Send only the minimum context and short evidence chunks to the model.
-- Never send entire uploaded documents to the model by default.
-- Redact secrets and document bodies from logs/traces.
-- The agent may recommend and draft but may not place orders or create legal commitments.
-- Token count is usage telemetry, not an exact carbon footprint.
-- Only publish an SCI-style compute estimate if every energy/carbon-intensity assumption is documented and reproducible.
-
-## Agent sustainability telemetry
-
-Capture:
-
-- measured baseline and projected impact;
-- approved/rejected impact;
-- baseline manual-time assumption and actual elapsed time;
-- model/provider identifier;
-- calls and input/output/context tokens;
-- structured-output repairs;
-- tool calls, retries, failures, rows processed, and evidence chunks retrieved;
-- total and per-stage latency;
-- trace ID, analysis signature, code/method/scoring versions, hashes, and approval actor/time.
-
-Useful transparent ratios:
-
-```text
-impact_per_1k_tokens = projected_kgco2e_avoided / (total_tokens / 1000)
-minutes_saved_per_run = baseline_manual_minutes - actual_elapsed_minutes
-verified_value_ratio = approved_kgco2e_avoided / max(1, model_call_count)
-```
-
-Do not overstate these ratios as direct model-carbon measurements.
+- All four modules execute in one connected golden-path run.
+- Deterministic outputs and hashes replay from declared fixtures.
+- Every numerical fact is clickable to live lineage and evidence.
+- Unsupported, stale, no-data, provider-failure, and infeasible states are
+  explicit.
+- Disclosure, procurement, and dispatch use Preview-Approve-Commit.
+- Agent tools, retries, context, and model calls remain bounded.
+- Run trace shows node/tool/API/cache/token/retry/latency and footprint
+  assumptions.
+- No customer, personal, confidential, or secret data exists in fixtures,
+  prompts, logs, screenshots, or traces.
+- Docker/database bootstrap and verification, seed/reset, tests, and E2E work on
+  a clean machine. A legacy-data transition is required only if the team chooses
+  to preserve an older live database.
+- README, architecture/design document, limitations, data/source register,
+  8-10 slide deck, and 3-5 minute running-agent video are complete.
 
 ## Working rules for coding agents
 
-When an AI coding agent receives this file:
+1. Read the latest request and this file; do not implement unrelated roadmap
+   items.
+2. Inspect `git status` and current files before editing; shared changes belong
+   to the team.
+3. Keep routes thin, services transactional, repositories persistence-only, and
+   Pydantic schemas at API/tool boundaries.
+4. Database models never leak into API responses.
+5. Use `AsyncSession`; transaction owners commit explicitly and helpers roll
+   back failures.
+6. Use `Decimal`, UTC timestamps, ISO currency codes, server-generated UUIDs,
+   and stable fixture IDs.
+7. Do not add an endpoint that pretends an unimplemented workflow succeeded.
+8. Do not perform DDL on application startup or mutate the shared database while
+   developing features.
+9. Do not run destructive reset, bootstrap, or optional transition commands
+   without resolving and verifying the exact disposable target.
+10. Add tests in proportion to risk, prioritizing formulas, time alignment,
+    constraints, citations, hashes, transactions, idempotency, lineage, and
+    replay.
+11. Run relevant Ruff/pytest/frontend checks before reporting completion.
+12. Update this file only when the team intentionally changes a shared decision.
 
-1. Read the latest user task first. Do not implement the whole roadmap unless explicitly requested.
-2. Inspect current files and `git status` before changing anything.
-3. Treat existing user/team changes as intentional and preserve them.
-4. Keep changes scoped to the requested vertical slice.
-5. Follow existing project patterns before introducing abstractions.
-6. Do not overengineer. The delivery window is four days.
-7. Do not add infrastructure, dependencies, folders, or generic utilities without an immediate use.
-8. Prefer typed contracts and deterministic functions at system boundaries.
-9. Never let an LLM calculate values, issue SQL, relax constraints, or approve actions.
-10. Add tests in proportion to risk, prioritizing formulas, constraints, hashes, transaction integrity, and end-to-end journeys.
-11. Run relevant type checks, linting, tests, and builds before reporting completion.
-12. Update this file only when the team intentionally changes a shared project decision.
+## References
 
-## Reference documents used to create this context
-
-- `CarbonMesh_4_Day_Hackathon_POC_Plan_v3.docx`
-- `CarbonMesh_Problem_and_Solution.pdf`
-- `CarbonMesh_Technology_Stack_and_Architecture.docx`
-- `frontend-architecture (3).md`
-- `backend-architecture (2).md`
-- `frontend-design-system.md`
-- The current CarbonMesh repository and its README, package manifests, configuration, and bootstrap code.
+- Attached four-module hackathon implementation blueprint (external source).
+- [System architecture](docs/architecture/system.md)
+- [Database architecture](docs/architecture/database.md)
+- [Current API reference](docs/api/reference.md)
+- [API contract](docs/api/contract.md)
+- [Current code audit](docs/planning/current-code-audit.md)
+- [Gap and team plan](docs/planning/implementation-plan.md)
+- The current repository, tests, OpenAPI schema, and package manifests.

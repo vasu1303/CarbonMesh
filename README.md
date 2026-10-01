@@ -1,296 +1,247 @@
 # CarbonMesh
 
-CarbonMesh is a React and FastAPI proof of concept that connects traceable carbon
-measurement to deterministic supplier comparison and human approval.
+CarbonMesh is a four-module carbon-operations proof of concept covering
+Measurement, Assurance, Procurement, and advisory Dispatch. The modules share
+one deterministic control plane, evidence-backed ledger, bounded agent runtime,
+and human Preview-Approve-Commit workflow.
 
-## Prerequisites
+The repository is in an active transition. The database contract and the
+existing Measurement/Procurement backend are implemented; hourly Scope 2,
+Assurance services, Dispatch optimization, and the full LangGraph runtime are
+still assigned work. A table or route appearing in the target architecture is
+not evidence that its business workflow already exists.
 
-- Node.js 22.12 or newer
-- npm 10 or newer
-- Python 3.12 or newer
+## Start locally with Docker
 
-## Install the frontend
+Prerequisites:
 
-From the repository root:
+- Docker with Compose support;
+- Node.js 22.12 or newer and npm 10 or newer for the frontend.
+
+Create the database, install the explicit schema contract, then start the API:
+
+```bash
+docker compose up -d db
+docker compose build api
+docker compose run --rm api python -m app.db.bootstrap
+docker compose up -d api
+```
+
+Bootstrap is deliberately separate from API startup. It creates a pristine
+PostgreSQL/pgvector database with 46 tables across eight schemas and then
+verifies columns, constraints, indexes, views, and the immutable-ledger trigger.
+It never seeds application data.
+
+Start the frontend from the repository root:
 
 ```bash
 npm --prefix apps/web install
+npm run dev
 ```
 
-## Install the backend
+Open:
+
+- frontend: `http://localhost:3000`;
+- API health: `http://localhost:8000/api/health`;
+- OpenAPI: `http://localhost:8000/docs`.
+
+The optional Make targets wrap the same operations:
+
+```bash
+make db-bootstrap
+make db-check
+make test
+make lint
+```
+
+Docker and GNU Make were not available in the environment that produced this
+change, so the Compose YAML was parsed and reviewed but still needs one
+clean-machine rehearsal.
+
+## Run without Docker
+
+Install the backend on Windows:
 
 ```powershell
 cd apps/api
 py -m venv .venv
 .venv\Scripts\Activate.ps1
 python -m pip install -e ".[dev]"
-```
-
-On macOS or Linux, activate the environment with `source .venv/bin/activate`.
-
-## Configure the existing Neon PostgreSQL database
-
-The Neon connection URL belongs in the backend environment file, not in frontend
-code or a committed source file:
-
-```powershell
-cd apps/api
 Copy-Item .env.example .env
 ```
 
-Open `apps/api/.env` and replace the example `DATABASE_URL` with the pooled
-connection string for the already-provisioned shared development database,
-obtained through the team's approved secret-sharing channel. Keep
-`sslmode=require` in the URL. The `.env` file is ignored by git; never commit,
-print, or expose the value to the frontend. If a credential has appeared in a
-prompt, issue, log, or commit, rotate it in Neon before using it here.
-Paste the raw URL from the Neon console, not a Markdown link or a string with
-brackets; reserved password characters must remain URL-encoded.
+On macOS or Linux, activate the environment with
+`source .venv/bin/activate`.
 
-The shared development database is already provisioned. Normal contributors do
-not run bootstrap: after installing dependencies and configuring `.env`, start
-the API directly.
+Set `DATABASE_URL` in the ignored `apps/api/.env` file. Local PostgreSQL may use
+`sslmode=disable` only with an approved local or Docker hostname. Every remote
+database must use `sslmode=require`. Never commit, print, or expose a real URL.
 
-### Provisioning a new database (operator only)
-
-Only an operator creating a new or reset disposable database should run the
-bootstrap commands that enable pgvector and install the five schemas, 32 tables,
-views, and immutable-ledger trigger:
+For a new disposable database only:
 
 ```powershell
 python -m app.db.bootstrap
 python -m app.db.bootstrap --check
 ```
 
-The first command is idempotent for a complete, compatible CarbonMesh schema.
-The check form is read-only and verifies the schemas, tables, pgvector column and
-index, views, and immutable-ledger trigger. Both commands reject partial or
-unexpected CarbonMesh structures instead of dropping or rewriting them.
-Do not run the provisioning command against the shared development database as
-part of routine startup. Use `--check` only when an operator needs read-only
-contract verification or when diagnosing a database mismatch.
-
-### Viewing the tables in Neon
-
-CarbonMesh does not place application tables in PostgreSQL's `public` schema.
-In the Neon **Tables** page, first select the same project, branch, and database
-used by `apps/api/.env`, then use the **Schema** menu to select `core`, `carbon`,
-`ledger`, `semantic`, or `procurement`. Neon shows one schema at a time, so the
-default `public` selection can appear empty even after bootstrap succeeds.
-
-The Neon SQL Editor can verify every application table independently of the
-Tables-page filter:
-
-```sql
-SELECT table_schema, table_name
-FROM information_schema.tables
-WHERE table_type = 'BASE TABLE'
-  AND table_schema IN ('core', 'carbon', 'ledger', 'semantic', 'procurement')
-ORDER BY table_schema, table_name;
-```
-
-The query must return 32 rows. If it does not, compare the SQL Editor's selected
-branch and database with the connection string in `apps/api/.env`, then rerun
-`python -m app.db.bootstrap --check` from `apps/api`.
-
-With the existing shared database configured, start the API directly:
+Then run the API from `apps/api`:
 
 ```powershell
 python -m uvicorn app.main:app --reload --reload-dir app --port 8000
 ```
 
-Then open `http://localhost:8000/api/db/demo`. A successful response confirms
-the async Neon connection and includes the database timestamp:
-
-```json
-{
-  "connected": true,
-  "database_time": "2026-01-01T12:00:00.000000+00:00",
-  "message": "Connected to Neon PostgreSQL."
-}
-```
-
-Connection failures return a fixed, sanitized `503` response. The endpoint never
-returns the connection URL, driver exception, host, username, or password.
-
-For the opt-in live contract suite, use only the rotated disposable branch. The
-explicit attestation prevents an accidental run against an ordinary database:
-
-```powershell
-$env:CARBONMESH_RUN_NEON_INTEGRATION_TESTS = "rotated-disposable-branch"
-python -m pytest tests/integration/test_neon_database.py -q
-Remove-Item Env:CARBONMESH_RUN_NEON_INTEGRATION_TESTS
-```
-
-The suite bootstraps twice, runs `--check`, exercises vector search and integrity
-constraints, and never drops or resets a schema. Without that exact opt-in value
-and a `*.neon.tech` URL, every live test is skipped.
-
-## SQLAlchemy code-first workflow
-
-The backend uses SQLAlchemy 2.x async ORM, asyncpg, and pgvector. Define models
-from `app.db.base.Base`; obtain an `AsyncSession` through the database session
-context manager. Routes must not construct engines, open raw connections, or
-commit implicitly.
-
-Schema creation is explicit, operator-owned, and never runs during FastAPI
-startup. The following command is for a new or reset disposable database, not
-normal development against the shared database:
-
-```powershell
-python -m app.db.bootstrap
-```
-
-This repository intentionally does not use Alembic. SQLAlchemy `create_all()`
-creates missing objects but does not alter existing tables. During the POC, a
-structural model change therefore requires rebuilding a disposable Neon branch;
-reintroduce a migration tool before persistent environments need in-place
-evolution. Never point bootstrap at a database whose existing CarbonMesh data
-must be preserved unless `python -m app.db.bootstrap --check` succeeds first.
-
-Evidence embeddings are stored in `core.evidence_items.embedding` as
-`VECTOR(768)` and indexed with a partial cosine HNSW index. The exact embedding
-model identifier is stored alongside each vector. See
-[`docs/architecture/database.md`](docs/architecture/database.md) for the full
-database contract.
-
-The API health endpoints are `http://localhost:8000/api/health` and
-`http://localhost:8000/api/v1/health`. Interactive API documentation is at
-`http://localhost:8000/docs`. The base URL returns `404` because no root route is
-defined. Limiting reloads to the `app` directory avoids virtual-environment or
-OneDrive changes repeatedly restarting the server.
-
-## POC API workflows
-
-The `/api/v1` surface implements measurement lineage, supplier exploration,
-deterministic procurement assessment and scenarios, bounded agent runs with SSE,
-hash-bound approvals, audit history, and Electricity Maps grid-intensity caching.
-Tenant-owned query routes require `company_id`; command payloads carry their tenant
-and actor context. OpenAPI documents the exact request and response contracts; the
-route overview is in [`docs/api/poc-v1.md`](docs/api/poc-v1.md).
-
-Set `ELECTRICITY_MAPS_API_TOKEN` only in `apps/api/.env` to use the live integration.
-The API never returns that credential. Grid-intensity syncs are bounded to ten days,
-snapshot the provider response, normalize gCO2eq/kWh to kgCO2e/kWh, and persist
-provenance in the existing evidence and factor tables.
-
-### Configure an AI model provider
-
-The agent layer exposes one provider-neutral model interface for OpenAI, Gemini,
-Anthropic, and OpenRouter. Put one provider's key and model identifier in
-`apps/api/.env`; model identifiers have no source-code defaults because provider
-catalogues change over time. For example:
-
-```dotenv
-AI_PROVIDER=openai
-OPENAI_API_KEY=replace-locally
-OPENAI_MODEL=replace-with-a-current-model-id
-```
-
-When `AI_PROVIDER=auto` (or blank), the factory selects a provider only if exactly
-one of `OPENAI_API_KEY`, `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, or
-`OPENROUTER_API_KEY` is configured. If multiple credentials are present, set
-`AI_PROVIDER` explicitly. The factory never silently fails over to another vendor.
-
-Agent code calls the same interface regardless of provider:
-
-```python
-from app.modules.agents.llm import AIMessage, AIRequest, build_ai_model
-
-model = build_ai_model()
-result = await model.generate(
-    AIRequest(messages=(AIMessage(role="user", content="Summarize these facts."),))
-)
-```
-
-Construction is lazy and makes no network call, so deterministic workflows and API
-startup do not require an AI credential. Provider calls have a bounded timeout and
-response size, return normalized token/latency metadata, and expose only sanitized
-errors. Prompts, provider response bodies, and credentials are not retained in the
-normalized result.
-
-The API E2E suite arranges the minimum synthetic Nova Components / Plant B / Q3
-2026 prerequisite records only inside its disposable database, then exercises all
-requested endpoints through HTTP. Command responses are persisted and read back
-through their corresponding query endpoints. The application never seeds data at
-startup or while serving these APIs. By default, the suite starts a temporary local
-PostgreSQL server and never reads `DATABASE_URL`:
-
-```powershell
-cd apps/api
-python -m pytest tests/e2e -q
-```
-
-The local path requires `initdb` and `pg_ctl` on `PATH`. To use an explicitly
-disposable PostgreSQL database instead, set `CARBONMESH_E2E_DATABASE_URL` and also
-set `CARBONMESH_RUN_API_E2E_TESTS=disposable-database`. The suite drops and rebuilds
-the five CarbonMesh schemas, so never opt in with a database that contains data to
-preserve. Electricity Maps is replaced by a deterministic fake provider in E2E
-tests; no external credential or network call is required.
-
-Run all backend quality checks from `apps/api`:
-
-```powershell
-ruff check app tests
-pytest -q
-```
-
-## Reset and use the synthetic POC API
-
-The versioned readiness endpoint is `GET /api/v1/health`; the legacy
-`GET /api/health` path remains available to the existing frontend. On an empty
-or all-synthetic disposable database, seed the documented Nova Components demo:
-
-```powershell
-$headers = @{ "X-Demo-Reset-Token" = $env:DEMO_RESET_TOKEN }
-Invoke-RestMethod -Method Post -Headers $headers http://localhost:8000/api/v1/demo/reset
-```
-
-Set a random `DEMO_RESET_TOKEN` of at least 16 characters in `apps/api/.env`
-before starting the API; without it the endpoint is disabled. The reset is also
-blocked with `409 demo_reset_blocked` if any non-synthetic company exists. It
-atomically replaces all demo rows, so use it only on a disposable rehearsal
-database. The response returns the stable company, Plant B, and Q3 2026
-identifiers needed by the other endpoints.
-
-Implemented POC endpoints include:
-
-- `GET /api/v1/semantic/metrics` and `POST /api/v1/context/resolve`
-- `POST /api/v1/imports/activity` and `POST /api/v1/imports/suppliers`
-- `GET /api/v1/imports/{import_id}` and `GET /api/v1/data-quality/issues`
-- `POST /api/v1/measurements/calculate`
-- `GET /api/v1/measurements` and `GET /api/v1/measurements/{measurement_id}`
-
-Import commands use a typed JSON envelope containing either CSV text or JSON
-rows. The exact request and response contracts, filters, status codes, and
-examples are available in the OpenAPI UI at `http://localhost:8000/docs`.
-
-## Run the frontend
-
-In a second terminal, from the repository root:
+Run the frontend in a second terminal from the repository root:
 
 ```bash
 npm run dev
 ```
 
-Open `http://localhost:3000`. Vite proxies `/api` requests to the FastAPI server on port `8000`.
+### Hosted database safety
 
-## Repository layout
+The checked-in SQLAlchemy metadata now expects the complete eight-schema,
+46-table contract. Do not point this branch at an older shared database and do
+not assume `create_all()` can upgrade it. Use a fresh disposable branch, or run
+a reviewed data-preserving migration after it has passed an empty-to-target and
+baseline-to-target rehearsal. Keep the previous branch or a verified backup as
+rollback.
 
-```text
-apps/
-  web/        React, TypeScript, Vite, Tailwind CSS v4, shadcn/ui
-  api/        FastAPI, async SQLAlchemy models, bootstrap, and domain modules
-data/demo/    Synthetic hackathon fixtures
-docs/         Project context, database design, architecture, and API documentation
-infra/        Deployment and infrastructure files
-scripts/      Project automation
-tests/e2e/    Cross-application end-to-end tests
+FastAPI startup performs no DDL, migration, reset, or seed. `--check` is
+read-only. The normal bootstrap refuses partial, extra, or structurally
+incompatible CarbonMesh schemas rather than dropping or rewriting them.
+
+## Database contract
+
+PostgreSQL and pgvector are the only persistence services. The code-first model
+contains exactly:
+
+| Schema | Tables |
+| --- | ---: |
+| `core` | 9 |
+| `semantic` | 5 |
+| `ai` | 2 |
+| `carbon` | 10 |
+| `ledger` | 4 |
+| `assurance` | 6 |
+| `procurement` | 5 |
+| `dispatch` | 5 |
+
+Important physical changes include generic `core.approvals`, shared
+`ledger.fact_bindings`, `ai.agent_runs` and `ai.agent_run_steps`, timestamped
+`carbon.grid_intensity_points`, six Assurance tables, five Dispatch tables, and
+`procurement.procurement_recommendations`.
+
+The connection layer uses async SQLAlchemy and asyncpg. Hosted Neon endpoints
+use authenticated TLS, disabled prepared-statement caches, and `NullPool`;
+approved local hosts use the bounded SQLAlchemy pool with pre-ping. See the
+[database architecture](docs/architecture/database.md) for the exact contract.
+
+## API status
+
+The canonical API is exposed under stable `/api/...` resource paths. OpenAPI is
+the source of truth for implemented request and response shapes. Temporary
+hidden aliases preserve the previous prefixed paths while frontend integration
+is updated.
+
+Implemented, substantive capabilities include:
+
+- health and sanitized database diagnostics;
+- synthetic reset for the existing Nova fixture;
+- semantic context resolution;
+- CSV/JSON activity and supplier imports with typed quality issues;
+- deterministic purchased-material Measurement, evidence, lineage, and audit;
+- supplier exploration, hard-constraint Procurement scoring, impact, and
+  hash-bound approval;
+- persisted bounded run state with SSE replay;
+- Electricity Maps historical retrieval using the existing factor cache;
+- tenant-scoped ledger event search and detail with safe evidence summaries and
+  immediate lineage neighbors.
+
+Still missing or incomplete:
+
+- the Maverick four-module fixture and golden replay manifest;
+- hourly Scope 2 calculation using `carbon.grid_intensity_points`;
+- Assurance repositories/services, retrieval, citations, validation, and
+  approval;
+- Dispatch forecast, constraint, optimizer, recommendation, and approval;
+- generic approval/fact-binding services beyond current Procurement use;
+- five LangGraph graphs, 24 typed tools, durable resume, real provider calls,
+  and persisted run-step telemetry;
+- dependency-aware readiness and agent-sustainability metrics.
+
+See the [current API reference](docs/api/reference.md),
+[target API contract](docs/api/contract.md), and
+[implementation plan](docs/planning/implementation-plan.md). The evidence for
+the remaining-work assessment is in the
+[current code audit](docs/planning/current-code-audit.md).
+
+## Synthetic data reset
+
+The current reset endpoint is destructive and is only for an empty or
+all-synthetic disposable database. Set a random `DEMO_RESET_TOKEN` of at least
+16 characters in `apps/api/.env`, start the API, and call:
+
+```powershell
+$headers = @{ "X-Demo-Reset-Token" = $env:DEMO_RESET_TOKEN }
+Invoke-RestMethod -Method Post -Headers $headers http://localhost:8000/api/demo/reset
 ```
 
-The database foundation, synthetic reset/seed path, import/data-quality APIs,
-semantic context APIs, and deterministic measurement APIs are implemented.
-Procurement, approvals, agents, and most feature screens remain staged work.
-The database and P0 backend workflows are implemented. Measurement calculation and
-import APIs beyond this route batch, production model execution, and most frontend
-feature screens remain staged work.
+It returns `409 demo_reset_blocked` when any non-synthetic company exists. The
+current fixture is the earlier Nova packaging scenario; replacing it with the
+four-module Maverick fixture is explicitly assigned to the Data/Dispatch/QA
+owner.
+
+## Optional external providers
+
+Set `ELECTRICITY_MAPS_API_TOKEN` only in the backend environment. Provider
+responses are bounded and snapshotted as evidence; secrets and response bodies
+must not enter logs or API errors.
+
+The model layer has provider-neutral OpenAI, Gemini, Anthropic, and OpenRouter
+HTTP adapters. Configure exactly one provider and an explicit model identifier,
+for example:
+
+```dotenv
+AI_PROVIDER=gemini
+GEMINI_API_KEY=replace-locally
+GEMINI_MODEL=replace-with-a-current-model-id
+```
+
+The current deterministic orchestrator does not call these adapters yet. Model
+identifiers remain configuration because provider catalogues change.
+
+## Quality checks
+
+Backend, from `apps/api`:
+
+```powershell
+python -m ruff check app tests
+python -m pytest -q
+```
+
+Frontend, from the repository root:
+
+```bash
+npm run typecheck
+npm run lint
+npm run build
+```
+
+Live Neon tests are opt-in and must use only a disposable branch. API E2E tests
+may drop and rebuild application schemas when explicitly configured; never aim
+them at data that must be preserved.
+
+## Repository map
+
+```text
+apps/web/                    React, TypeScript, Vite, shadcn/ui
+apps/api/                    FastAPI, domain services, SQLAlchemy models
+data/demo/                   Synthetic fixtures and expected results
+docs/architecture/           System and database contracts
+docs/api/                    Current and target HTTP contracts
+docs/planning/               Code audit and five-person implementation plan
+docker-compose.yml           Local PostgreSQL/pgvector and API
+.github/workflows/quality.yml  Backend and frontend quality gates
+```
+
+The repository-wide engineering contract is [AGENTS.md](AGENTS.md), and the
+short human summary is [docs/PROJECT_CONTEXT.md](docs/PROJECT_CONTEXT.md).
