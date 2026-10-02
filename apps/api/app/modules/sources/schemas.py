@@ -165,3 +165,15 @@ class SourceUploadResponse(SourceSchema):
     source: DataSourceMetadata
     document: SourceDocumentMetadata
     evidence: list[EvidenceMetadata]
+
+
+class SourceIndexRequest(SourceSchema):
+    company_id: UUID
+    actor_id: UUID
+
+
+class SourceIndexResponse(SourceSchema):
+    document_id: UUID
+    embedding_model_id: str
+    indexed_count: int
+    replayed: bool

@@ -10,10 +10,13 @@ WORKDIR /app
 RUN addgroup --system carbonmesh \
     && adduser --system --ingroup carbonmesh carbonmesh
 
-COPY pyproject.toml ./
-COPY app ./app
+COPY apps/api/pyproject.toml ./
+COPY apps/api/app ./app
+COPY data/demo ./app/demo_fixtures
 
-RUN python -m pip install .
+RUN python -m pip install . \
+    && mkdir -p /app/.data/sources \
+    && chown -R carbonmesh:carbonmesh /app/.data
 
 USER carbonmesh
 

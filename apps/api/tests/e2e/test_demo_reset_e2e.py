@@ -91,7 +91,9 @@ async def test_reset_measurement_procurement_dispatch_and_generic_decisions(api_
         },
     )
     assert procurement.status_code == 201, procurement.text
-    forecasts = await api_client.post("/api/dispatch/forecasts/sync", json=site)
+    forecasts = await api_client.post(
+        "/api/dispatch/forecasts/sync", json={**site, "source_mode": "fixture"}
+    )
     assert forecasts.status_code == 200, forecasts.text
     scenario = await api_client.post(
         "/api/dispatch/scenarios",

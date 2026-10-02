@@ -111,9 +111,14 @@ class ImportService:
         self,
         session: AsyncSession,
         repository: ImportRepository | None = None,
+        *,
+        actor_id: UUID | None = None,
+        trace_id: str | None = None,
     ) -> None:
         self.session = session
         self.repository = repository or ImportRepository(session)
+        self.actor_id = actor_id
+        self.trace_id = trace_id
 
     async def import_activity(self, request: ActivityImportRequest) -> ImportResult:
         try:
@@ -802,6 +807,10 @@ class ImportService:
                     "import_id": str(source.id),
                     "row_number": row_number,
                     "is_synthetic": request.is_synthetic,
+                    "trust_status": "synthetic" if request.is_synthetic else "accepted",
+                    "source_version": document.version,
+                    "source_checksum": document.checksum,
+                    "embedding_status": "pending_explicit_index",
                 },
             )
             seen_locators.add(locator)
@@ -1407,9 +1416,10 @@ class ImportService:
         source.updated_at = datetime.now(UTC)
         await self.repository.create_audit_log(
             company_id=source.company_id,
+            actor_id=self.actor_id,
             action="import.completed" if status != "failed" else "import.failed",
             entity_id=source.id,
-            trace_id=f"import:{source.id}",
+            trace_id=self.trace_id or f"import:{source.id}",
             details={
                 "import_type": source.configuration["import_type"],
                 "status": status,
@@ -1545,7 +1555,11 @@ def _build_import_result(
     issues: list[DataQualityIssue],
 ) -> ImportResult:
     configuration = source.configuration
-    inline_issues = issues[:MAX_INLINE_ISSUES]
+    # PostgreSQL transaction timestamps can tie. Match the persisted query's
+    # UUID tie-break before truncation so the first response and retries agree.
+    inline_issues = sorted(issues, key=lambda issue: (issue.created_at, issue.id))[
+        :MAX_INLINE_ISSUES
+    ]
     issue_count = int(configuration.get("issue_count", len(issues)))
     return ImportResult(
         import_id=source.id,

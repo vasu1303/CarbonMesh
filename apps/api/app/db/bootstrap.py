@@ -321,7 +321,28 @@ def _expected_index_contracts(
     return expected
 
 
+def _normalize_postgresql_numeric_literals(expression: str) -> str:
+    """Normalize negative numeric literals rewritten as cast string constants.
+
+    PostgreSQL deparses a negative NUMERIC bound such as ``-180`` as
+    ``'-180'::integer::numeric``.  It is still a numeric constant, so treating
+    it as an application string makes an otherwise identical CHECK constraint
+    look incompatible.
+    """
+    numeric_type = (
+        r"(?:smallint|integer|bigint|numeric|decimal|real|double\s+precision)"
+    )
+    return re.sub(
+        rf"'(?P<number>[-+]?\d+(?:\.\d+)?)'\s*::\s*{numeric_type}"
+        rf"(?:\s*::\s*{numeric_type})*",
+        lambda match: match.group("number"),
+        expression,
+        flags=re.IGNORECASE,
+    )
+
+
 def _sql_value_signature(expression: str) -> tuple[Counter[str], Counter[str], Counter[str]]:
+    expression = _normalize_postgresql_numeric_literals(expression)
     strings = Counter(
         match.group(0)[1:-1].replace("''", "'")
         for match in re.finditer(r"'(?:''|[^'])*'", expression)
@@ -338,6 +359,7 @@ def _sql_value_signature(expression: str) -> tuple[Counter[str], Counter[str], C
 
 
 def _bound_comparison_signature(expression: str) -> Counter[tuple[str, str, str]]:
+    expression = _normalize_postgresql_numeric_literals(expression)
     without_strings = re.sub(r"'(?:''|[^'])*'", " ", expression.lower())
     signature: Counter[tuple[str, str, str]] = Counter()
     operand = r"(?:[-+]?\d+(?:\.\d+)?|[a-z_][a-z0-9_]*)"

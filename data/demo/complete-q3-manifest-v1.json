@@ -1,0 +1,36 @@
+{
+  "manifest_version": "1.0.0",
+  "fixture_id": "maverick-q3-2026-complete-v1",
+  "synthetic": true,
+  "generated_by": "scripts/generate_demo_fixtures.py",
+  "company": "Maverick Manufacturing (synthetic)",
+  "site": "Plant B (synthetic)",
+  "reporting_period": "Q3 2026",
+  "interval_start": "2026-07-01T00:00:00Z",
+  "interval_end": "2026-10-01T00:00:00Z",
+  "hourly_intervals": 2208,
+  "fixture_variant": "complete_q3_v1",
+  "expected": {
+    "electricity_kwh": "1109424",
+    "scope2_kgco2e": "531768.046000",
+    "formula": "sum(kWh * gCO2e_per_kWh / 1000)",
+    "method_key": "measurement.scope2.location_based.hourly",
+    "method_version": "2.0.0",
+    "full_reporting_period": true
+  },
+  "artifacts": [
+    {
+      "path": "data/demo/electricity-hourly-complete-q3-v1.csv",
+      "sha256": "32d8f093a97ec72c85416f1658a3895304917e328ff90dc458816ace1be3f5ee"
+    },
+    {
+      "path": "data/demo/activity-material-complete-q3-v1.csv",
+      "sha256": "2b5fbf918757997ade9c9d61611d7bcd0c0a74b1dd920fa8056c0fdcccefd959"
+    },
+    {
+      "path": "data/demo/grid-history-complete-q3-v1.json",
+      "sha256": "b80628d752443ff4a306bb8654a045a3d93e681b3de5cd96e9dce1882ee0db07"
+    }
+  ],
+  "quality_cases_fixture": "maverick-q3-2026-v1"
+}

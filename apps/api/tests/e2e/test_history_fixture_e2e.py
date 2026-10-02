@@ -5,7 +5,7 @@ from app.modules.integrations.electricity_maps import get_electricity_maps_clien
 
 
 @pytest.mark.asyncio
-async def test_history_defaults_to_declared_synthetic_fixture_without_network(api_client, e2e_context):
+async def test_history_explicit_synthetic_fixture_never_accesses_network(api_client, e2e_context):
     class NetworkForbidden:
         async def list_zones(self):
             raise AssertionError("Fixture mode cannot access the network")
@@ -19,7 +19,11 @@ async def test_history_defaults_to_declared_synthetic_fixture_without_network(ap
     try:
         response = await api_client.post(
             "/api/measurement/grid/history/sync", params=context,
-            json={"start": "2026-07-01T00:00:00Z", "end": "2026-07-01T02:00:00Z"},
+            json={
+                "mode": "fixture",
+                "start": "2026-07-01T00:00:00Z",
+                "end": "2026-07-01T02:00:00Z",
+            },
         )
         assert response.status_code == 200, response.text
         assert response.json()["inserted_points"] == 2

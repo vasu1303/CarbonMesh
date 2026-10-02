@@ -28,7 +28,6 @@ CHUNKING_METHOD_ID = "carbonmesh-paragraph-1200-overlap-150-v1"
 
 @dataclass(frozen=True, slots=True)
 class ExtractedDocument:
-    content_bytes: bytes
     text: str
     extraction_method_id: str
 
@@ -168,15 +167,9 @@ def extract_content_bytes(*, content_bytes: bytes, content_type: str) -> Extract
                     field_details={"content": "invalid_json"},
                 ) from error
     return ExtractedDocument(
-        content_bytes=content_bytes,
         text=_normalize_text(text),
         extraction_method_id=extraction_method_id(content_type),
     )
-
-
-def extract_document(*, content: str, encoding: str, content_type: str) -> ExtractedDocument:
-    content_bytes = decode_content(content=content, encoding=encoding)
-    return extract_content_bytes(content_bytes=content_bytes, content_type=content_type)
 
 
 def chunk_text(text: str) -> list[TextChunk]:

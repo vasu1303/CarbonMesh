@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import Select, and_, func, select, text
+from sqlalchemy import Select, and_, func, insert, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.carbon import (
@@ -218,26 +218,37 @@ class MeasurementRepository:
             is not None
         )
 
-    async def get_grid_evidence(self, *, company_id: UUID, evidence_item_ids: set[UUID]):
-        return {
-            item.id: (item, document)
-            for item, document in (
-                await self.session.execute(
-                    select(EvidenceItem, SourceDocument)
-                    .join(
-                        SourceDocument,
-                        and_(
-                            SourceDocument.company_id == EvidenceItem.company_id,
-                            SourceDocument.id == EvidenceItem.source_document_id,
-                        ),
-                    )
-                    .where(
-                        EvidenceItem.company_id == company_id,
-                        EvidenceItem.id.in_(evidence_item_ids),
-                    )
+    async def get_grid_evidence(
+        self, *, company_id: UUID, evidence_item_ids: set[UUID]
+    ) -> dict[UUID, tuple[EvidenceItem, SourceDocument]]:
+        items = list(
+            await self.session.scalars(
+                select(EvidenceItem).where(
+                    EvidenceItem.company_id == company_id,
+                    EvidenceItem.id.in_(evidence_item_ids),
                 )
-            ).all()
+            )
+        )
+        documents = await self._source_documents(
+            company_id=company_id, document_ids={item.source_document_id for item in items},
+        )
+        return {
+            item.id: (item, documents[item.source_document_id])
+            for item in items
+            if item.source_document_id in documents
         }
+
+    async def _source_documents(
+        self, *, company_id: UUID, document_ids: set[UUID]
+    ) -> dict[UUID, SourceDocument]:
+        """Load large immutable provider snapshots once per source document."""
+        rows = await self.session.scalars(
+            select(SourceDocument).where(
+                SourceDocument.company_id == company_id,
+                SourceDocument.id.in_(document_ids),
+            )
+        )
+        return {document.id: document for document in rows}
 
     async def company_exists(self, *, company_id: UUID) -> bool:
         identifier = await self.session.scalar(
@@ -572,31 +583,31 @@ class MeasurementRepository:
         self.session.add(run)
         await self.session.flush()
 
-        calculations: list[EmissionCalculation] = []
+        calculations: list[dict] = []
         for item in plan.items:
             is_grid = isinstance(item, GridCalculationPersistenceItem)
-            calculation = EmissionCalculation(
-                company_id=plan.company_id,
-                calculation_run_id=run.id,
-                activity_record_id=item.source.activity.id,
-                emission_factor_id=None if is_grid else item.factor.id,
-                grid_intensity_point_id=item.grid_point.id if is_grid else None,
-                normalized_quantity=(
+            calculation = {
+                "company_id": plan.company_id,
+                "calculation_run_id": run.id,
+                "activity_record_id": item.source.activity.id,
+                "emission_factor_id": None if is_grid else item.factor.id,
+                "grid_intensity_point_id": item.grid_point.id if is_grid else None,
+                "normalized_quantity": (
                     item.normalized_quantity_kwh if is_grid else item.normalized_quantity_kg
                 ),
-                quantity_unit="kWh" if is_grid else "kg",
-                factor_value=(
+                "quantity_unit": "kWh" if is_grid else "kg",
+                "factor_value": (
                     item.grid_point.intensity_gco2e_per_kwh
                     if is_grid
                     else item.factor_kgco2e_per_kg
                 ),
-                factor_unit="gCO2e/kWh" if is_grid else "kgCO2e/kg",
-                emissions_kgco2e=item.emissions_kgco2e,
-                formula=item.formula,
-                output_hash=item.output_hash,
-            )
+                "factor_unit": "gCO2e/kWh" if is_grid else "kgCO2e/kg",
+                "emissions_kgco2e": item.emissions_kgco2e,
+                "formula": item.formula,
+                "output_hash": item.output_hash,
+            }
             calculations.append(calculation)
-        self.session.add_all(calculations)
+        await self.session.execute(insert(EmissionCalculation), calculations)
 
         measurement = CarbonMeasurement(
             company_id=plan.company_id,
@@ -653,7 +664,7 @@ class MeasurementRepository:
                 else None
             ),
         )
-        self.session.add(measurement_event)
+        ledger_events = [measurement_event]
 
         activity_events: dict[UUID, LedgerEvent] = {}
         for item in plan.items:
@@ -695,7 +706,7 @@ class MeasurementRepository:
                 created_by=plan.actor_id,
             )
             activity_events[activity.id] = event
-            self.session.add(event)
+            ledger_events.append(event)
 
         factor_events: dict[UUID, LedgerEvent] = {}
         factors = {item.factor.id: item.factor for item in mass_items}
@@ -722,7 +733,7 @@ class MeasurementRepository:
                 created_by=plan.actor_id,
             )
             factor_events[factor_id] = event
-            self.session.add(event)
+            ledger_events.append(event)
 
         grid_events: dict[UUID, LedgerEvent] = {}
         for item in grid_items:
@@ -752,7 +763,7 @@ class MeasurementRepository:
                 created_by=plan.actor_id,
             )
             grid_events[point.id] = event
-            self.session.add(event)
+            ledger_events.append(event)
 
         baseline_event: LedgerEvent | None = None
         if plan.baseline is not None:
@@ -774,15 +785,30 @@ class MeasurementRepository:
                 analysis_signature=plan.input_hash,
                 created_by=plan.actor_id,
             )
-            self.session.add(baseline_event)
+            ledger_events.append(baseline_event)
 
-        await self.session.flush()
+        # PostgreSQL assigns every UUID. Correlate returned events by their
+        # domain key, avoiding ordered ORM RETURNING that inserts one row at a
+        # time when primary keys have no client-generated sentinel.
+        appended_events = await self.session.execute(
+            insert(LedgerEvent).returning(
+                LedgerEvent.id, LedgerEvent.event_type, LedgerEvent.entity_id,
+            ),
+            [{name: getattr(event, name) for name in (
+                "company_id", "event_type", "entity_type", "entity_id", "payload",
+                "payload_hash", "analysis_signature", "created_by", "supersedes_event_id",
+            )} for event in ledger_events],
+        )
+        event_ids = {(row.event_type, row.entity_id): row.id for row in appended_events}
+        for event in ledger_events:
+            event.id = event_ids[(event.event_type, event.entity_id)]
         measurement.ledger_event_id = measurement_event.id
         if plan.supersedes_measurement is not None:
             plan.supersedes_measurement.status = "superseded"
 
+        lineage_edges = []
         for event in activity_events.values():
-            self.session.add(
+            lineage_edges.append(
                 LineageEdge(
                     company_id=plan.company_id,
                     parent_event_id=event.id,
@@ -792,7 +818,7 @@ class MeasurementRepository:
                 )
             )
         for event in factor_events.values():
-            self.session.add(
+            lineage_edges.append(
                 LineageEdge(
                     company_id=plan.company_id,
                     parent_event_id=event.id,
@@ -802,7 +828,7 @@ class MeasurementRepository:
                 )
             )
         for event in grid_events.values():
-            self.session.add(
+            lineage_edges.append(
                 LineageEdge(
                     company_id=plan.company_id,
                     parent_event_id=event.id,
@@ -812,7 +838,7 @@ class MeasurementRepository:
                 )
             )
         if baseline_event is not None:
-            self.session.add(
+            lineage_edges.append(
                 LineageEdge(
                     company_id=plan.company_id,
                     parent_event_id=baseline_event.id,
@@ -821,6 +847,32 @@ class MeasurementRepository:
                     edge_metadata={},
                 )
             )
+        if factor_events:
+            registrations = await self.session.execute(
+                select(LedgerEvent.id, LedgerEvent.entity_id).where(
+                    LedgerEvent.company_id == plan.company_id,
+                    LedgerEvent.event_type == "factor.registered",
+                    LedgerEvent.entity_type == "emission_factor",
+                    LedgerEvent.entity_id.in_(factor_events),
+                )
+            )
+            lineage_edges.extend(
+                LineageEdge(
+                    company_id=plan.company_id,
+                    parent_event_id=registration.id,
+                    child_event_id=factor_events[registration.entity_id].id,
+                    relationship_type="derived_from_registered_factor",
+                    edge_metadata={"calculation_run_id": str(run.id)},
+                )
+                for registration in registrations
+            )
+
+        await self.session.execute(insert(LineageEdge), [
+            {name: getattr(edge, name) for name in (
+                "company_id", "parent_event_id", "child_event_id", "relationship_type",
+                "edge_metadata",
+            )} for edge in lineage_edges
+        ])
 
         measurement_evidence_ids: set[UUID] = set()
         for item in grid_items:
@@ -1046,7 +1098,6 @@ class MeasurementRepository:
                         RawActivityRecord,
                         GridIntensityPoint,
                         EvidenceItem,
-                        SourceDocument,
                     )
                     .join(
                         ActivityRecord,
@@ -1076,13 +1127,6 @@ class MeasurementRepository:
                             EvidenceItem.id == GridIntensityPoint.evidence_item_id,
                         ),
                     )
-                    .join(
-                        SourceDocument,
-                        and_(
-                            SourceDocument.company_id == EvidenceItem.company_id,
-                            SourceDocument.id == EvidenceItem.source_document_id,
-                        ),
-                    )
                     .where(
                         EmissionCalculation.company_id == company_id,
                         EmissionCalculation.calculation_run_id == run.id,
@@ -1092,6 +1136,14 @@ class MeasurementRepository:
                     )
                 )
             ).all()
+            documents = await self._source_documents(
+                company_id=company_id,
+                document_ids={row[-1].source_document_id for row in grid_calculation_rows},
+            )
+            grid_calculation_rows = [
+                (*row, documents[row[-1].source_document_id]) for row in grid_calculation_rows
+                if row[-1].source_document_id in documents
+            ]
 
         baseline = None
         summary = run.summary if isinstance(run.summary, dict) else {}

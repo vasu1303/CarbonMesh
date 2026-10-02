@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import math
@@ -26,6 +27,7 @@ from app.modules.sources.embedding import (
 from app.modules.sources.errors import (
     PdfProviderUnavailableError,
     SourceChecksumMismatchError,
+    SourceConflictError,
     SourceContextNotFoundError,
     UnsupportedDocumentError,
 )
@@ -34,7 +36,8 @@ from app.modules.sources.extraction import (
     MAX_CHUNK_CHARACTERS,
     PDF_EXTRACTION_METHOD_ID,
     chunk_text,
-    extract_document,
+    decode_content,
+    extract_content_bytes,
 )
 from app.modules.sources.repository import StoredSourceUpload
 from app.modules.sources.schemas import SourceUploadRequest, SourceUploadResponse
@@ -218,13 +221,16 @@ def test_pdf_bytes_use_optional_reader_without_utf8_decoding(monkeypatch) -> Non
 
     monkeypatch.setattr(extraction, "_load_pdf_reader", lambda: Reader)
 
-    result = extract_document(
+    decoded = decode_content(
         content=base64.b64encode(pdf_bytes).decode("ascii"),
         encoding="base64",
+    )
+    result = extract_content_bytes(
+        content_bytes=decoded,
         content_type="application/pdf",
     )
 
-    assert result.content_bytes == pdf_bytes
+    assert decoded == pdf_bytes
     assert result.text == "Extracted PDF evidence"
     assert result.extraction_method_id == PDF_EXTRACTION_METHOD_ID
 
@@ -251,9 +257,8 @@ def test_real_pypdf_extracts_text() -> None:
     output = BytesIO()
     writer.write(output)
 
-    result = extract_document(
-        content=base64.b64encode(output.getvalue()).decode("ascii"),
-        encoding="base64",
+    result = extract_content_bytes(
+        content_bytes=output.getvalue(),
         content_type="application/pdf",
     )
 
@@ -268,9 +273,8 @@ def test_pdf_missing_extractor_is_typed_provider_unavailable(monkeypatch) -> Non
     monkeypatch.setattr(extraction, "_load_pdf_reader", unavailable)
 
     with pytest.raises(PdfProviderUnavailableError) as caught:
-        extract_document(
-            content=base64.b64encode(b"%PDF").decode("ascii"),
-            encoding="base64",
+        extract_content_bytes(
+            content_bytes=b"%PDF",
             content_type="application/pdf",
         )
 
@@ -280,18 +284,16 @@ def test_pdf_missing_extractor_is_typed_provider_unavailable(monkeypatch) -> Non
 
 def test_extraction_rejects_nul_and_non_finite_json() -> None:
     with pytest.raises(UnsupportedDocumentError) as nul_error:
-        extract_document(
-            content="safe prefix\x00unsafe suffix",
-            encoding="utf-8",
+        extract_content_bytes(
+            content_bytes=b"safe prefix\x00unsafe suffix",
             content_type="text/plain",
         )
     assert nul_error.value.field_details == {"content": "contains_nul"}
 
     for constant in ("NaN", "Infinity", "-Infinity"):
         with pytest.raises(UnsupportedDocumentError) as json_error:
-            extract_document(
-                content=f'{{"value":{constant}}}',
-                encoding="utf-8",
+            extract_content_bytes(
+                content_bytes=f'{{"value":{constant}}}'.encode(),
                 content_type="application/json",
             )
         assert json_error.value.field_details == {"content": "invalid_json"}
@@ -318,7 +320,7 @@ async def test_service_persists_tenant_context_chunks_and_safe_response() -> Non
     audit = next(item for item in repository.added if isinstance(item, AuditLog))
     assert source.status == "ready"
     assert document.checksum == hashlib.sha256(request.content.encode("utf-8")).hexdigest()
-    assert document.storage_uri == f"sha256://{document.checksum}"
+    assert document.storage_uri == f"content://{request.company_id}/{document.checksum}"
     assert evidence.embedding_model == EMBEDDING_MODEL_ID
     assert evidence.embedding is not None and len(evidence.embedding) == 768
     assert evidence.evidence_metadata == {
@@ -329,6 +331,9 @@ async def test_service_persists_tenant_context_chunks_and_safe_response() -> Non
         "actor_id": str(ACTOR_ID),
         "synthetic": True,
         "source_document_id": str(document.id),
+        "source_checksum": document.checksum,
+        "source_version": 1,
+        "trust_status": "synthetic",
         "ingestion_method_id": INGESTION_METHOD_ID,
         "extraction_method_id": "carbonmesh-text-utf8-v1",
         "chunking_method_id": CHUNKING_METHOD_ID,
@@ -431,6 +436,39 @@ async def test_tenant_checksum_replay_returns_existing_without_reextracting_pdf(
     assert result.document.id == document.id
     assert repository.added == []
     assert repository.commits == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("updates", [{"site_id": None}, {"reporting_period_id": None}, {"is_synthetic": False}])
+async def test_checksum_replay_cannot_relabel_source_context(updates) -> None:
+    repository = FakeRepository()
+    await upload_source_document(object(), _request(), repository=repository)
+    repository.existing = StoredSourceUpload(
+        next(item for item in repository.added if isinstance(item, DataSource)),
+        next(item for item in repository.added if isinstance(item, SourceDocument)),
+        [item for item in repository.added if isinstance(item, EvidenceItem)],
+    )
+    with pytest.raises(SourceConflictError):
+        await upload_source_document(object(), _request(**updates), repository=repository)
+    assert repository.commits == 1
+    assert repository.rollbacks == 1
+
+
+@pytest.mark.asyncio
+async def test_cancelled_embedding_rolls_back_source_upload_transaction() -> None:
+    class CancelledProvider:
+        model_id = "cancelled-test-provider"
+
+        async def embed(self, texts):
+            raise asyncio.CancelledError
+
+    repository = FakeRepository()
+    with pytest.raises(asyncio.CancelledError):
+        await upload_source_document(object(), _request(), repository=repository,
+                                     embedding_provider=CancelledProvider())
+    assert repository.rollbacks == 1
+    assert repository.commits == 0
+    assert repository.added == []
 
 
 @pytest.mark.asyncio

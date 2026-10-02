@@ -57,21 +57,11 @@ def parse_hourly_timestamp(value: Any) -> datetime:
     return validate_hourly_timestamp(value)
 
 
-class ActivityImportRequest(BaseModel):
-    """JSON-native envelope for purchased-material or hourly electricity activity.
-
-    ``content`` is CSV text for ``text/csv``. For ``application/json`` it may
-    be the original JSON string, a list of row objects, a single row object, or
-    an object containing a ``records`` list. Keeping parsing behind this
-    envelope lets a multipart transport be added without changing the service.
-    """
-
+class _ImportRequest(BaseModel):
+    """Shared source identity and transport contract for tabular imports."""
     model_config = ConfigDict(extra="forbid")
 
     company_id: UUID
-    site_id: UUID
-    reporting_period_id: UUID
-    metric_definition_id: UUID
     source_name: str = Field(min_length=1, max_length=160)
     filename: str = Field(min_length=1, max_length=255)
     content_type: Literal["text/csv", "application/json"]
@@ -80,6 +70,32 @@ class ActivityImportRequest(BaseModel):
     external_reference: str | None = Field(default=None, max_length=255)
     is_synthetic: bool = False
     idempotency_key: str | None = Field(default=None, min_length=1, max_length=200)
+
+    @field_validator("source_name", "filename", mode="before")
+    @classmethod
+    def strip_required_labels(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
+
+    @field_validator("external_reference", mode="before")
+    @classmethod
+    def strip_optional_reference(cls, value: object) -> object:
+        if isinstance(value, str):
+            return value.strip() or None
+        return value
+
+
+class ActivityImportRequest(_ImportRequest):
+    """JSON-native envelope for purchased-material or hourly electricity activity.
+
+    ``content`` is CSV text for ``text/csv``. For ``application/json`` it may
+    be the original JSON string, a list of row objects, a single row object, or
+    an object containing a ``records`` list. Keeping parsing behind this
+    envelope lets a multipart transport be added without changing the service.
+    """
+
+    site_id: UUID
+    reporting_period_id: UUID
+    metric_definition_id: UUID
     interval_start: datetime | None = None
     interval_end: datetime | None = None
 
@@ -99,45 +115,9 @@ class ActivityImportRequest(BaseModel):
                 raise ValueError("An hourly import interval cannot exceed 366 days")
         return self
 
-    @field_validator("source_name", "filename", mode="before")
-    @classmethod
-    def strip_required_labels(cls, value: object) -> object:
-        return value.strip() if isinstance(value, str) else value
 
-    @field_validator("external_reference", mode="before")
-    @classmethod
-    def strip_optional_reference(cls, value: object) -> object:
-        if isinstance(value, str):
-            return value.strip() or None
-        return value
-
-
-class SupplierImportRequest(BaseModel):
+class SupplierImportRequest(_ImportRequest):
     """JSON-native envelope for supplier products and their evidence."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    company_id: UUID
-    source_name: str = Field(min_length=1, max_length=160)
-    filename: str = Field(min_length=1, max_length=255)
-    content_type: Literal["text/csv", "application/json"]
-    content: ImportContent
-    checksum: Sha256 | None = None
-    external_reference: str | None = Field(default=None, max_length=255)
-    is_synthetic: bool = False
-    idempotency_key: str | None = Field(default=None, min_length=1, max_length=200)
-
-    @field_validator("source_name", "filename", mode="before")
-    @classmethod
-    def strip_required_labels(cls, value: object) -> object:
-        return value.strip() if isinstance(value, str) else value
-
-    @field_validator("external_reference", mode="before")
-    @classmethod
-    def strip_optional_reference(cls, value: object) -> object:
-        if isinstance(value, str):
-            return value.strip() or None
-        return value
 
 
 class ActivityRow(BaseModel):

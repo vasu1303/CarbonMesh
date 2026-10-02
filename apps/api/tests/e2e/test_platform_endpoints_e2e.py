@@ -270,7 +270,16 @@ async def test_electricity_maps_history_points_are_immutable_and_site_scoped(
 
         async with e2e_context.session_factory() as session:
             assert (
-                await session.scalar(select(func.count()).select_from(GridIntensityPoint))
+                await session.scalar(
+                    select(func.count())
+                    .select_from(GridIntensityPoint)
+                    .where(
+                        GridIntensityPoint.observed_at
+                        >= datetime(2026, 9, 29, tzinfo=UTC),
+                        GridIntensityPoint.observed_at
+                        < datetime(2026, 9, 29, 3, tzinfo=UTC),
+                    )
+                )
                 == 4
             )
             assert (

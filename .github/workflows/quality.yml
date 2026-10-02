@@ -19,7 +19,7 @@ jobs:
     timeout-minutes: 15
     services:
       postgres:
-        image: postgres:16
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_DB: carbonmesh_test
           POSTGRES_USER: carbonmesh_test
@@ -34,6 +34,7 @@ jobs:
     env:
       CARBONMESH_E2E_DATABASE_URL: postgresql://carbonmesh_test:synthetic-ci-only@127.0.0.1:5432/carbonmesh_test
       CARBONMESH_RUN_API_E2E_TESTS: disposable-database
+      CARBONMESH_E2E_REQUIRE_PGVECTOR: "1"
     defaults:
       run:
         working-directory: apps/api
@@ -50,8 +51,28 @@ jobs:
         run: python -m pip install -e ".[dev]"
       - name: Lint
         run: python -m ruff check app tests
+      - name: Bootstrap and verify disposable database
+        env:
+          DATABASE_URL: ${{ env.CARBONMESH_E2E_DATABASE_URL }}
+        run: |
+          python -m app.db.bootstrap
+          python -m app.db.bootstrap --check
       - name: Test
         run: python -m pytest -q
+      - name: Build API image
+        working-directory: .
+        run: docker build -f apps/api/Dockerfile -t carbonmesh-api:ci .
+      - name: Check packaged API and fixtures
+        working-directory: .
+        run: |
+          docker run --rm carbonmesh-api:ci python -c '
+          from fastapi.testclient import TestClient
+          from app.main import app
+          from app.modules.demo.fixtures import _fixture_directory
+          assert (_fixture_directory() / "complete-q3-manifest-v1.json").is_file()
+          with TestClient(app) as client:
+              assert client.get("/api/health").status_code == 200
+          '
 
   frontend:
     name: Frontend

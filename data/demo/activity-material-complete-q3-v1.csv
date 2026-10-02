@@ -1,0 +1,2 @@
+row_key,material_code,quantity,unit,activity_date,supplier_code,product_code,unit_cost,currency,synthetic
+complete-q3-v1-plant-b-recycled-aluminium-q3,RECYCLED-ALUMINIUM,10000,kg,2026-09-15,MAVERICK-CURRENT,AL-CURRENT,2.500000,USD,true

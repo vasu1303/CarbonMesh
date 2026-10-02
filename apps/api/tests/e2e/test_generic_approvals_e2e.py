@@ -21,7 +21,11 @@ from app.modules.ledger.service import payload_sha256
 async def _dispatch_preview(client, ids):
     sync = await client.post(
         "/api/dispatch/forecasts/sync",
-        json={"company_id": str(ids.company_id), "site_id": str(ids.site_id)},
+        json={
+            "company_id": str(ids.company_id),
+            "site_id": str(ids.site_id),
+            "source_mode": "fixture",
+        },
     )
     assert sync.status_code == 200, sync.text
     scenario = await client.post(
@@ -68,7 +72,7 @@ async def _disclosure_preview(client, context):
             "standard_id": str(ids.assurance_standard_id),
             "site_id": str(ids.site_id),
             "reporting_period_id": str(ids.reporting_period_id),
-            "measurement_id": str(ids.measurement_id),
+            "measurement_id": str(ids.assurance_measurement_id),
             "requested_by": str(ids.analyst_id),
             "idempotency_key": "supported-synthetic-disclosure",
             "title": "Supported synthetic disclosure",
@@ -274,10 +278,14 @@ async def test_disclosure_approval_rechecks_facts_evidence_and_exact_claims(
     preview = await _disclosure_preview(api_client, e2e_context)
     async with e2e_context.session_factory() as session, session.begin():
         if changed == "fact":
-            measurement = await session.get(CarbonMeasurement, ids.measurement_id)
+            measurement = await session.get(
+                CarbonMeasurement, ids.assurance_measurement_id
+            )
             measurement.value_kgco2e += Decimal(1)
         elif changed == "method":
-            measurement = await session.get(CarbonMeasurement, ids.measurement_id)
+            measurement = await session.get(
+                CarbonMeasurement, ids.assurance_measurement_id
+            )
             calculation = await session.get(CalculationRun, measurement.calculation_run_id)
             method = await session.get(MethodDefinition, calculation.method_definition_id)
             method.configuration = {**method.configuration, "version_changed": True}

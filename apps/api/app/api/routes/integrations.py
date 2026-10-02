@@ -68,7 +68,7 @@ async def synchronize_grid_intensity(
 ) -> GridIntensitySyncResult:
     request = request or GridIntensitySyncRequest()
     selected_provider = (
-        ElectricityMapsFixtureClient(_fixture_directory())
+        ElectricityMapsFixtureClient(_fixture_directory(), fixture_variant=request.fixture_variant)
         if request.mode == "fixture"
         else provider
     )
