@@ -25,6 +25,8 @@ Thumbs.db
 # Test output
 coverage/
 htmlcov/
+playwright-report/
+test-results/
 
 # Unused binary from the Vite starter template
 apps/web/src/assets/hero.png
