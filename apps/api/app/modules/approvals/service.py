@@ -2,19 +2,25 @@ from __future__ import annotations
 
 import hashlib
 from datetime import UTC, datetime, timedelta
-from typing import Literal
 from uuid import UUID
 
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models.core import Approval, AuditLog
+from app.db.models.core import Actor, Approval, AuditLog
 from app.db.models.procurement import Recommendation
 from app.modules.approvals import repository
+from app.modules.approvals.review import (
+    generic_preview_is_current,
+    procurement_bindings_are_current,
+)
 from app.modules.approvals.schemas import (
     ApprovalDecisionRequest,
     ApprovalDecisionResult,
+    ApprovalDetail,
     ApprovalItem,
     ApprovalListResult,
+    ApprovalStatus,
     GenericApprovalPreviewRequest,
     GenericApprovalPreviewResult,
 )
@@ -26,6 +32,7 @@ from app.modules.ledger.service import (
 from app.modules.procurement.review import (
     recommendation_preview_is_current,
     recommendation_previews_are_current,
+    stored_recommendation_payload,
 )
 
 DEFAULT_APPROVAL_TTL = timedelta(hours=24)
@@ -295,11 +302,15 @@ async def create_pending_approval(
 
     approval = Approval(
         company_id=recommendation.company_id,
+        target_type="procurement_recommendation",
+        target_id=recommendation.id,
         recommendation_id=recommendation.id,
         requested_by=requested_by,
         status="pending",
         preview_hash=recommendation.payload_hash,
+        preview_payload=payload_sha256(stored_recommendation_payload(recommendation))[0],
         analysis_signature=recommendation.analysis_signature,
+        context_hash=recommendation.analysis_signature,
         idempotency_key=idempotency_key,
         expires_at=expires_at,
     )
@@ -312,7 +323,7 @@ async def list_approvals(
     session: AsyncSession,
     *,
     company_id: UUID,
-    status: Literal["pending", "approved", "rejected"] | None,
+    status: ApprovalStatus | None,
     limit: int,
     offset: int,
 ) -> ApprovalListResult:
@@ -323,67 +334,184 @@ async def list_approvals(
         limit=limit,
         offset=offset,
     )
-    recommendations = [recommendation for _, recommendation, _, _ in records]
+    recommendations = [item for _, item, _, _ in records if item is not None]
     review_inputs = await repository.load_recommendation_review_inputs(
         session,
         company_id=company_id,
         recommendations=recommendations,
     )
     preview_statuses = recommendation_previews_are_current(recommendations, review_inputs)
-    now = datetime.now(UTC)
+    bindings = await repository.list_fact_bindings(
+        session,
+        company_id=company_id,
+        artifact_type="procurement_recommendation",
+        artifact_ids=[item.id for item in recommendations],
+    )
     items = []
     for approval, recommendation, requester, decider in records:
-        review = recommendation.impact_snapshot.get("review", {})
-        recommended_snapshot = review.get("recommended_product", {})
-        impact_snapshot = review.get("supplier_score", {}).get("impact", {})
-        items.append(
-            ApprovalItem(
-                id=approval.id,
-                company_id=approval.company_id,
-                recommendation_id=approval.recommendation_id,
-                status=approval.status,
-                preview_hash=approval.preview_hash,
-                analysis_signature=approval.analysis_signature,
-                expires_at=approval.expires_at,
-                created_at=approval.created_at,
-                requested_by=approval.requested_by,
-                requester_name=requester.display_name,
-                decided_by=approval.decided_by,
-                decider_name=decider.display_name if decider is not None else None,
-                decided_at=approval.decided_at,
-                decision_note=approval.decision_note,
-                ledger_event_id=approval.ledger_event_id,
-                recommended_product_id=recommendation.recommended_product_id,
-                recommended_product_name=recommended_snapshot.get(
-                    "name", "Unavailable frozen product"
-                ),
-                supplier_name=recommended_snapshot.get(
-                    "supplier_name", "Unavailable frozen supplier"
-                ),
-                projected_footprint_kgco2e=impact_snapshot.get(
-                    "projected_footprint_kgco2e",
-                    recommendation.projected_footprint_kgco2e,
-                ),
-                avoided_kgco2e=impact_snapshot.get("avoided_kgco2e", recommendation.avoided_kgco2e),
-                reduction_pct=impact_snapshot.get("reduction_pct", recommendation.reduction_pct),
-                cost_delta_pct=impact_snapshot.get("cost_delta_pct", recommendation.cost_delta_pct),
-                lead_time_delta_days=impact_snapshot.get(
-                    "lead_time_delta_days", recommendation.lead_time_delta_days
-                ),
-                expired=_as_utc(approval.expires_at) <= now,
-                preview_current=(
-                    approval.preview_hash == recommendation.payload_hash
-                    and approval.analysis_signature == recommendation.analysis_signature
-                    and recommendation.invalidated_at is None
-                    and recommendation.status != "invalidated"
-                    and preview_statuses.get(recommendation.id, False)
-                ),
+        if recommendation is None:
+            current = await generic_preview_is_current(session, approval)
+        else:
+            current = _procurement_preview_matches(approval, recommendation) and (
+                preview_statuses.get(recommendation.id, False)
+                and procurement_bindings_are_current(
+                    recommendation, bindings.get(recommendation.id, [])
+                )
             )
-        )
+        items.append(_approval_item(approval, recommendation, requester, decider, current))
     return ApprovalListResult(items=items, total=total, limit=limit, offset=offset)
 
 
+def _target_identity(approval: Approval) -> tuple[str, UUID]:
+    target_id = approval.target_id or approval.recommendation_id
+    if target_id is None:
+        raise ApprovalInvalidatedError("The approval target identity is missing.")
+    return approval.target_type or "procurement_recommendation", target_id
+
+
+def _procurement_preview_matches(approval: Approval, recommendation: Recommendation) -> bool:
+    return (
+        (approval.target_type or "procurement_recommendation") == "procurement_recommendation"
+        and (approval.target_id is None or approval.target_id == recommendation.id)
+        and approval.preview_hash == recommendation.payload_hash
+        and approval.analysis_signature == recommendation.analysis_signature
+        and approval.context_hash in {None, recommendation.analysis_signature}
+        and recommendation.invalidated_at is None
+        and recommendation.status != "invalidated"
+        and approval.status not in {"invalidated", "expired"}
+        and (
+            not approval.preview_payload  # Historical Procurement rows predate frozen payloads.
+            or payload_sha256(approval.preview_payload)[1] == approval.preview_hash
+        )
+    )
+
+
+def _approval_item(
+    approval: Approval,
+    recommendation: Recommendation | None,
+    requester: Actor,
+    decider: Actor | None,
+    current: bool,
+) -> ApprovalItem:
+    target_type, target_id = _target_identity(approval)
+    legacy = {}
+    if recommendation is not None:
+        review = recommendation.impact_snapshot.get("review", {})
+        product = review.get("recommended_product", {})
+        impact = review.get("supplier_score", {}).get("impact", {})
+        legacy = {
+            "recommended_product_id": recommendation.recommended_product_id,
+            "recommended_product_name": product.get("name", "Unavailable frozen product"),
+            "supplier_name": product.get("supplier_name", "Unavailable frozen supplier"),
+            **{
+                field: impact.get(field, getattr(recommendation, field))
+                for field in (
+                    "projected_footprint_kgco2e",
+                    "avoided_kgco2e",
+                    "reduction_pct",
+                    "cost_delta_pct",
+                    "lead_time_delta_days",
+                )
+            },
+        }
+    return ApprovalItem(
+        id=approval.id,
+        company_id=approval.company_id,
+        target_type=target_type,
+        target_id=target_id,
+        recommendation_id=approval.recommendation_id,
+        context_hash=approval.context_hash,
+        idempotency_key=approval.idempotency_key,
+        policy_definition_id=approval.policy_definition_id,
+        status=approval.status,
+        preview_hash=approval.preview_hash,
+        analysis_signature=approval.analysis_signature,
+        expires_at=approval.expires_at,
+        created_at=approval.created_at,
+        requested_by=approval.requested_by,
+        requester_name=requester.display_name,
+        decided_by=approval.decided_by,
+        decider_name=decider.display_name if decider is not None else None,
+        decided_at=approval.decided_at,
+        decision_note=approval.decision_note,
+        ledger_event_id=approval.ledger_event_id,
+        expired=_as_utc(approval.expires_at) <= datetime.now(UTC),
+        preview_current=current,
+        **legacy,
+    )
+
+
+async def get_approval(
+    session: AsyncSession, *, company_id: UUID, approval_id: UUID
+) -> ApprovalDetail:
+    record = await repository.get_approval_record(
+        session, company_id=company_id, approval_id=approval_id
+    )
+    if record is None:
+        raise ApprovalNotFoundError("The requested approval was not found.")
+    approval, recommendation, requester, decider = record
+    if recommendation is None:
+        current = await generic_preview_is_current(session, approval)
+        payload = approval.preview_payload
+    else:
+        current = _procurement_preview_matches(approval, recommendation) and (
+            await recommendation_preview_is_current(session, recommendation)
+            and await _procurement_bindings_current(session, recommendation)
+        )
+        payload = approval.preview_payload
+        if not payload and recommendation.ledger_event_id is not None:
+            event = await repository.get_ledger_event(
+                session, company_id=company_id, event_id=recommendation.ledger_event_id
+            )
+            if event is not None and event.payload_hash == approval.preview_hash:
+                payload = event.payload
+        if not payload:
+            # Only expose a rebuilt legacy preview if it still hashes to the reviewed payload.
+            rebuilt, digest = payload_sha256(stored_recommendation_payload(recommendation))
+            payload = rebuilt if digest == approval.preview_hash else {}
+    return ApprovalDetail(
+        **_approval_item(approval, recommendation, requester, decider, current).model_dump(),
+        preview_payload=payload or {},
+    )
+
+
+async def _procurement_bindings_current(
+    session: AsyncSession, recommendation: Recommendation
+) -> bool:
+    bindings = await repository.list_fact_bindings(
+        session,
+        company_id=recommendation.company_id,
+        artifact_type="procurement_recommendation",
+        artifact_ids=[recommendation.id],
+    )
+    return procurement_bindings_are_current(recommendation, bindings.get(recommendation.id, []))
+
+
 async def decide_approval(
+    session: AsyncSession,
+    *,
+    approval_id: UUID,
+    request: ApprovalDecisionRequest,
+    trace_id: str | None = None,
+) -> ApprovalDecisionResult:
+    """Serialize decisions and atomically commit target, ledger, lineage, and audit."""
+    try:
+        return await _decide_approval(
+            session, approval_id=approval_id, request=request, trace_id=trace_id
+        )
+    except DBAPIError as error:
+        await session.rollback()
+        if getattr(error.orig, "sqlstate", None) in {"40001", "40P01"}:
+            raise ApprovalConflictError(
+                "The reviewed inputs changed concurrently; reload the preview before deciding."
+            ) from error
+        raise
+    except Exception:
+        await session.rollback()
+        raise
+
+
+async def _decide_approval(
     session: AsyncSession,
     *,
     approval_id: UUID,
@@ -402,9 +530,18 @@ async def decide_approval(
         session,
         company_id=approval.company_id,
         actor_id=request.actor_id,
+        for_update=True,
     )
     if actor is None or not actor.is_active or actor.role != "approver":
         raise ApprovalActorError("An active approver must make this decision.")
+
+    target_type, target_id = _target_identity(approval)
+    if request.idempotency_key is not None and request.idempotency_key != approval.idempotency_key:
+        raise ApprovalConflictError("The idempotency key does not match this approval preview.")
+    if approval.status == "invalidated":
+        raise ApprovalInvalidatedError("The approval preview has been invalidated.")
+    if approval.status == "expired":
+        raise ApprovalExpiredError("The approval preview has expired.")
 
     expected_status = "approved" if request.decision == "approve" else "rejected"
     if approval.status != "pending":
@@ -412,12 +549,15 @@ async def decide_approval(
             approval.status == expected_status
             and approval.preview_hash == request.preview_hash
             and approval.decided_by == request.actor_id
+            and approval.decision_note == request.decision_note
             and approval.decided_at is not None
             and approval.ledger_event_id is not None
         ):
             return ApprovalDecisionResult(
                 approval_id=approval.id,
                 recommendation_id=approval.recommendation_id,
+                target_type=target_type,
+                target_id=target_id,
                 status=approval.status,
                 preview_hash=approval.preview_hash,
                 analysis_signature=approval.analysis_signature,
@@ -437,26 +577,30 @@ async def decide_approval(
             field_details={"preview_hash": "mismatch"},
         )
 
-    recommendation = await repository.get_recommendation_for_update(
-        session,
-        company_id=approval.company_id,
-        recommendation_id=approval.recommendation_id,
-    )
-    if recommendation is None:
-        raise ApprovalInvalidatedError("The bound recommendation no longer exists.")
-    if (
-        recommendation.payload_hash != approval.preview_hash
-        or recommendation.analysis_signature != approval.analysis_signature
-        or recommendation.status != "pending_approval"
-        or recommendation.invalidated_at is not None
-    ):
-        raise ApprovalInvalidatedError("The recommendation changed after preview creation.")
-    if not await recommendation_preview_is_current(session, recommendation):
+    await repository.lock_review_dependencies(session, approval=approval)
+    if target_type == "procurement_recommendation":
+        target = await repository.get_recommendation_for_update(
+            session,
+            company_id=approval.company_id,
+            recommendation_id=target_id,
+        )
+        current = (
+            target is not None
+            and _procurement_preview_matches(approval, target)
+            and await recommendation_preview_is_current(session, target)
+            and await _procurement_bindings_current(session, target)
+        )
+    else:
+        target = await repository.get_generic_target(session, approval=approval, for_update=True)
+        current = await generic_preview_is_current(session, approval, target=target)
+    if target is None or target.status != "pending_approval" or not current:
         raise ApprovalInvalidatedError(
-            "A reviewed product, evidence item, scenario, or scoring method changed."
+            "The reviewed payload, facts, evidence, method, forecast, or constraints changed."
         )
 
     decided_at = datetime.now(UTC)
+    if _as_utc(approval.expires_at) <= decided_at:
+        raise ApprovalExpiredError("The approval preview expired during revalidation.")
     ledger_event = await append_ledger_event(
         session,
         company_id=approval.company_id,
@@ -466,6 +610,10 @@ async def decide_approval(
         payload={
             "approval_id": approval.id,
             "recommendation_id": approval.recommendation_id,
+            "target_type": target_type,
+            "target_id": target_id,
+            "context_hash": approval.context_hash,
+            "idempotency_key": approval.idempotency_key,
             "decision": expected_status,
             "preview_hash": approval.preview_hash,
             "analysis_signature": approval.analysis_signature,
@@ -482,13 +630,18 @@ async def decide_approval(
     approval.decided_at = decided_at
     approval.decision_note = request.decision_note
     approval.ledger_event_id = ledger_event.id
-    recommendation.status = expected_status
+    target.status = expected_status
+    if target_type == "disclosure_draft":
+        target.validation_summary = {
+            **target.validation_summary,
+            "terminal_state": "success" if expected_status == "approved" else "policy_blocked",
+        }
 
-    if recommendation.ledger_event_id is not None:
+    if target.ledger_event_id is not None:
         await append_lineage_edge(
             session,
             company_id=approval.company_id,
-            parent_event_id=recommendation.ledger_event_id,
+            parent_event_id=target.ledger_event_id,
             child_event_id=ledger_event.id,
             relationship_type="decided_by",
             metadata={"decision": expected_status},
@@ -504,6 +657,8 @@ async def decide_approval(
             trace_id=trace_id,
             details={
                 "recommendation_id": str(approval.recommendation_id),
+                "target_type": target_type,
+                "target_id": str(target_id),
                 "preview_hash": approval.preview_hash,
                 "analysis_signature": approval.analysis_signature,
                 "ledger_event_id": str(ledger_event.id),
@@ -515,6 +670,8 @@ async def decide_approval(
     return ApprovalDecisionResult(
         approval_id=approval.id,
         recommendation_id=approval.recommendation_id,
+        target_type=target_type,
+        target_id=target_id,
         status=expected_status,
         preview_hash=approval.preview_hash,
         analysis_signature=approval.analysis_signature,

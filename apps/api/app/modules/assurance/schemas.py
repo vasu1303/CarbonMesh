@@ -123,10 +123,20 @@ class DisclosureDraftCreateRequest(AssuranceSchema):
     site_id: UUID
     reporting_period_id: UUID
     measurement_id: UUID
+    requirement_ids: tuple[UUID, ...] = Field(default_factory=tuple, max_length=100)
     agent_run_id: UUID | None = None
     requested_by: UUID
     idempotency_key: IdempotencyKey
     title: Annotated[str | None, Field(min_length=1, max_length=255)] = None
+
+    @field_validator("requirement_ids")
+    @classmethod
+    def requirement_scope_is_unique(
+        cls, value: tuple[UUID, ...]
+    ) -> tuple[UUID, ...]:
+        if len(value) != len(set(value)):
+            raise ValueError("requirement_ids must not contain duplicates")
+        return value
 
     @field_validator("title", mode="before")
     @classmethod
@@ -359,7 +369,7 @@ class FactBindingView(AssuranceSchema):
     id: UUID
     artifact_type: Annotated[str, Field(min_length=1, max_length=100)]
     artifact_id: UUID | None
-    agent_run_id: UUID
+    agent_run_id: UUID | None
     ledger_event_id: UUID
     evidence_item_id: UUID | None
     placeholder: Annotated[
@@ -417,16 +427,6 @@ class AssuranceEvidencePack(AssuranceSchema):
         if len({item.id for item in value}) != len(value):
             raise ValueError("fact_bindings must not contain duplicate ids")
         return value
-
-
-class AssuranceAgentDraftRequest(DisclosureDraftCreateRequest):
-    """Typed input accepted by the bounded Assurance agent tool."""
-
-
-class AssuranceAgentValidateRequest(DisclosureDraftValidateRequest):
-    """Typed input accepted by the bounded citation-validation tool."""
-
-    draft_id: UUID
 
 
 class AssuranceAgentResult(AssuranceSchema):

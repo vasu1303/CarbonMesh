@@ -12,6 +12,7 @@ from app.modules.audit.schemas import (
     AuditLineageSummary,
     AuditTimelineItem,
 )
+from app.modules.ledger.repository import list_events
 
 MAX_AUDIT_LINEAGE_DEPTH = 25
 MAX_AUDIT_LINEAGE_EVENTS = 200
@@ -109,7 +110,7 @@ async def get_entity_audit(
         for edge in edges_by_id.values()
         if edge.parent_event_id in all_event_ids and edge.child_event_id in all_event_ids
     ]
-    ledger_entries = await repository.list_ledger_events_by_id(
+    ledger_entries = await list_events(
         session,
         company_id=company_id,
         event_ids=all_event_ids,

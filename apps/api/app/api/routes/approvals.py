@@ -1,4 +1,4 @@
-from typing import Annotated, Literal
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Query
@@ -10,11 +10,14 @@ from app.dependencies.request import TraceIdHeader
 from app.modules.approvals.schemas import (
     ApprovalDecisionRequest,
     ApprovalDecisionResult,
+    ApprovalDetail,
     ApprovalListResult,
+    ApprovalStatus,
 )
 from app.modules.approvals.service import (
     ApprovalServiceError,
     decide_approval,
+    get_approval,
     list_approvals,
 )
 
@@ -25,7 +28,7 @@ router = APIRouter()
 async def read_approvals(
     company_id: UUID,
     session: DatabaseSession,
-    status: Literal["pending", "approved", "rejected"] | None = None,
+    status: ApprovalStatus | None = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> ApprovalListResult:
@@ -36,6 +39,27 @@ async def read_approvals(
         limit=limit,
         offset=offset,
     )
+
+
+@router.get("/approvals/{approval_id}", response_model=ApprovalDetail)
+async def read_approval(
+    approval_id: UUID,
+    company_id: UUID,
+    session: DatabaseSession,
+    trace_id: TraceIdHeader = None,
+) -> ApprovalDetail:
+    request_trace_id = ensure_trace_id(trace_id)
+    try:
+        return await get_approval(session, company_id=company_id, approval_id=approval_id)
+    except ApprovalServiceError as error:
+        raise safe_http_error(
+            status_code=error.status_code,
+            code=error.code,
+            message=error.message,
+            retryable=error.retryable,
+            trace_id=request_trace_id,
+            field_details=error.field_details,
+        ) from error
 
 
 @router.post("/approvals/{approval_id}/decision", response_model=ApprovalDecisionResult)

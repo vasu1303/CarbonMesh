@@ -1,4 +1,0 @@
-SYNTHETIC DEMO EVIDENCE - NOT THIRD-PARTY VERIFIED
-
-Product-specific cradle-to-gate factor for AL-CURRENT:
-8.6 kgCO2e/kg, effective 2026-01-01 for India.

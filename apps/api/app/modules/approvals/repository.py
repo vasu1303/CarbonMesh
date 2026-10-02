@@ -2,15 +2,17 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Collection
-from typing import Literal
 from uuid import UUID
 
 from sqlalchemy import Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
-from app.db.models.carbon import CarbonMeasurement
-from app.db.models.core import Actor, Approval, EvidenceItem
+from app.db.models.assurance import DisclosureDraft
+from app.db.models.carbon import CalculationRun, CarbonMeasurement
+from app.db.models.core import Actor, Approval, Company, EvidenceItem
+from app.db.models.dispatch import DispatchRecommendation
+from app.db.models.ledger import FactBinding, LedgerEvent
 from app.db.models.procurement import (
     ProcurementScenario,
     Recommendation,
@@ -19,6 +21,7 @@ from app.db.models.procurement import (
     SupplierScore,
 )
 from app.db.models.semantic import MethodDefinition
+from app.modules.approvals.schemas import ApprovalStatus
 from app.modules.procurement.repository import ProductRecord
 from app.modules.procurement.review import RecommendationReviewInputs
 
@@ -28,7 +31,7 @@ PREVIEW_CANDIDATE_LIMIT = 100
 def _approval_filters(
     *,
     company_id: UUID,
-    status: Literal["pending", "approved", "rejected"] | None,
+    status: ApprovalStatus | None,
 ) -> list[object]:
     filters: list[object] = [Approval.company_id == company_id]
     if status is not None:
@@ -40,17 +43,17 @@ async def list_approval_records(
     session: AsyncSession,
     *,
     company_id: UUID,
-    status: Literal["pending", "approved", "rejected"] | None,
+    status: ApprovalStatus | None,
     limit: int,
     offset: int,
-) -> tuple[list[tuple[Approval, Recommendation, Actor, Actor | None]], int]:
+) -> tuple[list[tuple[Approval, Recommendation | None, Actor, Actor | None]], int]:
     requester = aliased(Actor)
     decider = aliased(Actor)
     filters = _approval_filters(company_id=company_id, status=status)
 
     query: Select = (
         select(Approval, Recommendation, requester, decider)
-        .join(
+        .outerjoin(
             Recommendation,
             (Recommendation.company_id == Approval.company_id)
             & (Recommendation.id == Approval.recommendation_id),
@@ -71,6 +74,77 @@ async def list_approval_records(
     rows = await session.execute(query)
     total = await session.scalar(select(func.count()).select_from(Approval).where(*filters))
     return list(rows), int(total or 0)
+
+
+async def get_approval_record(
+    session: AsyncSession, *, company_id: UUID, approval_id: UUID
+) -> tuple[Approval, Recommendation | None, Actor, Actor | None] | None:
+    requester, decider = aliased(Actor), aliased(Actor)
+    result = await session.execute(
+        select(Approval, Recommendation, requester, decider)
+        .outerjoin(
+            Recommendation,
+            (Recommendation.company_id == Approval.company_id)
+            & (Recommendation.id == Approval.recommendation_id),
+        )
+        .join(
+            requester,
+            (requester.company_id == Approval.company_id) & (requester.id == Approval.requested_by),
+        )
+        .outerjoin(
+            decider,
+            (decider.company_id == Approval.company_id) & (decider.id == Approval.decided_by),
+        )
+        .where(Approval.company_id == company_id, Approval.id == approval_id)
+    )
+    return result.one_or_none()
+
+
+async def get_generic_target(
+    session: AsyncSession, *, approval: Approval, for_update: bool = False
+) -> DisclosureDraft | DispatchRecommendation | None:
+    model = {
+        "disclosure_draft": DisclosureDraft,
+        "dispatch_recommendation": DispatchRecommendation,
+    }.get(approval.target_type)
+    if model is None or approval.target_id is None:
+        return None
+    query = select(model).where(
+        model.company_id == approval.company_id, model.id == approval.target_id
+    )
+    if for_update:
+        query = query.with_for_update()
+    return await session.scalar(query)
+
+
+async def get_ledger_event(
+    session: AsyncSession, *, company_id: UUID, event_id: UUID
+) -> LedgerEvent | None:
+    return await session.scalar(
+        select(LedgerEvent).where(LedgerEvent.company_id == company_id, LedgerEvent.id == event_id)
+    )
+
+
+async def list_fact_bindings(
+    session: AsyncSession,
+    *,
+    company_id: UUID,
+    artifact_type: str,
+    artifact_ids: Collection[UUID],
+) -> dict[UUID, list[FactBinding]]:
+    if not artifact_ids:
+        return {}
+    rows = await session.scalars(
+        select(FactBinding).where(
+            FactBinding.company_id == company_id,
+            FactBinding.artifact_type == artifact_type,
+            FactBinding.artifact_id.in_(artifact_ids),
+        )
+    )
+    grouped: dict[UUID, list[FactBinding]] = {}
+    for item in rows:
+        grouped.setdefault(item.artifact_id, []).append(item)
+    return grouped
 
 
 async def load_recommendation_review_inputs(
@@ -291,6 +365,10 @@ async def get_approval_for_update(
     company_id: UUID,
     approval_id: UUID,
 ) -> Approval | None:
+    # All approval transactions acquire this lock before their target/dependency
+    # locks. The parent lock also prevents a new tenant-scoped input appearing
+    # between feasibility/evidence revalidation and commit via its foreign key.
+    await session.scalar(select(Company.id).where(Company.id == company_id).with_for_update())
     return await session.scalar(
         select(Approval)
         .where(
@@ -299,6 +377,68 @@ async def get_approval_for_update(
         )
         .with_for_update()
     )
+
+
+async def lock_review_dependencies(session: AsyncSession, *, approval: Approval) -> None:
+    """Hold mutable domain inputs stable through the short decision transaction.
+
+    Rows are acquired in physical table / UUID order for every decision. The
+    company parent lock above closes insert phantoms; these locks close updates
+    and deletes. This deliberately favors P0 correctness over tenant throughput.
+    """
+    from app.db.models.assurance import (
+        ClaimCitation,
+        DisclosureClaim,
+        DisclosureRequirement,
+        EvidenceGap,
+        Standard,
+    )
+    from app.db.models.core import DataSource, ReportingPeriod, Site, SourceDocument
+    from app.db.models.dispatch import (
+        DispatchScenario,
+        FlexibleLoad,
+        GridForecast,
+        OperatingConstraint,
+    )
+    from app.db.models.ledger import FactBinding, LedgerEventEvidence
+    from app.db.models.semantic import PolicyDefinition
+
+    shared = {Actor, EvidenceItem, SourceDocument, DataSource, FactBinding, Site, MethodDefinition}
+    domain = {
+        "procurement_recommendation": {
+            ProcurementScenario,
+            Supplier,
+            SupplierProduct,
+            SupplierScore,
+            CarbonMeasurement,
+        },
+        "disclosure_draft": {
+            Standard,
+            DisclosureRequirement,
+            DisclosureClaim,
+            ClaimCitation,
+            EvidenceGap,
+            CalculationRun,
+            CarbonMeasurement,
+            ReportingPeriod,
+        },
+        "dispatch_recommendation": {
+            DispatchScenario,
+            FlexibleLoad,
+            GridForecast,
+            OperatingConstraint,
+            PolicyDefinition,
+            LedgerEventEvidence,
+        },
+    }.get(approval.target_type, set())
+    for model in sorted(shared | domain, key=lambda item: item.__table__.fullname):
+        primary_key = tuple(model.__table__.primary_key.columns)
+        await session.execute(
+            select(*primary_key)
+            .where(model.company_id == approval.company_id)
+            .order_by(*primary_key)
+            .with_for_update()
+        )
 
 
 async def get_recommendation_for_update(
@@ -322,10 +462,12 @@ async def get_actor(
     *,
     company_id: UUID,
     actor_id: UUID,
+    for_update: bool = False,
 ) -> Actor | None:
-    return await session.scalar(
-        select(Actor).where(Actor.company_id == company_id, Actor.id == actor_id)
-    )
+    query = select(Actor).where(Actor.company_id == company_id, Actor.id == actor_id)
+    if for_update:
+        query = query.with_for_update()
+    return await session.scalar(query)
 
 
 async def get_pending_approval(

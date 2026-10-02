@@ -32,9 +32,14 @@ class ElectricityMapsTestResult(BaseModel):
     zones_truncated: bool
 
 
+GridFixtureVariant = Literal["quality_cases_v1", "complete_q3_v1"]
+
+
 class GridIntensitySyncRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    mode: Literal["fixture", "live"] = "live"
+    fixture_variant: GridFixtureVariant = "quality_cases_v1"
     zone: str | None = Field(default=None, min_length=2, max_length=100)
     start: datetime | None = None
     end: datetime | None = None
@@ -55,6 +60,8 @@ class GridIntensitySyncRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_range_pair(self) -> GridIntensitySyncRequest:
+        if self.mode != "fixture" and self.fixture_variant != "quality_cases_v1":
+            raise ValueError("A fixture variant can only be selected in explicit fixture mode.")
         if (self.start is None) != (self.end is None):
             raise ValueError("start and end must be provided together")
         if self.start is not None and self.end is not None:

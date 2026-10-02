@@ -13,6 +13,7 @@ from pathlib import Path
 import httpx
 import pytest
 import pytest_asyncio
+from pgvector.sqlalchemy import VECTOR
 from sqlalchemy import ARRAY, Float, MetaData, text
 from sqlalchemy.engine import URL
 from sqlalchemy.ext.asyncio import (
@@ -21,6 +22,7 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
+from sqlalchemy.types import TypeEngine
 
 import app.db.models.ai
 import app.db.models.assurance
@@ -30,11 +32,23 @@ import app.db.models.dispatch
 import app.db.models.ledger
 import app.db.models.procurement
 import app.db.models.semantic
+from app.api.routes.agents import get_agent_run_service_factory
 from app.db.base import Base
 from app.db.ddl import APPLICATION_SCHEMAS, install_database_objects
+from app.db.models.core import EvidenceItem
 from app.db.session import normalize_database_url
 from app.dependencies.database import get_db_session_factory
 from app.main import app
+from app.modules.agents.llm.contracts import AIRequest, AIResult, AITokenUsage
+from app.modules.agents.planning import PlannerSelection, planning_system_instruction
+from app.modules.agents.repository import AgentRunRepository
+from app.modules.agents.resume import GenericApprovalResumeObserver
+from app.modules.agents.runtime import GraphAgentRunService
+from app.modules.agents.tool_ports import CarbonMeshAgentToolServicePort
+from app.modules.agents.tools import AgentToolRegistry
+from app.modules.agents.workflow import AgentWorkflowExecutor
+from app.modules.measurement.service import MeasurementService
+from app.modules.procurement.service import ProcurementService
 from tests.e2e.seed import ApiE2ESeedIds, seed_api_e2e_data
 
 EXTERNAL_E2E_URL_ENV = "CARBONMESH_E2E_DATABASE_URL"
@@ -61,6 +75,59 @@ class E2EContext:
     engine: AsyncEngine
     session_factory: async_sessionmaker[AsyncSession]
     ids: ApiE2ESeedIds
+
+
+class StrictStructuredE2EPlanner:
+    """Return one schema-validated plan without classifying request keywords."""
+
+    provider = "gemini"
+    model_id = "e2e-strict-structured-planner-v1"
+
+    async def generate(self, request: AIRequest) -> AIResult:
+        if (
+            request.system_instruction != planning_system_instruction()
+            or request.temperature is not None
+            or len(request.messages) != 1
+            or request.messages[0].role != "user"
+        ):
+            raise AssertionError("E2E planner received an unexpected model contract")
+        selection = PlannerSelection(
+            disposition="execute",
+            modules=("measurement", "procurement"),
+            clarification_fields=(),
+            reason_code="synthetic_cross_module_request",
+        )
+        return AIResult(
+            provider=self.provider,
+            model_id=self.model_id,
+            text=selection.model_dump_json(),
+            usage=AITokenUsage(
+                input_tokens=16,
+                output_tokens=8,
+                total_tokens=24,
+            ),
+            provider_request_id="synthetic-e2e-planner-request",
+            finish_reason="STOP",
+            latency_ms=1,
+        )
+
+
+def _e2e_agent_run_service(session: AsyncSession) -> GraphAgentRunService:
+    service_port = CarbonMeshAgentToolServicePort(
+        measurement_service=MeasurementService(session),
+        procurement_service=ProcurementService(session),
+        workflow_resolver=AgentWorkflowExecutor(session),
+    )
+    return GraphAgentRunService(
+        AgentRunRepository(session),
+        model_factory=StrictStructuredE2EPlanner,
+        tool_registry_factory=lambda: AgentToolRegistry(service_port),
+        approval_resume=GenericApprovalResumeObserver(session),
+    )
+
+
+def _e2e_agent_run_service_factory():
+    return _e2e_agent_run_service
 
 
 def _available_port() -> int:
@@ -156,12 +223,15 @@ def e2e_database() -> Iterator[DatabaseProcess]:
             )
 
 
-def _portable_test_metadata() -> MetaData:
-    """Clone production metadata, replacing only unused pgvector test storage."""
+def _portable_test_metadata(*, use_vector: bool = False) -> MetaData:
+    """Use production vectors when installed; plain PostgreSQL is a test-only fallback."""
 
     metadata = MetaData(naming_convention=Base.metadata.naming_convention)
     for table in Base.metadata.sorted_tables:
         table.to_metadata(metadata)
+
+    if use_vector:
+        return metadata
 
     evidence = metadata.tables["core.evidence_items"]
     evidence.c.embedding.type = ARRAY(Float)
@@ -174,12 +244,31 @@ def _portable_test_metadata() -> MetaData:
     return metadata
 
 
+def _set_test_embedding_type(column_type: TypeEngine) -> None:
+    """Keep ORM comparator caches aligned with the temporary test storage type."""
+    attribute = EvidenceItem.embedding
+    column = EvidenceItem.__table__.c.embedding
+    column.type = column_type
+    column._reset_memoizations()
+    # Unit tests may have already memoized an annotated VECTOR column. Merely
+    # replacing Table.c.embedding.type leaves its cosine operator cached on the
+    # ORM comparator, producing an invalid ARRAY <=> parameter query in E2E.
+    for owner, name in (
+        (attribute.comparator, "__clause_element__"),
+        (attribute.comparator, "expressions"),
+        (attribute, "expression"),
+    ):
+        try:
+            delattr(owner, name)
+        except AttributeError:
+            pass
+
+
 @pytest_asyncio.fixture
 async def e2e_context(e2e_database: DatabaseProcess) -> AsyncIterator[E2EContext]:
     """Create tables and arrange test-only prerequisites in a disposable database."""
 
     original_vector_type = Base.metadata.tables["core.evidence_items"].c.embedding.type
-    Base.metadata.tables["core.evidence_items"].c.embedding.type = ARRAY(Float)
     engine = create_async_engine(
         e2e_database.url,
         connect_args=e2e_database.connect_args,
@@ -187,8 +276,16 @@ async def e2e_context(e2e_database: DatabaseProcess) -> AsyncIterator[E2EContext
     )
     session_factory = async_sessionmaker(engine, expire_on_commit=False, autoflush=False)
     try:
-        metadata = _portable_test_metadata()
         async with engine.begin() as connection:
+            use_vector = bool(await connection.scalar(text(
+                "SELECT EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'vector')"
+            )))
+            if os.getenv("CARBONMESH_E2E_REQUIRE_PGVECTOR") == "1" and not use_vector:
+                pytest.fail("This disposable E2E environment requires the pgvector extension.")
+            _set_test_embedding_type(VECTOR(768) if use_vector else ARRAY(Float))
+            metadata = _portable_test_metadata(use_vector=use_vector)
+            if use_vector:
+                await connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
             # Every test receives a pristine copy of the eight-schema model. The
             # server itself is temporary (or explicitly opted-in as disposable),
             # so this cannot touch the configured CarbonMesh application database.
@@ -205,12 +302,15 @@ async def e2e_context(e2e_database: DatabaseProcess) -> AsyncIterator[E2EContext
         yield E2EContext(engine=engine, session_factory=session_factory, ids=ids)
     finally:
         await engine.dispose()
-        Base.metadata.tables["core.evidence_items"].c.embedding.type = original_vector_type
+        _set_test_embedding_type(original_vector_type)
 
 
 @pytest_asyncio.fixture
 async def api_client(e2e_context: E2EContext) -> AsyncIterator[httpx.AsyncClient]:
     app.dependency_overrides[get_db_session_factory] = lambda: e2e_context.session_factory
+    app.dependency_overrides[
+        get_agent_run_service_factory
+    ] = _e2e_agent_run_service_factory
     transport = httpx.ASGITransport(app=app)
     try:
         # ASGITransport does not drive lifespan itself. Running it explicitly
@@ -225,4 +325,5 @@ async def api_client(e2e_context: E2EContext) -> AsyncIterator[httpx.AsyncClient
         ):
             yield client
     finally:
+        app.dependency_overrides.pop(get_agent_run_service_factory, None)
         app.dependency_overrides.pop(get_db_session_factory, None)

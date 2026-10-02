@@ -28,6 +28,7 @@ from app.modules.approvals.service import (
 )
 from app.modules.assurance.errors import (
     AssuranceConflictError,
+    AssuranceError,
     AssuranceNotFoundError,
     AssuranceStaleError,
     AssuranceValidationError,
@@ -69,10 +70,16 @@ from app.modules.ledger.service import (
     normalize_json,
     payload_sha256,
 )
-from app.modules.sources.embedding import EMBEDDING_MODEL_ID, hash_embedding
+from app.modules.measurement.domain import sha256_payload as measurement_payload_hash
+from app.modules.sources.embedding import (
+    EmbeddingUnavailableError,
+    get_embedding_provider,
+    selected_embedding_model,
+)
+from app.modules.sources.errors import SourceUploadError
 
-VALIDATION_METHOD_ID = "assurance-claim-validation-v1"
-RETRIEVAL_METHOD_ID = "assurance-filtered-retrieval-v1"
+VALIDATION_METHOD_ID = "assurance-claim-validation-v2"
+RETRIEVAL_METHOD_ID = "assurance-filtered-retrieval-v2"
 APPROVAL_TTL = timedelta(hours=24)
 DISCLAIMER = "POC draft; not an assurance opinion or filing."
 MAX_EVIDENCE_CANDIDATES = 100
@@ -256,6 +263,24 @@ def _requirement_source(requirement: DisclosureRequirement) -> dict[str, Any]:
     }
 
 
+def _expected_standard_metric_key(standard: Any) -> str | None:
+    """Return an explicitly configured or well-known metric contract."""
+
+    template = standard.template if isinstance(standard.template, dict) else {}
+    configured = template.get("metric_key")
+    if isinstance(configured, str) and configured.strip():
+        return configured.strip()
+
+    template_kind = template.get("type", template.get("kind"))
+    normalized_kind = (
+        str(template_kind).strip().casefold().replace("-", "_") if template_kind is not None else ""
+    )
+    normalized_code = str(standard.code).strip().casefold().replace("-", "_")
+    if normalized_kind in {"scope2_summary", "scope_2_summary"} or "scope_2" in normalized_code:
+        return "emissions.scope2.location_based"
+    return None
+
+
 def _base_context(
     dependencies: DraftDependencies,
     requirements: list[DisclosureRequirement] | tuple[DisclosureRequirement, ...],
@@ -309,11 +334,23 @@ def _base_context(
             "status": dependencies.measurement.status,
             "output_hash": dependencies.measurement.output_hash,
             "formula": dependencies.measurement.formula,
+            "coverage": dependencies.measurement_coverage,
+            "calculation": dependencies.measurement_calculation,
+        },
+        "measurement_metric": {
+            "id": dependencies.measurement_metric.id,
+            "key": dependencies.measurement_metric.key,
+            "version": dependencies.measurement_metric.version,
+            "canonical_unit": dependencies.measurement_metric.canonical_unit,
+            "dimensions": dependencies.measurement_metric.dimensions,
+            "handler": dependencies.measurement_metric.handler,
+            "method_version": dependencies.measurement_metric.method_version,
+            "is_active": dependencies.measurement_metric.is_active,
         },
         "agent_run_id": dependencies.agent_run.id if dependencies.agent_run else None,
         "validation_method": VALIDATION_METHOD_ID,
         "retrieval_method": RETRIEVAL_METHOD_ID,
-        "embedding_model": EMBEDDING_MODEL_ID,
+        "embedding_model": selected_embedding_model(),
     }
 
 
@@ -388,9 +425,13 @@ def _gap(
     **details: Any,
 ) -> _PlannedGap:
     code = f"{requirement.requirement_code}_{suffix}"[:100]
+    blocks_publication = (
+        requirement.is_required
+        or requirement.evidence_rules.get("missing_support_policy") == "block"
+    )
     return _PlannedGap(
         code=code,
-        severity="error" if requirement.is_required else "warning",
+        severity="error" if blocks_publication else "warning",
         message=message,
         details={"requirement_code": requirement.requirement_code, **details},
     )
@@ -419,6 +460,7 @@ class AssuranceServicePort(Protocol):
         request: DisclosureDraftValidateRequest,
         *,
         trace_id: str | None = None,
+        allowed_evidence_item_ids: frozenset[UUID] | None = None,
     ) -> AssuranceAgentResult: ...
 
     async def get_evidence_pack(
@@ -497,9 +539,13 @@ class AssuranceService:
             raise AssuranceNotFoundError(
                 "The requested Assurance context was not found in this company."
             )
-        requirements = await self.repository.list_requirements(
+        available_requirements = await self.repository.list_requirements(
             company_id=request.company_id,
             standard_id=request.standard_id,
+        )
+        requirements = self._select_requirements(
+            available_requirements,
+            request.requirement_ids,
         )
         self._validate_draft_dependencies(dependencies, requirements)
         version = await self.repository.allocate_draft_version(
@@ -548,6 +594,7 @@ class AssuranceService:
             "site_id": request.site_id,
             "reporting_period_id": request.reporting_period_id,
             "measurement_id": request.measurement_id,
+            "requirement_ids": [item.id for item in requirements],
             "version": version,
             "title": title,
             "context_hash": context_hash,
@@ -558,11 +605,12 @@ class AssuranceService:
             "idempotency_key": request.idempotency_key,
             "create_request_hash": request_hash,
             "measurement_id": str(request.measurement_id),
+            "requirement_ids": [str(item.id) for item in requirements],
             "requested_by": str(request.requested_by),
             "base_context_hash": context_hash,
             "validation_method": VALIDATION_METHOD_ID,
             "retrieval_method": RETRIEVAL_METHOD_ID,
-            "embedding_model": EMBEDDING_MODEL_ID,
+            "embedding_model": selected_embedding_model(),
             "disclaimer": DISCLAIMER,
         }
         try:
@@ -644,6 +692,7 @@ class AssuranceService:
         request: DisclosureDraftValidateRequest,
         *,
         trace_id: str | None = None,
+        allowed_evidence_item_ids: frozenset[UUID] | None = None,
     ) -> DisclosureDraftValidationResult:
         draft = await self.repository.get_draft(
             company_id=request.company_id,
@@ -681,6 +730,17 @@ class AssuranceService:
             )
             if aggregate is None:
                 raise AssuranceNotFoundError("The disclosure draft became unavailable.")
+            if allowed_evidence_item_ids is not None:
+                stored_scope = self._stored_evidence_scope_ids(aggregate.draft.validation_summary)
+                selected_ids = {item.evidence.id for item in aggregate.evidence}
+                if stored_scope != allowed_evidence_item_ids or not selected_ids.issubset(
+                    allowed_evidence_item_ids
+                ):
+                    raise AssuranceConflictError(
+                        "The validated draft does not match the frozen evidence scope.",
+                        code="assurance_evidence_scope_mismatch",
+                        field_details={"evidence_item_ids": "scope_mismatch"},
+                    )
             if await self._aggregate_is_stale(aggregate):
                 return await self._invalidate_draft(
                     aggregate,
@@ -707,9 +767,13 @@ class AssuranceService:
                 actor_id=request.requested_by,
                 trace_id=trace_id,
             )
-        requirements = await self.repository.list_requirements(
+        available_requirements = await self.repository.list_requirements(
             company_id=request.company_id,
             standard_id=draft.standard_id,
+        )
+        requirements = self._select_requirements(
+            available_requirements,
+            self._stored_requirement_ids(draft.validation_summary),
         )
         self._validate_draft_dependencies(dependencies, requirements)
         measurement_event = (
@@ -723,7 +787,13 @@ class AssuranceService:
 
         draft.status = "validating"
         plans = [
-            await self._plan_claim(draft, dependencies, requirement) for requirement in requirements
+            await self._plan_claim(
+                draft,
+                dependencies,
+                requirement,
+                allowed_evidence_item_ids=allowed_evidence_item_ids,
+            )
+            for requirement in requirements
         ]
         selected_evidence = self._unique_evidence(
             [item for plan in plans for item in plan.evidence]
@@ -795,7 +865,7 @@ class AssuranceService:
                     "validation_idempotency_key": request.idempotency_key,
                     "validation_method": VALIDATION_METHOD_ID,
                     "retrieval_method": RETRIEVAL_METHOD_ID,
-                    "embedding_model": EMBEDDING_MODEL_ID,
+                    "embedding_model": selected_embedding_model(),
                     "source_hash": source_hash,
                     "analysis_signature": analysis_signature,
                     "validated_at": now.isoformat(),
@@ -806,6 +876,10 @@ class AssuranceService:
                     "disclaimer": DISCLAIMER,
                 }
             )
+            if allowed_evidence_item_ids is not None:
+                summary["evidence_item_scope_ids"] = [
+                    str(item) for item in sorted(allowed_evidence_item_ids, key=str)
+                ]
             draft.validation_summary = summary
             event = await append_ledger_event(
                 self.session,
@@ -958,8 +1032,14 @@ class AssuranceService:
         request: DisclosureDraftValidateRequest,
         *,
         trace_id: str | None = None,
+        allowed_evidence_item_ids: frozenset[UUID] | None = None,
     ) -> AssuranceAgentResult:
-        result = await self.validate_draft(draft_id, request, trace_id=trace_id)
+        result = await self.validate_draft(
+            draft_id,
+            request,
+            trace_id=trace_id,
+            allowed_evidence_item_ids=allowed_evidence_item_ids,
+        )
         supported = sorted(
             item.requirement_code
             for item in result.draft.claims
@@ -984,6 +1064,91 @@ class AssuranceService:
             payload_hash=result.draft.payload_hash,
             idempotent=result.idempotent,
         )
+
+    @staticmethod
+    def _stored_requirement_ids(summary: dict[str, Any]) -> tuple[UUID, ...]:
+        """Read the immutable requirement scope from a persisted draft.
+
+        Drafts created before requirement scoping did not persist this field and
+        retain the original all-active-requirements behavior.
+        """
+
+        raw_ids = summary.get("requirement_ids")
+        if raw_ids is None:
+            return ()
+        if not isinstance(raw_ids, list) or not raw_ids:
+            raise AssuranceValidationError(
+                "The disclosure draft has an invalid requirement scope.",
+                field_details={"requirement_ids": "invalid_persisted_scope"},
+            )
+        try:
+            identifiers = tuple(UUID(str(item)) for item in raw_ids)
+        except (TypeError, ValueError) as error:
+            raise AssuranceValidationError(
+                "The disclosure draft has an invalid requirement scope.",
+                field_details={"requirement_ids": "invalid_persisted_scope"},
+            ) from error
+        if len(identifiers) != len(set(identifiers)):
+            raise AssuranceValidationError(
+                "The disclosure draft has an invalid requirement scope.",
+                field_details={"requirement_ids": "duplicate_persisted_scope"},
+            )
+        return identifiers
+
+    @staticmethod
+    def _stored_evidence_scope_ids(
+        summary: dict[str, Any],
+    ) -> frozenset[UUID] | None:
+        """Return the evidence allowlist frozen by agent validation, if any."""
+
+        raw_ids = summary.get("evidence_item_scope_ids")
+        if raw_ids is None:
+            return None
+        if not isinstance(raw_ids, list):
+            raise AssuranceValidationError(
+                "The disclosure draft has an invalid evidence scope.",
+                field_details={"evidence_item_scope_ids": "invalid_persisted_scope"},
+            )
+        try:
+            identifiers = tuple(UUID(str(item)) for item in raw_ids)
+        except (TypeError, ValueError) as error:
+            raise AssuranceValidationError(
+                "The disclosure draft has an invalid evidence scope.",
+                field_details={"evidence_item_scope_ids": "invalid_persisted_scope"},
+            ) from error
+        if len(identifiers) != len(set(identifiers)):
+            raise AssuranceValidationError(
+                "The disclosure draft has an invalid evidence scope.",
+                field_details={"evidence_item_scope_ids": "duplicate_persisted_scope"},
+            )
+        return frozenset(identifiers)
+
+    @staticmethod
+    def _select_requirements(
+        available: list[DisclosureRequirement] | tuple[DisclosureRequirement, ...],
+        requested_ids: tuple[UUID, ...],
+    ) -> list[DisclosureRequirement]:
+        """Freeze a supported subset without permitting required omissions."""
+
+        if not requested_ids:
+            return list(available)
+        requested = set(requested_ids)
+        available_ids = {item.id for item in available}
+        unknown = requested - available_ids
+        if unknown:
+            raise AssuranceValidationError(
+                "One or more selected requirements are unavailable in this standard.",
+                field_details={"requirement_ids": "unknown_or_inactive"},
+            )
+        missing_required = {
+            item.id for item in available if item.is_required and item.id not in requested
+        }
+        if missing_required:
+            raise AssuranceValidationError(
+                "Required disclosure requirements cannot be omitted from a draft.",
+                field_details={"requirement_ids": "required_requirement_missing"},
+            )
+        return [item for item in available if item.id in requested]
 
     def _validate_draft_dependencies(
         self,
@@ -1034,20 +1199,76 @@ class AssuranceService:
             raise AssuranceValidationError(
                 "The measurement context does not match the draft context."
             )
+        if dependencies.measurement_metric.id != measurement.metric_definition_id:
+            raise AssuranceValidationError(
+                "The measurement metric metadata does not match the measurement.",
+                field_details={"measurement_id": "metric_definition_mismatch"},
+            )
+        expected_metric_key = _expected_standard_metric_key(standard)
+        if (
+            expected_metric_key is not None
+            and dependencies.measurement_metric.key != expected_metric_key
+        ):
+            raise AssuranceValidationError(
+                "The measurement metric does not satisfy the disclosure standard.",
+                field_details={
+                    "measurement_metric_key": (
+                        f"expected:{expected_metric_key};"
+                        f"actual:{dependencies.measurement_metric.key}"
+                    )
+                },
+            )
         if measurement.status != "verified" or measurement.ledger_event_id is None:
             raise AssuranceValidationError(
                 "Only a verified measurement with ledger lineage can support a draft."
             )
+        calculation = dependencies.measurement_calculation
+        if calculation is not None:
+            if (
+                calculation.get("status") != "completed"
+                or calculation.get("reporting_period_id") != period.id
+                or calculation.get("is_active") is not True
+                or calculation.get("effective_from") is None
+                or calculation["effective_from"] > period.end_date
+                or (
+                    calculation.get("effective_to") is not None
+                    and calculation["effective_to"] < period.start_date
+                )
+            ):
+                raise AssuranceValidationError(
+                    "The measurement calculation or its effective method is no longer valid."
+                )
+            method_changed = calculation.get("run_method_version") != calculation.get(
+                "method_version"
+            ) or calculation.get("run_code_version") != calculation.get("code_version")
+            frozen_method = calculation.get("frozen_method")
+            if frozen_method is not None:
+                current_method = {
+                    "method_definition_id": calculation["method_id"],
+                    "method_key": calculation["method_key"],
+                    "method_version": calculation["method_version"],
+                    "code_version": calculation["code_version"],
+                    "method_configuration": calculation["configuration"],
+                }
+                method_changed |= normalize_json(frozen_method) != normalize_json(current_method)
+            recorded_method_hash = calculation.get("recorded_method_hash")
+            if recorded_method_hash is not None:
+                method_changed |= recorded_method_hash != measurement_payload_hash(
+                    {
+                        "key": calculation["method_key"],
+                        "version": calculation["method_version"],
+                        "configuration": calculation["configuration"],
+                    }
+                )
+            if method_changed:
+                raise AssuranceValidationError(
+                    "The measurement method has changed since the verified calculation."
+                )
         fact_requirements = [
             item
             for item in requirements
             if item.evidence_rules.get("fact_binding_required") is True
         ]
-        if fact_requirements and dependencies.agent_run is None:
-            raise AssuranceValidationError(
-                "A persisted agent run is required to bind numerical disclosure facts.",
-                field_details={"agent_run_id": "required_for_fact_binding"},
-            )
         mismatched_metrics = [
             item.requirement_code
             for item in fact_requirements
@@ -1065,8 +1286,14 @@ class AssuranceService:
         draft: Any,
         dependencies: DraftDependencies,
         requirement: DisclosureRequirement,
+        *,
+        allowed_evidence_item_ids: frozenset[UUID] | None = None,
     ) -> _PlannedClaim:
-        evidence = await self._retrieve_evidence(dependencies, requirement)
+        evidence = await self._retrieve_evidence(
+            dependencies,
+            requirement,
+            allowed_evidence_item_ids=allowed_evidence_item_ids,
+        )
         claim_type = _claim_type(requirement)
         placeholders = set(_PLACEHOLDER.findall(requirement.claim_template))
         replacements = {
@@ -1170,6 +1397,9 @@ class AssuranceService:
         unknown = placeholders - allowed
         expected_unit = requirement.evidence_rules.get("unit")
         reasons: list[str] = []
+        coverage = dependencies.measurement_coverage
+        if coverage is not None and coverage.get("full_reporting_period") is not True:
+            reasons.append("incomplete_reporting_period_coverage")
         if unknown or "scope2_total" not in placeholders:
             reasons.append("unbound_numeric_placeholder")
         if (
@@ -1220,7 +1450,11 @@ class AssuranceService:
             rendered_text=rendered,
             support_status="supported",
             confidence=measurement.confidence,
-            validation_details={**details, "fact_validation": "valid"},
+            validation_details={
+                **details,
+                "fact_validation": "valid",
+                "metric_key": dependencies.measurement_metric.key,
+            },
             evidence=evidence,
             fact_placeholder="fact_scope2_total",
             fact_display_value=display_value,
@@ -1233,6 +1467,8 @@ class AssuranceService:
         self,
         dependencies: DraftDependencies,
         requirement: DisclosureRequirement,
+        *,
+        allowed_evidence_item_ids: frozenset[UUID] | None = None,
     ) -> tuple[EvidenceRecord, ...]:
         configured = requirement.evidence_rules.get("allowed_evidence_types")
         evidence_types = (
@@ -1244,13 +1480,39 @@ class AssuranceService:
             f"{requirement.requirement_code}\n{requirement.title}\n"
             f"{requirement.description}\n{requirement.claim_template}"
         )
-        query_embedding = hash_embedding(query_text)
+        context = EvidenceRetrievalContext(
+            company_id=dependencies.standard.company_id,
+            site_id=dependencies.site.id,
+            reporting_period_id=dependencies.reporting_period.id,
+            requirement_code=requirement.requirement_code,
+            allowed_evidence_types=evidence_types,
+            embedding_model=selected_embedding_model(),
+            minimum_similarity=_minimum_evidence_similarity(requirement),
+            company_name=dependencies.company.name,
+            site_name=dependencies.site.name,
+            reporting_period_name=dependencies.reporting_period.name,
+        )
+        try:
+            query_embedding = (await get_embedding_provider().embed([query_text]))[0]
+        except EmbeddingUnavailableError as error:
+            raise AssuranceError(
+                "The evidence embedding provider is unavailable.",
+                code="provider_unavailable",
+                status_code=503,
+                retryable=True,
+            ) from error
+        except SourceUploadError as error:
+            raise AssuranceValidationError(
+                "The evidence retrieval request exceeds the supported embedding input bounds."
+            ) from error
         records = await self.repository.list_evidence_candidates(
             company_id=dependencies.standard.company_id,
             evidence_types=evidence_types,
-            embedding_model=EMBEDDING_MODEL_ID,
+            embedding_model=selected_embedding_model(),
             limit=MAX_EVIDENCE_CANDIDATES,
             query_embedding=query_embedding,
+            evidence_item_ids=allowed_evidence_item_ids,
+            context=context,
         )
         candidates: list[EvidenceCandidate] = []
         by_id: dict[UUID, EvidenceRecord] = {}
@@ -1270,6 +1532,7 @@ class AssuranceService:
                 content_text=record.evidence.content_text,
                 checksum=record.evidence.checksum,
                 source_document_checksum=record.document.checksum,
+                source_document_version=record.document.version,
                 metadata=record.evidence.evidence_metadata,
                 embedding_model=record.evidence.embedding_model,
                 embedded_at=record.evidence.embedded_at,
@@ -1282,18 +1545,6 @@ class AssuranceService:
                 record.source,
                 similarity,
             )
-        context = EvidenceRetrievalContext(
-            company_id=dependencies.standard.company_id,
-            site_id=dependencies.site.id,
-            reporting_period_id=dependencies.reporting_period.id,
-            requirement_code=requirement.requirement_code,
-            allowed_evidence_types=evidence_types,
-            embedding_model=EMBEDDING_MODEL_ID,
-            minimum_similarity=_minimum_evidence_similarity(requirement),
-            company_name=dependencies.company.name,
-            site_name=dependencies.site.name,
-            reporting_period_name=dependencies.reporting_period.name,
-        )
         ranked = rank_evidence_candidates(
             candidates,
             context,
@@ -1313,13 +1564,12 @@ class AssuranceService:
         fact_binding_id = None
         if plan.fact_placeholder is not None:
             if (
-                dependencies.agent_run is None
-                or plan.fact_value_snapshot is None
+                plan.fact_value_snapshot is None
                 or plan.ledger_event_id is None
                 or plan.fact_display_value is None
             ):
                 raise AssuranceValidationError(
-                    "A numerical claim cannot be persisted without an agent run and fact."
+                    "A numerical claim cannot be persisted without a verified ledger fact."
                 )
             normalized_snapshot = normalize_json(plan.fact_value_snapshot)
             if not isinstance(normalized_snapshot, dict):
@@ -1352,7 +1602,7 @@ class AssuranceService:
                     artifact_type="disclosure_draft",
                     artifact_id=draft.id,
                     recommendation_id=None,
-                    agent_run_id=dependencies.agent_run.id,
+                    agent_run_id=dependencies.agent_run.id if dependencies.agent_run else None,
                     ledger_event_id=plan.ledger_event_id,
                     evidence_item_id=(plan.evidence[0].evidence.id if plan.evidence else None),
                     placeholder=plan.fact_placeholder,
@@ -1549,7 +1799,7 @@ class AssuranceService:
             "fact_bindings": [item.model_dump(mode="python") for item in bindings],
             "validation_method": VALIDATION_METHOD_ID,
             "retrieval_method": RETRIEVAL_METHOD_ID,
-            "embedding_model": EMBEDDING_MODEL_ID,
+            "embedding_model": selected_embedding_model(),
             "approval_eligible": approval_eligible,
             "approval_expires_at": approval_expires_at,
             "disclaimer": DISCLAIMER,
@@ -1668,15 +1918,26 @@ class AssuranceService:
         )
         if dependencies is None or dependencies.measurement.ledger_event_id is None:
             return True
-        current_requirements = await self.repository.list_requirements(
+        available_requirements = await self.repository.list_requirements(
             company_id=aggregate.draft.company_id,
             standard_id=aggregate.draft.standard_id,
             active_only=True,
         )
         try:
+            current_requirements = self._select_requirements(
+                available_requirements,
+                self._stored_requirement_ids(aggregate.draft.validation_summary),
+            )
             self._validate_draft_dependencies(dependencies, current_requirements)
             current_plans = [
-                await self._plan_claim(aggregate.draft, dependencies, requirement)
+                await self._plan_claim(
+                    aggregate.draft,
+                    dependencies,
+                    requirement,
+                    allowed_evidence_item_ids=self._stored_evidence_scope_ids(
+                        aggregate.draft.validation_summary
+                    ),
+                )
                 for requirement in current_requirements
             ]
         except AssuranceValidationError:

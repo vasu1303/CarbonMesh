@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
@@ -10,6 +11,7 @@ from urllib.parse import parse_qs, urlparse
 import pytest
 from pydantic import SecretStr, ValidationError
 
+from app.core.observability import begin_external_usage, take_external_usage
 from app.modules.integrations.electricity_maps import (
     ElectricityMapsHttpClient,
     ElectricityMapsProviderError,
@@ -23,7 +25,6 @@ from app.modules.integrations.grid_forecast import (
 from app.modules.integrations.schemas import ElectricityMapsRangePayload
 
 DEMO_FIXTURES = Path(__file__).resolve().parents[4] / "data" / "demo"
-PACKAGED_FIXTURES = Path(__file__).resolve().parents[2] / "app" / "demo_fixtures"
 
 
 class FakeResponse:
@@ -97,6 +98,7 @@ async def test_live_forecast_adapter_uses_official_v4_path_and_query(monkeypatch
 @pytest.mark.asyncio
 async def test_live_provider_retries_one_transient_failure(monkeypatch) -> None:
     attempts = 0
+    begin_external_usage()
 
     def flaky_urlopen(request, *, timeout):
         nonlocal attempts
@@ -114,6 +116,10 @@ async def test_live_provider_retries_one_transient_failure(monkeypatch) -> None:
     await client.get_carbon_intensity_forecast(zone="IN", horizon_hours=6)
 
     assert attempts == 2
+    usage = take_external_usage()
+    assert usage.api_calls == 2
+    assert usage.retry_count == 1
+    assert usage.cache_hits == 0
 
 
 @pytest.mark.asyncio
@@ -148,6 +154,7 @@ async def test_live_provider_bounds_all_transient_failures_to_one_retry(
 @pytest.mark.asyncio
 async def test_live_provider_does_not_retry_authentication_failure(monkeypatch) -> None:
     attempts = 0
+    begin_external_usage()
 
     def rejected_urlopen(request, *, timeout):
         nonlocal attempts
@@ -164,6 +171,9 @@ async def test_live_provider_does_not_retry_authentication_failure(monkeypatch) 
         await client.get_carbon_intensity_forecast(zone="IN", horizon_hours=6)
 
     assert attempts == 1
+    usage = take_external_usage()
+    assert usage.api_calls == 1
+    assert usage.retry_count == 0
     assert caught.value.code == "integration_authentication_failed"
     assert caught.value.retryable is False
     assert "top-secret" not in str(caught.value)
@@ -254,6 +264,100 @@ def test_forecast_contract_fails_closed_on_missing_interval() -> None:
     assert caught.value.retryable is False
 
 
+@pytest.mark.parametrize("horizon", [6, 24, 48, 72])
+def test_forecast_accepts_inclusive_endpoint_without_extending_horizon(horizon: int) -> None:
+    payload = forecast_payload(horizon + 1)
+    original = json.dumps(payload, sort_keys=True)
+
+    normalized = normalize_electricity_maps_forecast(
+        payload, expected_zone="IN", horizon_hours=cast(ForecastHorizon, horizon)
+    )
+
+    start = datetime(2026, 10, 1, 8, tzinfo=UTC)
+    assert len(normalized.points) == horizon
+    assert normalized.points[0].forecast_for == start
+    assert normalized.points[-1].forecast_for + timedelta(hours=1) == (
+        start + timedelta(hours=horizon)
+    )
+    assert len(normalized.source_snapshot["forecast"]) == horizon + 1
+    assert json.dumps(payload, sort_keys=True) == original
+
+
+@pytest.mark.asyncio
+async def test_live_forecast_normalizes_25_points_to_24_intervals(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.modules.integrations.electricity_maps.urlopen",
+        lambda request, *, timeout: FakeResponse(forecast_payload(25)),
+    )
+    provider = ElectricityMapsHttpClient(token=SecretStr("synthetic-test-token"))
+
+    normalized = await fetch_normalized_grid_forecast(provider, zone="IN", horizon_hours=24)
+
+    assert len(normalized.points) == 24
+    assert provider.is_synthetic is False
+    assert "synthetic" not in normalized.source_snapshot
+    assert len(normalized.source_snapshot["forecast"]) == 25
+
+
+@pytest.mark.parametrize(
+    ("invalid_case", "expected_code"),
+    [
+        ("interior_gap", "integration_incomplete_forecast"),
+        ("interior_duplicate", "integration_invalid_response"),
+        ("endpoint_duplicate", "integration_invalid_response"),
+        ("endpoint_misaligned", "integration_invalid_response"),
+        ("endpoint_factor_method", "integration_invalid_response"),
+        ("endpoint_invalid_value", "integration_invalid_response"),
+    ],
+)
+def test_inclusive_forecast_validates_all_points_before_trimming(
+    invalid_case: str, expected_code: str
+) -> None:
+    payload = forecast_payload(25)
+    forecast = payload["forecast"]
+    assert isinstance(forecast, list)
+    if invalid_case == "interior_gap":
+        forecast[6]["datetime"] = "2026-10-02T09:00:00Z"
+    elif invalid_case == "interior_duplicate":
+        forecast[6]["datetime"] = forecast[5]["datetime"]
+    elif invalid_case == "endpoint_duplicate":
+        forecast[-1]["datetime"] = forecast[-2]["datetime"]
+    elif invalid_case == "endpoint_misaligned":
+        forecast[-1]["datetime"] = "2026-10-02T08:30:00Z"
+    elif invalid_case == "endpoint_factor_method":
+        forecast[-1]["emissionFactorType"] = "direct"
+    else:
+        forecast[-1]["carbonIntensity"] = -1
+
+    with pytest.raises(ElectricityMapsProviderError) as caught:
+        normalize_electricity_maps_forecast(payload, expected_zone="IN", horizon_hours=24)
+
+    assert caught.value.code == expected_code
+    assert caught.value.retryable is False
+
+
+@pytest.mark.parametrize("count", [23, 26])
+def test_forecast_rejects_unexpected_horizon_lengths(count: int) -> None:
+    with pytest.raises(ElectricityMapsProviderError) as caught:
+        normalize_electricity_maps_forecast(
+            forecast_payload(count), expected_zone="IN", horizon_hours=24
+        )
+    assert caught.value.code == "integration_incomplete_forecast"
+
+
+def test_excluded_endpoint_remains_bound_by_raw_response_checksum() -> None:
+    payload = forecast_payload(25)
+    first = normalize_electricity_maps_forecast(payload, expected_zone="IN", horizon_hours=24)
+    forecast = payload["forecast"]
+    assert isinstance(forecast, list)
+    forecast[-1]["carbonIntensity"] += 1
+
+    changed = normalize_electricity_maps_forecast(payload, expected_zone="IN", horizon_hours=24)
+
+    assert first.points == changed.points
+    assert first.response_checksum != changed.response_checksum
+
+
 def test_forecast_contract_rejects_non_hour_aligned_points() -> None:
     payload = forecast_payload()
     forecast = payload["forecast"]
@@ -318,17 +422,58 @@ async def test_forecast_estimations_cannot_be_silently_disabled() -> None:
     assert caught.value.retryable is False
 
 
-def test_forecast_assets_are_container_packaged_and_match_canonical_fixtures(
-    monkeypatch,
+@pytest.mark.asyncio
+async def test_forecast_fixture_lookup_loads_container_bundle(
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     monkeypatch.delenv("CARBONMESH_DEMO_FIXTURE_DIR", raising=False)
     monkeypatch.chdir(tmp_path)
-    from app.api.routes.dispatch import _demo_forecast_fixture_directory
+    from app.api.routes import dispatch
+    from app.modules.demo import fixtures
 
-    assert _demo_forecast_fixture_directory() == PACKAGED_FIXTURES
-    for horizon in (6, 24, 48, 72):
-        filename = f"grid-forecast-{horizon}h.json"
-        assert (PACKAGED_FIXTURES / filename).read_bytes() == (
-            DEMO_FIXTURES / filename
-        ).read_bytes()
+    bundled = tmp_path / "app" / "demo_fixtures"
+    shutil.copytree(DEMO_FIXTURES, bundled)
+    monkeypatch.setattr(fixtures, "__file__", str(tmp_path / "app/modules/demo/fixtures.py"))
+
+    assert dispatch._demo_forecast_fixture_directory() == bundled
+    provider = ElectricityMapsFixtureClient(dispatch._demo_forecast_fixture_directory())
+    forecast = await fetch_normalized_grid_forecast(provider, zone="IN", horizon_hours=24)
+    assert len(forecast.points) == 24
+    assert forecast.source_snapshot["synthetic"] is True
+
+
+def test_forecast_fixture_lookup_uses_canonical_data_outside_repository_cwd(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from app.api.routes import dispatch
+
+    monkeypatch.delenv("CARBONMESH_DEMO_FIXTURE_DIR", raising=False)
+    monkeypatch.chdir(tmp_path)
+    assert dispatch._demo_forecast_fixture_directory() == DEMO_FIXTURES
+
+
+def test_forecast_fixture_lookup_preserves_explicit_override(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from app.api.routes import dispatch
+
+    monkeypatch.setenv("CARBONMESH_DEMO_FIXTURE_DIR", str(tmp_path))
+    assert dispatch._demo_forecast_fixture_directory() == tmp_path
+
+
+def test_forecast_fixture_lookup_preserves_startup_when_bundle_missing(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from app.api.routes import dispatch
+
+    def missing_bundle() -> Path:
+        raise RuntimeError("Synthetic missing bundle")
+
+    monkeypatch.delenv("CARBONMESH_DEMO_FIXTURE_DIR", raising=False)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(dispatch, "_fixture_directory", missing_bundle)
+    assert dispatch._demo_forecast_fixture_directory() == tmp_path / "data" / "demo"

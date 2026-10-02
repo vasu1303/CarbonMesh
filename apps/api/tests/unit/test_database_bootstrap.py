@@ -192,6 +192,13 @@ def test_check_comparison_tolerates_postgresql_rewrites() -> None:
         "confidence BETWEEN 0 AND 1",
         "CHECK (((confidence >= (0)::numeric) AND (confidence <= (1)::numeric)))",
     )
+    assert _check_definition_is_compatible(
+        "longitude IS NULL OR longitude BETWEEN -180 AND 180",
+        (
+            "CHECK (longitude IS NULL OR "
+            "longitude >= '-180'::integer::numeric AND longitude <= 180::numeric)"
+        ),
+    )
     assert not _check_definition_is_compatible(
         "confidence BETWEEN 0 AND 1",
         "CHECK (((confidence >= (0)::numeric) AND (confidence <= (2)::numeric)))",

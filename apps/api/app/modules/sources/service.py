@@ -9,7 +9,11 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.core import AuditLog, DataSource, EvidenceItem, SourceDocument
-from app.modules.sources.embedding import EMBEDDING_MODEL_ID, hash_embedding
+from app.modules.sources.embedding import (
+    EMBEDDING_MODEL_ID,
+    EmbeddingProvider,
+    get_embedding_provider,
+)
 from app.modules.sources.errors import (
     SourceChecksumMismatchError,
     SourceConflictError,
@@ -33,9 +37,12 @@ from app.modules.sources.schemas import (
     DataSourceMetadata,
     EvidenceMetadata,
     SourceDocumentMetadata,
+    SourceIndexRequest,
+    SourceIndexResponse,
     SourceUploadRequest,
     SourceUploadResponse,
 )
+from app.modules.sources.storage import SourceContentStore
 
 INGESTION_METHOD_ID = "carbonmesh-source-json-v1"
 
@@ -189,6 +196,8 @@ async def upload_source_document(
     *,
     trace_id: str | None = None,
     repository: SourceRepositoryProtocol | None = None,
+    embedding_provider: EmbeddingProvider | None = None,
+    content_store: SourceContentStore | None = None,
 ) -> SourceUploadResponse:
     """Validate, extract and atomically persist one evidence-backed source document."""
 
@@ -210,6 +219,14 @@ async def upload_source_document(
             checksum=checksum,
         )
         if existing is not None:
+            _validate_existing_source(existing.source, request)
+            existing_period = existing.document.document_metadata.get("reporting_period_id")
+            requested_period = str(request.reporting_period_id) if request.reporting_period_id else None
+            if existing_period is not None and existing_period != requested_period:
+                raise SourceConflictError(
+                    "This source content is already bound to a different reporting period.",
+                    code="source_identity_conflict",
+                )
             result = _response(
                 existing,
                 replayed=True,
@@ -225,6 +242,11 @@ async def upload_source_document(
         )
         chunks = chunk_text(extracted.text)
         context_metadata = _context_metadata(request)
+        provider = embedding_provider or get_embedding_provider()
+        vectors = await provider.embed([chunk.text for chunk in chunks])
+        storage_uri = await (content_store or SourceContentStore()).put(
+            request.company_id, checksum, content_bytes
+        )
 
         source = await repo.get_source_by_name(
             company_id=request.company_id,
@@ -240,7 +262,7 @@ async def upload_source_document(
                 external_reference=request.external_reference,
                 configuration={
                     "ingestion_method_id": INGESTION_METHOD_ID,
-                    "embedding_model_id": EMBEDDING_MODEL_ID,
+                    "embedding_model_id": provider.model_id,
                 },
                 is_synthetic=request.is_synthetic,
             )
@@ -255,8 +277,10 @@ async def upload_source_document(
             "ingestion_method_id": INGESTION_METHOD_ID,
             "extraction_method_id": extracted.extraction_method_id,
             "chunking_method_id": CHUNKING_METHOD_ID,
-            "embedding_model_id": EMBEDDING_MODEL_ID,
+            "embedding_model_id": provider.model_id,
             "source_checksum": checksum,
+            "trust_status": "synthetic" if request.is_synthetic else "accepted",
+            "source_version": version,
         }
         document = SourceDocument(
             company_id=request.company_id,
@@ -266,7 +290,7 @@ async def upload_source_document(
             checksum=checksum,
             version=version,
             size_bytes=len(content_bytes),
-            storage_uri=f"sha256://{checksum}",
+            storage_uri=storage_uri,
             document_metadata=document_metadata,
         )
         repo.add(document)
@@ -274,7 +298,7 @@ async def upload_source_document(
 
         embedded_at = datetime.now(UTC)
         evidence_items: list[EvidenceItem] = []
-        for chunk in chunks:
+        for chunk, vector in zip(chunks, vectors, strict=True):
             chunk_bytes = chunk.text.encode("utf-8")
             evidence_metadata = {
                 **context_metadata,
@@ -282,7 +306,10 @@ async def upload_source_document(
                 "ingestion_method_id": INGESTION_METHOD_ID,
                 "extraction_method_id": extracted.extraction_method_id,
                 "chunking_method_id": CHUNKING_METHOD_ID,
-                "embedding_model_id": EMBEDDING_MODEL_ID,
+                "embedding_model_id": provider.model_id,
+                "trust_status": "synthetic" if request.is_synthetic else "accepted",
+                "source_version": version,
+                "source_checksum": checksum,
                 "chunk_index": chunk.index,
                 "chunk_count": len(chunks),
                 "character_start": chunk.start,
@@ -296,8 +323,8 @@ async def upload_source_document(
                 content_text=chunk.text,
                 checksum=_sha256(chunk_bytes),
                 evidence_metadata=evidence_metadata,
-                embedding=hash_embedding(chunk.text),
-                embedding_model=EMBEDDING_MODEL_ID,
+                embedding=vector,
+                embedding_model=provider.model_id,
                 embedded_at=embedded_at,
             )
             repo.add(item)
@@ -322,7 +349,7 @@ async def upload_source_document(
                         "ingestion_method_id": INGESTION_METHOD_ID,
                         "extraction_method_id": extracted.extraction_method_id,
                         "chunking_method_id": CHUNKING_METHOD_ID,
-                        "embedding_model_id": EMBEDDING_MODEL_ID,
+                        "embedding_model_id": provider.model_id,
                     },
                 )
             )
@@ -343,6 +370,115 @@ async def upload_source_document(
     except SQLAlchemyError as error:
         await repo.rollback()
         raise SourceStorageUnavailableError("Source storage is temporarily unavailable.") from error
-    except Exception:
+    except BaseException:
+        await repo.rollback()
+        raise
+
+
+async def read_source_content(
+    session: AsyncSession,
+    *,
+    company_id: UUID,
+    document_id: UUID,
+    content_store: SourceContentStore | None = None,
+) -> tuple[SourceDocument, bytes]:
+    stored = await SourceRepository(session).get_document(
+        company_id=company_id, document_id=document_id
+    )
+    if stored is None:
+        raise SourceContextNotFoundError("The source document was not found.")
+    document = stored.document
+    if document.storage_uri != f"content://{company_id}/{document.checksum}":
+        raise SourceContextNotFoundError(
+            "Original bytes were not retained for this source document.",
+            code="source_content_not_found",
+        )
+    content = await (content_store or SourceContentStore()).read(
+        company_id, document.checksum, int(document.size_bytes or 0)
+    )
+    return document, content
+
+
+async def index_source_evidence(
+    session: AsyncSession,
+    *,
+    document_id: UUID,
+    request: SourceIndexRequest,
+    trace_id: str | None = None,
+    embedding_provider: EmbeddingProvider | None = None,
+) -> SourceIndexResponse:
+    """Explicitly reindex original evidence; existing facts retain their old hashes.
+
+    Changing a model or vector changes Assurance source hashes, so existing drafts
+    and previews become stale instead of silently reinterpreting their evidence.
+    """
+    repo = SourceRepository(session)
+    try:
+        if await repo.get_actor(company_id=request.company_id, actor_id=request.actor_id) is None:
+            raise SourceContextNotFoundError("The source actor was not found.")
+        stored = await repo.get_document(
+            company_id=request.company_id, document_id=document_id, for_update=True
+        )
+        if stored is None:
+            raise SourceContextNotFoundError("The source document was not found.")
+        if stored.source.status != "ready":
+            raise SourceConflictError("Only ready source evidence can be indexed.")
+        provider = embedding_provider or get_embedding_provider()
+        pending = [
+            item
+            for item in stored.evidence
+            if item.embedding_model != provider.model_id
+            or item.embedding is None
+            or item.embedded_at is None
+        ]
+        if len(pending) > 128:
+            raise SourceUploadError(
+                "The document exceeds the bounded indexing limit.", status_code=422
+            )
+        for item in pending:
+            if _sha256(item.content_text.encode("utf-8")) != item.checksum:
+                raise SourceChecksumMismatchError("Evidence content integrity validation failed.")
+        vectors = await provider.embed([item.content_text for item in pending])
+        now = datetime.now(UTC)
+        for item, vector in zip(pending, vectors, strict=True):
+            item.embedding, item.embedding_model, item.embedded_at = vector, provider.model_id, now
+            metadata = dict(item.evidence_metadata)
+            metadata.update(
+                embedding_model_id=provider.model_id,
+                embedding_status="indexed",
+                source_version=stored.document.version,
+                source_checksum=stored.document.checksum,
+            )
+            metadata.setdefault(
+                "trust_status", "synthetic" if stored.source.is_synthetic else "accepted"
+            )
+            item.evidence_metadata = metadata
+        if pending:
+            document_metadata = dict(stored.document.document_metadata)
+            document_metadata["embedding_model_id"] = provider.model_id
+            stored.document.document_metadata = document_metadata
+            repo.add(
+                AuditLog(
+                    company_id=request.company_id,
+                    actor_id=request.actor_id,
+                    agent_run_id=None,
+                    action="source.evidence_indexed",
+                    entity_type="source_document",
+                    entity_id=document_id,
+                    trace_id=trace_id,
+                    details={
+                        "embedding_model_id": provider.model_id,
+                        "indexed_count": len(pending),
+                    },
+                )
+            )
+        await repo.commit()
+        return SourceIndexResponse(
+            document_id=document_id,
+            embedding_model_id=provider.model_id,
+            indexed_count=len(pending),
+            replayed=not pending,
+        )
+    except BaseException:
         await repo.rollback()
         raise

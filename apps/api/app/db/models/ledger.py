@@ -219,7 +219,7 @@ class FactBinding(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     )
     artifact_id: Mapped[UUID | None] = mapped_column(PostgreSQLUUID(as_uuid=True))
     recommendation_id: Mapped[UUID | None] = mapped_column(PostgreSQLUUID(as_uuid=True))
-    agent_run_id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), nullable=False)
+    agent_run_id: Mapped[UUID | None] = mapped_column(PostgreSQLUUID(as_uuid=True))
     ledger_event_id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), nullable=False)
     evidence_item_id: Mapped[UUID | None] = mapped_column(PostgreSQLUUID(as_uuid=True))
     placeholder: Mapped[str] = mapped_column(String(150), nullable=False)

@@ -13,6 +13,7 @@ from urllib.request import Request, urlopen
 from pydantic import SecretStr
 
 from app.core.config import get_settings
+from app.core.observability import record_external_call, traced_operation
 
 ELECTRICITY_MAPS_BASE_URL = "https://api.electricitymaps.com/v4"
 MAX_RESPONSE_BYTES = 2_000_000
@@ -118,6 +119,7 @@ class ElectricityMapsHttpClient:
             },
         )
 
+    @traced_operation("provider.grid.http")
     async def _get_json(
         self,
         path: str,
@@ -137,7 +139,7 @@ class ElectricityMapsHttpClient:
         url = f"{ELECTRICITY_MAPS_BASE_URL}{path}{query}"
         token = self.token.get_secret_value()
 
-        def request_json() -> Mapping[str, Any]:
+        def request_json(attempt: int) -> Mapping[str, Any]:
             request = Request(
                 url,
                 headers={
@@ -148,6 +150,7 @@ class ElectricityMapsHttpClient:
                 method="GET",
             )
             try:
+                record_external_call("electricity_maps", retry=attempt > 0)
                 with urlopen(  # nosec B310
                     request, timeout=self.timeout_seconds
                 ) as response:
@@ -203,7 +206,7 @@ class ElectricityMapsHttpClient:
         for attempt in range(2):
             try:
                 return await asyncio.wait_for(
-                    asyncio.to_thread(request_json),
+                    asyncio.to_thread(request_json, attempt),
                     timeout=self.timeout_seconds + 1,
                 )
             except ElectricityMapsProviderError as error:

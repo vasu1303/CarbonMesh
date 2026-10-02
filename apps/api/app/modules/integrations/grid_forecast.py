@@ -18,6 +18,7 @@ from app.modules.integrations.electricity_maps import (
 )
 from app.modules.integrations.schemas import (
     ElectricityMapsForecastPayload,
+    GridFixtureVariant,
     NormalizedGridForecast,
     NormalizedGridForecastPoint,
 )
@@ -65,7 +66,7 @@ def normalize_electricity_maps_forecast(
             code="integration_invalid_response",
             retryable=False,
         )
-    if len(payload.forecast) != horizon_hours:
+    if len(payload.forecast) not in {horizon_hours, horizon_hours + 1}:
         raise ElectricityMapsProviderError(
             "Electricity Maps returned an incomplete forecast horizon.",
             code="integration_incomplete_forecast",
@@ -109,6 +110,15 @@ def normalize_electricity_maps_forecast(
             code="integration_invalid_response",
             retryable=False,
         )
+
+    # Electricity Maps can include both horizon 0 and horizon N, giving N+1
+    # timestamps. CarbonMesh stores hourly intervals in [start, start + N hours),
+    # so the point exactly at that exclusive end belongs to the next horizon.
+    # Validate the complete response BEFORE excluding that endpoint: a duplicate,
+    # gap, misalignment or invalid method must never disappear through slicing.
+    # Keep the unmodified provider response in source_snapshot and its checksum.
+    if len(ordered) == horizon_hours + 1:
+        ordered = ordered[:-1]
 
     source_snapshot = dict(raw_payload)
     return NormalizedGridForecast(
@@ -157,8 +167,17 @@ class ElectricityMapsFixtureClient:
 
     is_synthetic: ClassVar[bool] = True
 
-    def __init__(self, fixture_directory: Path) -> None:
+    def __init__(
+        self,
+        fixture_directory: Path,
+        *,
+        fixture_variant: GridFixtureVariant = "quality_cases_v1",
+    ) -> None:
         self._fixture_directory = fixture_directory
+        self._history_filename = {
+            "quality_cases_v1": "grid-history.json",
+            "complete_q3_v1": "grid-history-complete-q3-v1.json",
+        }[fixture_variant]
 
     async def list_zones(self) -> Mapping[str, Any]:
         return {
@@ -178,7 +197,7 @@ class ElectricityMapsFixtureClient:
         end: datetime,
         disable_estimations: bool = False,
     ) -> Mapping[str, Any]:
-        payload = self._read_json("grid-history.json")
+        payload = self._read_json(self._history_filename)
         if str(payload.get("zone", "")).upper() != zone.upper():
             raise ElectricityMapsProviderError(
                 "The grid history fixture does not contain the requested zone.",

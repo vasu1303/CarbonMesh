@@ -44,6 +44,7 @@ from app.modules.dispatch.schemas import (
     DispatchRecommendationResult,
     DispatchRecommendationView,
     DispatchScenarioView,
+    DispatchTerminalState,
     FlexibleLoadList,
     FlexibleLoadView,
     ForecastPointView,
@@ -1356,6 +1357,22 @@ class DispatchService:
             )
         return load_snapshot, method_snapshot, policy_snapshot
 
+    async def get_scenario(
+        self,
+        *,
+        company_id: UUID,
+        scenario_id: UUID,
+    ) -> DispatchScenarioView:
+        """Return the tenant-scoped frozen scenario without optimizing it."""
+
+        record = await self.repository.get_scenario(
+            company_id=company_id,
+            scenario_id=scenario_id,
+        )
+        if record is None:
+            raise DispatchNotFoundError("The Dispatch scenario was not found.")
+        return self._scenario_view(record)
+
     async def optimize_scenario(
         self,
         scenario_id: UUID,
@@ -1403,7 +1420,7 @@ class DispatchService:
             recommendation = self._recommendation_view(existing)
             return DispatchOptimizationResult(
                 scenario_id=scenario_id,
-                terminal_state="approval_required",
+                terminal_state=self._recommendation_terminal_state(recommendation),
                 evaluated_windows=int(
                     existing.recommendation.impact_snapshot.get("evaluated_windows", 0)
                 ),
@@ -1864,27 +1881,17 @@ class DispatchService:
                 )
             )
 
-            if scenario.agent_run_id is not None:
-                self._add_fact_bindings(
-                    scenario=scenario,
-                    recommendation=recommendation,
-                    ledger_event=ledger_event,
-                    values={
-                        "fact_expected_emissions": (
-                            selected.emissions_kgco2e,
-                            "kgCO2e",
-                        ),
-                        "fact_baseline_emissions": (
-                            optimized.baseline.emissions_kgco2e,
-                            "kgCO2e",
-                        ),
-                        "fact_avoided_emissions": (
-                            optimized.avoided_kgco2e,
-                            "kgCO2e",
-                        ),
-                        "fact_reduction_pct": (optimized.reduction_pct, "%"),
-                    },
-                )
+            self._add_fact_bindings(
+                scenario=scenario,
+                recommendation=recommendation,
+                ledger_event=ledger_event,
+                values={
+                    "fact_expected_emissions": (selected.emissions_kgco2e, "kgCO2e"),
+                    "fact_baseline_emissions": (optimized.baseline.emissions_kgco2e, "kgCO2e"),
+                    "fact_avoided_emissions": (optimized.avoided_kgco2e, "kgCO2e"),
+                    "fact_reduction_pct": (optimized.reduction_pct, "%"),
+                },
+            )
 
             approval = Approval(
                 company_id=scenario.company_id,
@@ -1938,8 +1945,6 @@ class DispatchService:
         ledger_event: LedgerEvent,
         values: dict[str, tuple[Decimal, str]],
     ) -> None:
-        if scenario.agent_run_id is None:
-            return
         for placeholder, (value, unit) in values.items():
             value_snapshot = {"value": str(value), "unit": unit}
             binding_payload = {
@@ -1967,6 +1972,26 @@ class DispatchService:
                     binding_hash=_hash(binding_payload),
                 )
             )
+
+    @staticmethod
+    def _recommendation_terminal_state(
+        recommendation: DispatchRecommendationView,
+    ) -> DispatchTerminalState:
+        approval = recommendation.approval
+        if (
+            recommendation.invalidated_at is not None
+            or recommendation.status == "invalidated"
+            or approval.status in {"invalidated", "expired"}
+            or (approval.status == "pending" and approval.expires_at <= datetime.now(UTC))
+        ):
+            return "stale"
+        if approval.status in {"approved", "rejected"}:
+            if recommendation.status != approval.status:
+                raise DispatchConflictError("The Dispatch decision and recommendation disagree.")
+            return "approved" if approval.status == "approved" else "rejected"
+        if approval.status != "pending" or recommendation.status != "pending_approval":
+            raise DispatchConflictError("The Dispatch approval state is inconsistent.")
+        return "approval_required"
 
     @staticmethod
     def _recommendation_view(record: Any) -> DispatchRecommendationView:
@@ -2039,8 +2064,9 @@ class DispatchService:
                     recommendation=None,
                 )
             raise DispatchNotFoundError("No Dispatch recommendation exists for this scenario.")
+        view = self._recommendation_view(recommendation)
         return DispatchRecommendationResult(
             scenario_id=scenario_id,
-            terminal_state="approval_required",
-            recommendation=self._recommendation_view(recommendation),
+            terminal_state=self._recommendation_terminal_state(view),
+            recommendation=view,
         )

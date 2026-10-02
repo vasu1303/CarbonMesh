@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from app.api.errors import safe_http_error
 from app.dependencies.database import DatabaseSession
 from app.dependencies.request import TraceIdHeader
+from app.modules.demo.fixtures import _fixture_directory
 from app.modules.dispatch.errors import DispatchError
 from app.modules.dispatch.schemas import (
     CreateDispatchScenarioRequest,
@@ -35,13 +36,10 @@ def _demo_forecast_fixture_directory() -> Path:
     configured = os.getenv("CARBONMESH_DEMO_FIXTURE_DIR")
     if configured:
         return Path(configured)
-    bundled = Path(__file__).resolve().parents[2] / "demo_fixtures"
-    if bundled.is_dir():
-        return bundled
-    for ancestor in Path(__file__).resolve().parents:
-        candidate = ancestor / "data" / "demo"
-        if candidate.is_dir():
-            return candidate
+    try:
+        return _fixture_directory()
+    except RuntimeError:
+        pass
     # Container packaging may place assets under the process working directory.
     # A missing directory is reported by the fixture adapter only when fixture
     # mode is requested; module import and API startup remain safe.

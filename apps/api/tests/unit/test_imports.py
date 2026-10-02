@@ -5,7 +5,7 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -25,6 +25,7 @@ from app.modules.imports.parser import ImportPayloadError, parse_import_content
 from app.modules.imports.schemas import (
     ActivityImportRequest,
     ActivityRow,
+    HourlyElectricityRow,
     SupplierImportRequest,
     SupplierProductRow,
 )
@@ -39,6 +40,31 @@ from app.modules.imports.service import (
 from app.modules.measurement.domain import normalize_mass_to_kg
 
 DEMO_DIR = Path(__file__).resolve().parents[4] / "data" / "demo"
+
+
+def test_import_issue_order_is_stable_before_truncation() -> None:
+    company_id = uuid4()
+    now = datetime.now(UTC)
+    source = DataSource(
+        id=uuid4(), company_id=company_id, is_synthetic=True,
+        configuration={"import_type": "activity", "import_status": "completed_with_errors"},
+        created_at=now, updated_at=now,
+    )
+    issues = [
+        DataQualityIssue(
+            id=UUID(int=index), company_id=company_id, issue_type="validation",
+            code="invalid_field_value", severity="error", message="Synthetic invalid row",
+            status="open", details={}, created_at=now, updated_at=now,
+        )
+        for index in range(1, MAX_INLINE_ISSUES + 2)
+    ]
+    first = import_service_module._build_import_result(source, None, list(reversed(issues)))
+    replay = import_service_module._build_import_result(source, None, issues)
+
+    assert first == replay
+    assert [issue.id for issue in first.issues] == [issue.id for issue in issues[:-1]]
+    assert first.issue_count == MAX_INLINE_ISSUES + 1
+    assert first.issues_truncated
 
 
 def test_csv_parser_preserves_rows_and_strips_bom() -> None:
@@ -102,9 +128,7 @@ def test_import_envelope_does_not_mutate_content_before_checksum() -> None:
 
 
 def test_mass_normalization_uses_decimal_and_fixed_scale() -> None:
-    assert normalize_quantity(Decimal("12.5"), "tonnes", "kg") == Decimal(
-        "12500.000000"
-    )
+    assert normalize_quantity(Decimal("12.5"), "tonnes", "kg") == Decimal("12500.000000")
     assert normalize_quantity(Decimal(10), "lb", "kg") == Decimal("4.535924")
 
     with pytest.raises(ValueError, match="Unsupported unit conversion"):
@@ -354,9 +378,9 @@ async def test_import_result_caps_inline_issues_but_preserves_exact_count() -> N
         content=[{} for _ in range(MAX_INLINE_ISSUES + 1)],
     )
 
-    result = await ImportService(
-        FakeSession(), RowLimitRepository(company_id)
-    ).import_suppliers(request)
+    result = await ImportService(FakeSession(), RowLimitRepository(company_id)).import_suppliers(
+        request
+    )
 
     assert result.issue_count > MAX_INLINE_ISSUES
     assert result.returned_issue_count == MAX_INLINE_ISSUES
@@ -434,12 +458,16 @@ async def test_supplier_import_rejects_product_for_inactive_supplier() -> None:
 class FakeSession:
     def __init__(self) -> None:
         self.committed = False
+        self.rolled_back = False
 
     async def flush(self) -> None:
         return None
 
     async def commit(self) -> None:
         self.committed = True
+
+    async def rollback(self) -> None:
+        self.rolled_back = True
 
 
 class RowLimitRepository:
@@ -594,6 +622,169 @@ class ActivityRepository(RowLimitRepository):
         )
         self.activities.append(activity)
         return activity
+
+    async def list_hourly_activity_payloads(self, **context) -> list[dict[str, Any]]:
+        return [raw.raw_payload for raw in self.raw_records if raw.import_status == "accepted"]
+
+
+@pytest.mark.parametrize(
+    "timestamp",
+    [
+        "2026-07-01T00:00:00",
+        "2026-07-01T00:30:00Z",
+        "2026-07-01T00:00:01Z",
+        "2026-07-01T00:00:00.000001Z",
+        "not-a-timestamp",
+        1782864000,
+        "1782864000",
+    ],
+)
+def test_hourly_row_rejects_ambiguous_or_unaligned_timestamps(timestamp) -> None:
+    with pytest.raises(ValueError):
+        HourlyElectricityRow.model_validate({"timestamp": timestamp, "kwh": "10"})
+
+
+def test_hourly_row_normalizes_offset_and_rejects_conflicting_aliases() -> None:
+    row = HourlyElectricityRow.model_validate(
+        {
+            "timestamp": "2026-07-01T05:30:00+05:30",
+            "kwh": "0.123456",
+        }
+    )
+    assert row.timestamp == datetime(2026, 7, 1, tzinfo=UTC)
+    assert row.quantity == Decimal("0.123456")
+    assert row.material_code == "ELECTRICITY"
+    assert row.activity_date == date(2026, 7, 1)
+    for payload in (
+        {"timestamp": "2026-07-01T00:00Z", "kwh": "10", "quantity": "11"},
+        {"timestamp": "2026-07-01T00:00Z", "interval_start": "2026-07-01T01:00Z", "kwh": "10"},
+        {"timestamp": "2026-07-01T00:00Z", "kwh": "10", "unit": "MWh"},
+    ):
+        with pytest.raises(ValueError):
+            HourlyElectricityRow.model_validate(payload)
+
+
+def test_energy_normalization_is_decimal_and_dimensionally_safe() -> None:
+    assert normalize_quantity(Decimal("0.123456"), "MWh", "kWh") == Decimal("123.456000")
+    assert normalize_quantity(Decimal(125), "Wh", "kWh") == Decimal("0.125000")
+    with pytest.raises(ValueError):
+        normalize_quantity(Decimal(1), "kg", "kWh")
+
+
+def _hourly_repository_and_request(content, **request_overrides):
+    repository = ActivityRepository(
+        company_id=uuid4(),
+        site_id=uuid4(),
+        period_id=uuid4(),
+        metric_id=uuid4(),
+        product_id=uuid4(),
+    )
+    repository.metric.key = "activity.electricity_consumption"
+    repository.metric.canonical_unit = "kWh"
+    request = ActivityImportRequest(
+        company_id=repository.company_id,
+        site_id=repository.site.id,
+        reporting_period_id=repository.period.id,
+        metric_definition_id=repository.metric.id,
+        source_name="Synthetic hourly electricity",
+        filename="electricity.json",
+        content_type="application/json",
+        content=content,
+        is_synthetic=True,
+        **request_overrides,
+    )
+    return repository, request
+
+
+@pytest.mark.asyncio
+async def test_hourly_import_preserves_raw_and_normalizes_energy() -> None:
+    payload = [
+        {"timestamp": "2026-07-01T05:30:00+05:30", "kwh": "10.123456"},
+        {"timestamp": "2026-07-01T01:00Z", "quantity": "0.25", "unit": "MWh"},
+    ]
+    repository, request = _hourly_repository_and_request(payload)
+    result = await ImportService(FakeSession(), repository).import_activity(request)
+    assert result.accepted_count == 2
+    assert result.status == "completed"
+    assert [raw.raw_payload for raw in repository.raw_records] == payload
+    assert [activity.normalized_quantity for activity in repository.activities] == [
+        Decimal("10.123456"),
+        Decimal("250.000000"),
+    ]
+    assert all(activity.supplier_product_id is None for activity in repository.activities)
+    assert repository.source.configuration["expected_intervals"] == 2
+
+
+@pytest.mark.asyncio
+async def test_hourly_import_rejects_all_duplicate_intervals_and_records_gaps() -> None:
+    payload = [
+        {"row_key": "a", "timestamp": "2026-07-01T00:00Z", "kwh": "10"},
+        {"row_key": "b", "timestamp": "2026-07-01T05:30+05:30", "kwh": "11"},
+        {"row_key": "c", "timestamp": "2026-07-01T02:00Z", "kwh": "12"},
+    ]
+    repository, request = _hourly_repository_and_request(payload)
+    result = await ImportService(FakeSession(), repository).import_activity(request)
+    assert result.accepted_count == 1
+    assert result.rejected_count == 2
+    assert [raw.import_status for raw in repository.raw_records] == [
+        "rejected",
+        "rejected",
+        "accepted",
+    ]
+    assert [issue.code for issue in result.issues].count("duplicate_timestamp") == 2
+    missing = next(issue for issue in result.issues if issue.code == "missing_interval")
+    assert missing.details["missing_count"] == 2
+    assert missing.details["blocks_verification"] is True
+
+
+@pytest.mark.asyncio
+async def test_hourly_import_checks_declared_boundary_gaps_and_existing_rows() -> None:
+    repository, request = _hourly_repository_and_request(
+        [{"timestamp": "2026-07-01T01:00Z", "kwh": "12"}],
+        interval_start="2026-07-01T00:00Z",
+        interval_end="2026-07-01T03:00Z",
+    )
+    service = ImportService(FakeSession(), repository)
+    result = await service.import_activity(request)
+    assert result.accepted_count == 1
+    assert [issue.code for issue in result.issues] == ["missing_interval", "missing_interval"]
+    repeated = await service.import_activity(request)
+    assert repeated.accepted_count == 0
+    assert "duplicate_timestamp" in {issue.code for issue in repeated.issues}
+    assert len(repository.activities) == 1
+
+
+@pytest.mark.asyncio
+async def test_hourly_import_preserves_invalid_rows_without_accepting_them() -> None:
+    payload = [
+        {"timestamp": "2026-07-01T00:00:00", "kwh": "12"},
+        {"timestamp": "2026-07-01T01:00Z", "kwh": "-1"},
+        {"timestamp": "2026-07-01T02:00Z", "kwh": "10", "site_code": "OTHER"},
+    ]
+    repository, request = _hourly_repository_and_request(payload)
+    result = await ImportService(FakeSession(), repository).import_activity(request)
+    assert result.status == "failed"
+    assert result.rejected_count == 3
+    assert [raw.raw_payload for raw in repository.raw_records] == payload
+    assert all(issue.details["blocks_verification"] for issue in result.issues)
+    assert not repository.activities
+
+
+@pytest.mark.asyncio
+async def test_activity_import_rolls_back_when_persistence_fails(monkeypatch) -> None:
+    repository, request = _hourly_repository_and_request(
+        [{"timestamp": "2026-07-01T00:00Z", "kwh": "12"}]
+    )
+    session = FakeSession()
+
+    async def fail(**values):
+        raise RuntimeError("simulated write failure")
+
+    monkeypatch.setattr(repository, "create_activity", fail)
+    with pytest.raises(RuntimeError, match="simulated write failure"):
+        await ImportService(session, repository).import_activity(request)
+    assert session.rolled_back
+    assert not session.committed
 
 
 class SupplierRepository(RowLimitRepository):

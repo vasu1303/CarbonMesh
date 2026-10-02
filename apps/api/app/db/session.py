@@ -1,6 +1,6 @@
 import ssl
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
 from threading import Lock
 
@@ -66,7 +66,9 @@ def normalize_database_url(database_url: SecretStr | str) -> AsyncDatabaseConfig
     stack can run without weakening the hosted-database policy.
     """
     raw_url = database_url.get_secret_value() if isinstance(database_url, SecretStr) else database_url
-    if any(marker in raw_url for marker in ("mailto:", "[", "]", "\r", "\n")):
+    if raw_url.lstrip().startswith("[") or any(
+        marker in raw_url for marker in ("mailto:", "](", "\r", "\n")
+    ):
         raise DatabaseConfigurationError(
             "DATABASE_URL contains formatted text; provide the raw PostgreSQL URL."
         )
@@ -169,6 +171,12 @@ def get_engine() -> AsyncEngine:
         if configuration.is_neon:
             engine_options["poolclass"] = NullPool
         _engine = create_async_engine(configuration.url, **engine_options)
+        from app.core.config import get_settings
+
+        if get_settings().telemetry_enabled:
+            from app.core.observability import instrument_database
+
+            instrument_database(_engine)
         _session_factory = async_sessionmaker(
             bind=_engine,
             autoflush=False,
@@ -197,6 +205,34 @@ async def session_scope() -> AsyncIterator[AsyncSession]:
         raise
     finally:
         await session.close()
+
+
+@asynccontextmanager
+async def execution_session_scope(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> AsyncIterator[AsyncSession]:
+    """Keep one connection for a bounded execution across explicit checkpoints.
+
+    A connection-bound session can commit each durable checkpoint without
+    reconnecting through NullPool (and repeating remote TLS negotiation). The
+    connection ends with this execution segment, including errors/cancellation;
+    it must not span approval waits or long-lived SSE polling. Transactions still
+    belong to application services: this helper never commits implicitly.
+
+    Preserve injected session factories and already connection-bound factories.
+    """
+    bind = session_factory.kw.get("bind") if isinstance(session_factory, async_sessionmaker) else None
+    async with AsyncExitStack() as stack:
+        if isinstance(bind, AsyncEngine):
+            connection = await stack.enter_async_context(bind.connect())
+            session = await stack.enter_async_context(session_factory(bind=connection))
+        else:
+            session = await stack.enter_async_context(session_factory())
+        try:
+            yield session
+        except BaseException:
+            await session.rollback()
+            raise
 
 
 async def dispose_engine() -> None:

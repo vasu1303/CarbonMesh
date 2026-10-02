@@ -7,7 +7,6 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
-ApprovalStatus = Literal["pending", "approved", "rejected"]
 GenericApprovalStatus = Literal[
     "pending",
     "approved",
@@ -15,6 +14,7 @@ GenericApprovalStatus = Literal[
     "invalidated",
     "expired",
 ]
+ApprovalStatus = GenericApprovalStatus
 Sha256 = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 TargetType = Annotated[
     str,
@@ -80,7 +80,12 @@ class GenericApprovalPreviewResult(BaseModel):
 class ApprovalItem(BaseModel):
     id: UUID
     company_id: UUID
-    recommendation_id: UUID
+    target_type: str
+    target_id: UUID
+    recommendation_id: UUID | None = None
+    context_hash: str | None = None
+    idempotency_key: str
+    policy_definition_id: UUID | None = None
     status: ApprovalStatus
     preview_hash: str
     analysis_signature: str
@@ -93,16 +98,20 @@ class ApprovalItem(BaseModel):
     decided_at: datetime | None = None
     decision_note: str | None = None
     ledger_event_id: UUID | None = None
-    recommended_product_id: UUID
-    recommended_product_name: str
-    supplier_name: str
-    projected_footprint_kgco2e: Decimal
-    avoided_kgco2e: Decimal
-    reduction_pct: Decimal
-    cost_delta_pct: Decimal
-    lead_time_delta_days: int
+    recommended_product_id: UUID | None = None
+    recommended_product_name: str | None = None
+    supplier_name: str | None = None
+    projected_footprint_kgco2e: Decimal | None = None
+    avoided_kgco2e: Decimal | None = None
+    reduction_pct: Decimal | None = None
+    cost_delta_pct: Decimal | None = None
+    lead_time_delta_days: int | None = None
     expired: bool
     preview_current: bool
+
+
+class ApprovalDetail(ApprovalItem):
+    preview_payload: dict[str, Any]
 
 
 class ApprovalListResult(BaseModel):
@@ -120,11 +129,14 @@ class ApprovalDecisionRequest(BaseModel):
     preview_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     actor_id: UUID
     decision_note: str | None = Field(default=None, max_length=2000)
+    idempotency_key: IdempotencyKey | None = None
 
 
 class ApprovalDecisionResult(BaseModel):
     approval_id: UUID
-    recommendation_id: UUID
+    target_type: str
+    target_id: UUID
+    recommendation_id: UUID | None = None
     status: Literal["approved", "rejected"]
     preview_hash: str
     analysis_signature: str

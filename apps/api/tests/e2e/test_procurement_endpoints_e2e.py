@@ -141,7 +141,7 @@ async def test_procurement_api_vertical_slice_is_deterministic(
     assert "{" not in detail["narrative"]["resolved_text"]
     assert len(detail["evidence"]) == 2
     assert len(detail["impact_snapshot"]["review"]["fact_bindings"]) == 7
-    assert all(binding["id"] is None for binding in detail["narrative"]["fact_bindings"])
+    assert all(binding["id"] is not None for binding in detail["narrative"]["fact_bindings"])
 
     tight_response = await api_client.post(
         "/api/procurement/scenarios",
@@ -168,7 +168,10 @@ async def test_procurement_api_vertical_slice_is_deterministic(
         assert await session.scalar(select(func.count()).select_from(SupplierScore)) == 6
         assert await session.scalar(select(func.count()).select_from(Recommendation)) == 1
         assert await session.scalar(select(func.count()).select_from(Approval)) == 1
-        assert await session.scalar(select(func.count()).select_from(FactBinding)) == 0
+        bindings = list((await session.scalars(select(FactBinding))).all())
+        assert len(bindings) == 7
+        assert all(binding.agent_run_id is None for binding in bindings)
+        assert all(binding.binding_hash and binding.context_hash for binding in bindings)
         assert (
             await session.scalar(
                 select(func.count())
