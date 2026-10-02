@@ -763,24 +763,36 @@ class ProcurementService:
             )
             attached.add(evidence_item_id)
 
-        if scenario.agent_run_id is not None:
-            self.session.add_all(
-                [
-                    FactBinding(
-                        company_id=scenario.company_id,
-                        recommendation_id=recommendation.id,
-                        agent_run_id=scenario.agent_run_id,
-                        ledger_event_id=ledger_event.id,
-                        evidence_item_id=binding.evidence_item_id,
-                        placeholder=binding.placeholder,
-                        value_snapshot=binding.value,
-                        display_value=binding.display_value,
-                        unit=binding.unit,
-                    )
-                    for binding in fact_bindings
-                ]
+        for binding in fact_bindings:
+            binding_payload = {
+                "artifact_type": "procurement_recommendation",
+                "artifact_id": recommendation.id,
+                "placeholder": binding.placeholder,
+                "ledger_event_id": ledger_event.id,
+                "evidence_item_id": binding.evidence_item_id,
+                "value_snapshot": binding.value,
+                "display_value": binding.display_value,
+                "unit": binding.unit,
+                "context_hash": scenario.analysis_signature,
+            }
+            self.session.add(
+                FactBinding(
+                    company_id=scenario.company_id,
+                    artifact_type="procurement_recommendation",
+                    artifact_id=recommendation.id,
+                    recommendation_id=recommendation.id,
+                    agent_run_id=scenario.agent_run_id,
+                    ledger_event_id=ledger_event.id,
+                    evidence_item_id=binding.evidence_item_id,
+                    placeholder=binding.placeholder,
+                    value_snapshot=binding.value,
+                    display_value=binding.display_value,
+                    unit=binding.unit,
+                    context_hash=scenario.analysis_signature,
+                    binding_hash=payload_sha256(binding_payload)[1],
+                )
             )
-            await self.session.flush()
+        await self.session.flush()
 
         if requested_by is not None:
             try:

@@ -1864,27 +1864,17 @@ class DispatchService:
                 )
             )
 
-            if scenario.agent_run_id is not None:
-                self._add_fact_bindings(
-                    scenario=scenario,
-                    recommendation=recommendation,
-                    ledger_event=ledger_event,
-                    values={
-                        "fact_expected_emissions": (
-                            selected.emissions_kgco2e,
-                            "kgCO2e",
-                        ),
-                        "fact_baseline_emissions": (
-                            optimized.baseline.emissions_kgco2e,
-                            "kgCO2e",
-                        ),
-                        "fact_avoided_emissions": (
-                            optimized.avoided_kgco2e,
-                            "kgCO2e",
-                        ),
-                        "fact_reduction_pct": (optimized.reduction_pct, "%"),
-                    },
-                )
+            self._add_fact_bindings(
+                scenario=scenario,
+                recommendation=recommendation,
+                ledger_event=ledger_event,
+                values={
+                    "fact_expected_emissions": (selected.emissions_kgco2e, "kgCO2e"),
+                    "fact_baseline_emissions": (optimized.baseline.emissions_kgco2e, "kgCO2e"),
+                    "fact_avoided_emissions": (optimized.avoided_kgco2e, "kgCO2e"),
+                    "fact_reduction_pct": (optimized.reduction_pct, "%"),
+                },
+            )
 
             approval = Approval(
                 company_id=scenario.company_id,
@@ -1938,8 +1928,6 @@ class DispatchService:
         ledger_event: LedgerEvent,
         values: dict[str, tuple[Decimal, str]],
     ) -> None:
-        if scenario.agent_run_id is None:
-            return
         for placeholder, (value, unit) in values.items():
             value_snapshot = {"value": str(value), "unit": unit}
             binding_payload = {

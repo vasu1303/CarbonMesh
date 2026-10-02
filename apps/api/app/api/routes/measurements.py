@@ -8,6 +8,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.dependencies.database import DatabaseSession
 from app.modules.measurement.schemas import (
+    MeasurementBreakdown,
     MeasurementCalculateRequest,
     MeasurementDetail,
     MeasurementErrorDetail,
@@ -97,6 +98,24 @@ async def get_measurement(
             company_id=company_id,
             measurement_id=measurement_id,
         )
+    except MeasurementServiceError as error:
+        _raise_service_error(error)
+    except SQLAlchemyError as error:
+        _raise_unexpected_error(trace_id=None, cause=error)
+
+
+@router.get(
+    "/measurements/{measurement_id}/breakdown",
+    response_model=MeasurementBreakdown,
+    responses=ERROR_RESPONSES,
+)
+async def get_measurement_breakdown(
+    measurement_id: UUID,
+    company_id: Annotated[UUID, Query(description="Tenant company identifier.")],
+    service: Annotated[MeasurementService, Depends(get_measurement_service)],
+) -> MeasurementBreakdown:
+    try:
+        return await service.get_breakdown(company_id=company_id, measurement_id=measurement_id)
     except MeasurementServiceError as error:
         _raise_service_error(error)
     except SQLAlchemyError as error:

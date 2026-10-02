@@ -12,9 +12,11 @@ from tests.e2e.conftest import E2EContext
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("with_agent", [False, True])
 async def test_assurance_http_journey_blocks_unsupported_prior_period_claim(
     api_client,
     e2e_context: E2EContext,
+    with_agent: bool,
 ) -> None:
     ids = e2e_context.ids
     company_query = {"company_id": str(ids.company_id)}
@@ -49,7 +51,7 @@ async def test_assurance_http_journey_blocks_unsupported_prior_period_claim(
         "site_id": str(ids.site_id),
         "reporting_period_id": str(ids.reporting_period_id),
         "measurement_id": str(ids.measurement_id),
-        "agent_run_id": str(ids.assurance_agent_run_id),
+        "agent_run_id": str(ids.assurance_agent_run_id) if with_agent else None,
         "requested_by": str(ids.analyst_id),
         "idempotency_key": "assurance-e2e-create-q3-2026",
         "title": "Q3 2026 synthetic emissions disclosure",
@@ -64,7 +66,7 @@ async def test_assurance_http_journey_blocks_unsupported_prior_period_claim(
     assert created["status"] == "draft"
     assert created["version"] == 1
     assert created["measurement_id"] == str(ids.measurement_id)
-    assert created["agent_run_id"] == str(ids.assurance_agent_run_id)
+    assert created["agent_run_id"] == create_payload["agent_run_id"]
     assert created["claims"] == []
     assert created["gaps"] == []
     assert created["approval"] is None

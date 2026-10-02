@@ -338,7 +338,7 @@ def test_demo_reset_truncates_only_the_authoritative_table_catalogue() -> None:
     statement = _truncate_statement()
 
     assert statement.startswith("TRUNCATE TABLE ")
-    assert statement.endswith(" RESTART IDENTITY CASCADE")
+    assert statement.endswith(" RESTART IDENTITY RESTRICT")
     assert statement.count('"."') == 46
     assert '"core"."companies"' in statement
     assert '"ledger"."ledger_events"' in statement

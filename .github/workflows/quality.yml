@@ -17,6 +17,23 @@ jobs:
     name: Backend
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: carbonmesh_test
+          POSTGRES_USER: carbonmesh_test
+          POSTGRES_PASSWORD: synthetic-ci-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U carbonmesh_test -d carbonmesh_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      CARBONMESH_E2E_DATABASE_URL: postgresql://carbonmesh_test:synthetic-ci-only@127.0.0.1:5432/carbonmesh_test
+      CARBONMESH_RUN_API_E2E_TESTS: disposable-database
     defaults:
       run:
         working-directory: apps/api

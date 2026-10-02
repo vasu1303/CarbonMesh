@@ -20,7 +20,7 @@ from app.db.models.assurance import (
     EvidenceGap,
     Standard,
 )
-from app.db.models.carbon import CarbonMeasurement
+from app.db.models.carbon import CalculationRun, CarbonMeasurement
 from app.db.models.core import (
     Actor,
     Approval,
@@ -32,6 +32,7 @@ from app.db.models.core import (
     SourceDocument,
 )
 from app.db.models.ledger import FactBinding, LedgerEvent
+from app.db.models.semantic import MethodDefinition
 
 ApprovalStatus = Literal["pending", "approved", "rejected", "invalidated", "expired"]
 
@@ -45,6 +46,8 @@ class DraftDependencies:
     measurement: CarbonMeasurement
     requested_by: Actor
     agent_run: AgentRun | None
+    measurement_coverage: dict[str, Any] | None = None
+    measurement_calculation: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -225,6 +228,57 @@ class AssuranceRepository:
             or (agent_run_id is not None and agent_run is None)
         ):
             return None
+        calculation = (
+            await self.session.execute(
+                select(CalculationRun, MethodDefinition)
+                .join(MethodDefinition, MethodDefinition.id == CalculationRun.method_definition_id)
+                .where(
+                    CalculationRun.company_id == company_id,
+                    MethodDefinition.company_id == company_id,
+                    CalculationRun.id == measurement.calculation_run_id,
+                )
+            )
+        ).one_or_none()
+        if calculation is None:
+            return None
+        coverage = None
+        run, method = calculation
+        snapshot = run.summary.get("input_snapshot")
+        if not isinstance(snapshot, dict):
+            snapshot = {}
+        is_scope2 = "measurement.scope2.location_based.hourly" in (
+            method.key, snapshot.get("method_key")
+        )
+        if is_scope2:
+            coverage = snapshot.get("coverage", {})
+            if not isinstance(coverage, dict):
+                coverage = {}
+        calculation_identity = {
+            "id": run.id,
+            "input_hash": run.input_hash,
+            "output_hash": run.output_hash,
+            "status": run.status,
+            "reporting_period_id": run.reporting_period_id,
+            "run_method_version": run.method_version,
+            "run_code_version": run.code_version,
+            "rounding_policy": run.rounding_policy,
+            "recorded_method_hash": run.summary.get("method_hash"),
+            "method_id": method.id,
+            "method_key": method.key,
+            "method_version": method.version,
+            "code_version": method.code_version,
+            "configuration": method.configuration,
+            "effective_from": method.effective_from,
+            "effective_to": method.effective_to,
+            "is_active": method.is_active,
+            "frozen_method": {
+                field: snapshot.get(field)
+                for field in (
+                    "method_definition_id", "method_key", "method_version",
+                    "code_version", "method_configuration",
+                )
+            } if is_scope2 or snapshot.get("method_key") is not None else None,
+        }
         return DraftDependencies(
             company=company,
             standard=standard,
@@ -233,6 +287,8 @@ class AssuranceRepository:
             measurement=measurement,
             requested_by=actor,
             agent_run=agent_run,
+            measurement_coverage=coverage,
+            measurement_calculation=calculation_identity,
         )
 
     async def allocate_draft_version(

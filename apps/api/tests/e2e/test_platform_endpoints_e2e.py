@@ -215,6 +215,7 @@ async def test_electricity_maps_history_points_are_immutable_and_site_scoped(
 
         company_query = {"company_id": str(ids.company_id)}
         sync_payload = {
+            "mode": "live",
             "start": "2026-09-29T00:00:00Z",
             "end": "2026-09-29T03:00:00Z",
         }

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Annotated, Any, Literal
 from uuid import UUID
@@ -35,8 +35,30 @@ Score = Annotated[
 ImportContent = str | list[Any] | dict[str, Any]
 
 
+def validate_hourly_timestamp(value: datetime) -> datetime:
+    """Require an explicit offset and an exact UTC hour; never infer local time."""
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise ValueError("timestamp must include an explicit UTC offset")
+    normalized = value.astimezone(UTC)
+    if normalized.minute or normalized.second or normalized.microsecond:
+        raise ValueError("timestamp must align to an exact UTC hour")
+    return normalized
+
+
+def parse_hourly_timestamp(value: Any) -> datetime:
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value.strip())
+        except ValueError as error:
+            raise ValueError("timestamp must be an ISO 8601 datetime with UTC offset") from error
+    if not isinstance(value, datetime):
+        # Pydantic validators must raise ValueError to report a typed validation issue.
+        raise ValueError("timestamp must be an ISO 8601 datetime with UTC offset")  # noqa: TRY004
+    return validate_hourly_timestamp(value)
+
+
 class ActivityImportRequest(BaseModel):
-    """JSON-native envelope for a CSV or JSON purchased-activity upload.
+    """JSON-native envelope for purchased-material or hourly electricity activity.
 
     ``content`` is CSV text for ``text/csv``. For ``application/json`` it may
     be the original JSON string, a list of row objects, a single row object, or
@@ -57,6 +79,25 @@ class ActivityImportRequest(BaseModel):
     checksum: Sha256 | None = None
     external_reference: str | None = Field(default=None, max_length=255)
     is_synthetic: bool = False
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=200)
+    interval_start: datetime | None = None
+    interval_end: datetime | None = None
+
+    @field_validator("interval_start", "interval_end", mode="before")
+    @classmethod
+    def validate_interval_boundary(cls, value: Any) -> datetime | None:
+        return parse_hourly_timestamp(value) if value is not None else None
+
+    @model_validator(mode="after")
+    def validate_interval(self) -> ActivityImportRequest:
+        if (self.interval_start is None) != (self.interval_end is None):
+            raise ValueError("interval_start and interval_end must be supplied together")
+        if self.interval_start is not None and self.interval_end is not None:
+            if self.interval_end <= self.interval_start:
+                raise ValueError("interval_end must be after interval_start (exclusive end)")
+            if (self.interval_end - self.interval_start).total_seconds() > 366 * 86400:
+                raise ValueError("An hourly import interval cannot exceed 366 days")
+        return self
 
     @field_validator("source_name", "filename", mode="before")
     @classmethod
@@ -84,6 +125,7 @@ class SupplierImportRequest(BaseModel):
     checksum: Sha256 | None = None
     external_reference: str | None = Field(default=None, max_length=255)
     is_synthetic: bool = False
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=200)
 
     @field_validator("source_name", "filename", mode="before")
     @classmethod
@@ -167,13 +209,49 @@ class ActivityRow(BaseModel):
         if (self.unit_cost is None) != (self.currency is None):
             raise ValueError("unit_cost and currency must be supplied together")
         if (self.supplier_code is None) != (self.supplier_product_code is None):
-            raise ValueError(
-                "supplier_code and supplier_product_code must be supplied together"
-            )
+            raise ValueError("supplier_code and supplier_product_code must be supplied together")
         if self.supplier_product_id is not None and self.supplier_code is not None:
-            raise ValueError(
-                "use supplier_product_id or supplier/product codes, not both"
-            )
+            raise ValueError("use supplier_product_id or supplier/product codes, not both")
+        return self
+
+
+class HourlyElectricityRow(ActivityRow):
+    """One hourly kWh interval; the source payload remains unchanged in storage."""
+
+    material_code: Literal["ELECTRICITY"] = "ELECTRICITY"
+    timestamp: datetime = Field(
+        validation_alias=AliasChoices("timestamp", "interval_start", "activity_timestamp")
+    )
+    quantity: ActivityQuantity = Field(validation_alias=AliasChoices("quantity", "kwh"))
+    unit: str = Field(default="kWh", min_length=1, max_length=50)
+    site_code: str | None = Field(default=None, max_length=100)
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_ambiguous_aliases(cls, value: Any) -> Any:
+        if isinstance(value, dict):
+            for aliases in (
+                ("timestamp", "interval_start", "activity_timestamp"),
+                ("quantity", "kwh"),
+            ):
+                if sum(key in value for key in aliases) > 1:
+                    raise ValueError(f"Supply exactly one of {', '.join(aliases)}")
+            if "kwh" in value and str(value.get("unit", "kWh")).strip().casefold() != "kwh":
+                raise ValueError("The kwh field requires unit kWh; use quantity for other units")
+        return value
+
+    @field_validator("timestamp", mode="before")
+    @classmethod
+    def validate_timestamp(cls, value: Any) -> datetime:
+        return parse_hourly_timestamp(value)
+
+    @model_validator(mode="after")
+    def validate_hourly_context(self) -> HourlyElectricityRow:
+        if self.supplier_product_id is not None or self.supplier_code is not None:
+            raise ValueError("Hourly electricity cannot reference a supplier product")
+        if self.activity_date is not None and self.activity_date != self.timestamp.date():
+            raise ValueError("activity_date must match the timestamp's UTC date")
+        self.activity_date = self.timestamp.date()
         return self
 
 
@@ -324,3 +402,17 @@ class DataQualityIssueList(BaseModel):
     total: int = Field(ge=0)
     limit: int = Field(ge=1, le=200)
     offset: int = Field(ge=0)
+
+
+class DataQualityIssueUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    company_id: UUID
+    actor_id: UUID
+    status: Literal["resolved", "waived"]
+    decision_note: str = Field(min_length=1, max_length=2000)
+
+    @field_validator("decision_note", mode="before")
+    @classmethod
+    def strip_note(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value

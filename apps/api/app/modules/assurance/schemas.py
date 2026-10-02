@@ -359,7 +359,7 @@ class FactBindingView(AssuranceSchema):
     id: UUID
     artifact_type: Annotated[str, Field(min_length=1, max_length=100)]
     artifact_id: UUID | None
-    agent_run_id: UUID
+    agent_run_id: UUID | None
     ledger_event_id: UUID
     evidence_item_id: UUID | None
     placeholder: Annotated[

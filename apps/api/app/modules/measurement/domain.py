@@ -4,8 +4,9 @@ import hashlib
 import json
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import ROUND_HALF_EVEN, Decimal, InvalidOperation, localcontext
+from pathlib import Path
 from typing import Any
 from uuid import UUID
 
@@ -23,6 +24,86 @@ DEFAULT_CONFIDENCE_WEIGHTS: dict[str, Decimal] = {
     "factor_recency": Decimal("0.20"),
     "record_completeness": Decimal("0.10"),
 }
+
+CONFIDENCE_V2_WEIGHTS: dict[str, Decimal] = {
+    "source_quality": Decimal("0.35"),
+    "method_fit": Decimal("0.25"),
+    "temporal_match": Decimal("0.20"),
+    "completeness": Decimal("0.20"),
+}
+
+
+@dataclass(frozen=True, slots=True)
+class ConfidenceV2:
+    source_quality: Decimal
+    method_fit: Decimal
+    temporal_match: Decimal
+    completeness: Decimal
+    overall: Decimal
+    weights: Mapping[str, Decimal]
+    version: str = "2.0.0"
+
+
+def calculate_confidence_v2(
+    *,
+    source_quality: Decimal,
+    method_fit: Decimal,
+    temporal_match: Decimal,
+    completeness: Decimal,
+) -> ConfidenceV2:
+    components = {
+        "source_quality": source_quality,
+        "method_fit": method_fit,
+        "temporal_match": temporal_match,
+        "completeness": completeness,
+    }
+    for name, value in components.items():
+        _validate_confidence_component(name, value)
+    overall = sum(
+        (components[name] * weight for name, weight in CONFIDENCE_V2_WEIGHTS.items()),
+        start=Decimal(0),
+    ).quantize(CONFIDENCE_QUANTUM, rounding=ROUND_HALF_EVEN)
+    return ConfidenceV2(**components, overall=overall, weights=dict(CONFIDENCE_V2_WEIGHTS))
+
+
+def hourly_timestamp(payload: Mapping[str, Any]) -> datetime:
+    """Require one unambiguous, offset-aware UTC hour; never round timestamps."""
+    candidates = [
+        payload[key]
+        for key in ("timestamp", "interval_start", "activity_timestamp")
+        if payload.get(key) is not None
+    ]
+    if not candidates:
+        raise MeasurementDomainError("An hourly activity timestamp is required.")
+    parsed = []
+    for raw in candidates:
+        try:
+            value = raw if isinstance(raw, datetime) else datetime.fromisoformat(str(raw))
+        except ValueError as error:
+            raise MeasurementDomainError("The hourly timestamp is invalid.") from error
+        if value.utcoffset() is None:
+            raise MeasurementDomainError("An hourly timestamp must include a UTC offset.")
+        value = value.astimezone(UTC)
+        if value.minute or value.second or value.microsecond:
+            raise MeasurementDomainError("An hourly timestamp must align exactly to a UTC hour.")
+        parsed.append(value)
+    if len(set(parsed)) != 1:
+        raise MeasurementDomainError("Hourly timestamp aliases disagree.")
+    return parsed[0]
+
+
+def normalize_energy_to_kwh(quantity: Decimal, unit: str) -> Decimal:
+    multipliers = {"kwh": Decimal(1), "wh": Decimal("0.001"), "mwh": Decimal(1000)}
+    if unit.strip().casefold() not in multipliers:
+        raise InvalidQuantityError("Only Wh, kWh, and MWh electricity quantities are supported.")
+    return calculate_emissions(quantity, multipliers[unit.strip().casefold()])
+
+
+def calculate_scope2_emissions(quantity_kwh: Decimal, intensity_gco2e_per_kwh: Decimal) -> Decimal:
+    with localcontext() as context:
+        context.prec = 60
+        return calculate_emissions(quantity_kwh, intensity_gco2e_per_kwh / Decimal(1000))
+
 
 _KG_PER_UNIT: dict[str, Decimal] = {
     "kg": Decimal(1),
@@ -382,3 +463,14 @@ def sha256_payload(payload: Mapping[str, Any]) -> str:
         sort_keys=True,
     )
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def measurement_code_hash() -> str:
+    """Hash calculation implementation text with portable newline normalization."""
+    directory = Path(__file__).resolve().parent
+    return sha256_payload(
+        {
+            name: (directory / name).read_text(encoding="utf-8")
+            for name in ("domain.py", "service.py", "scope2.py")
+        }
+    )
