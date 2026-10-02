@@ -213,7 +213,7 @@ export function DashboardPage({ scope }: { scope: DashboardScope }) {
           )}
         </SummaryCard>
         <SummaryCard
-          title="Pending procurement"
+          title="Pending approvals"
           icon={ClipboardCheck}
           query={approvals}
         >

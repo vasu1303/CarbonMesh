@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { formatDate, formatDecimal } from '../format'
+import { formatDate, formatDecimal, humanize } from '../format'
 import { dashboardQueries, type DashboardScope } from '../queries'
 import type { Approval } from '../schemas'
 import {
@@ -45,21 +45,21 @@ export function ApprovalsPanel({
       <div className="mb-4 flex items-start justify-between gap-3">
         <div>
           <h2 id="approvals-title" className="text-sm font-semibold">
-            Procurement review queue
+            Approval review queue
           </h2>
           <p className="mt-1 text-xs text-muted-foreground">
             Company-wide pending previews, including stale and expired items
           </p>
         </div>
-        <QueryRefresh query={query} label="procurement previews" />
+        <QueryRefresh query={query} label="approval previews" />
       </div>
       <QueryState query={query}>
         {(page) => (
           <>
             {page.items.length === 0 ? (
               <EmptyState
-                title="No pending procurement previews"
-                detail="No procurement decision is waiting in this queue."
+                title="No pending approval previews"
+                detail="No decision is waiting in this queue."
               />
             ) : (
               <ul className="divide-y">
@@ -79,30 +79,38 @@ export function ApprovalsPanel({
                           {state}
                         </Badge>
                         <span className="text-xs text-muted-foreground">
-                          Projected, not realized
+                          {humanize(item.target_type)}
                         </span>
                       </div>
                       <h3 className="text-sm font-medium break-words">
-                        {item.recommended_product_name}
+                        {item.recommended_product_name ??
+                          humanize(item.target_type)}
                       </h3>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        {item.supplier_name}
+                        {item.supplier_name ??
+                          `Requested by ${item.requester_name}`}
                       </p>
                       <dl className="my-4 grid grid-cols-2 gap-4 text-xs">
-                        <div>
-                          <dt className="text-muted-foreground">
-                            Avoided kgCO2e
-                          </dt>
-                          <dd className="mt-1 break-all font-mono text-base tabular-nums">
-                            {formatDecimal(item.avoided_kgco2e)}
-                          </dd>
-                        </div>
-                        <div>
-                          <dt className="text-muted-foreground">Cost change</dt>
-                          <dd className="mt-1 font-mono text-base tabular-nums">
-                            {formatDecimal(item.cost_delta_pct)}%
-                          </dd>
-                        </div>
+                        {item.avoided_kgco2e != null && (
+                          <div>
+                            <dt className="text-muted-foreground">
+                              Avoided kgCO2e
+                            </dt>
+                            <dd className="mt-1 break-all font-mono text-base tabular-nums">
+                              {formatDecimal(item.avoided_kgco2e)}
+                            </dd>
+                          </div>
+                        )}
+                        {item.cost_delta_pct != null && (
+                          <div>
+                            <dt className="text-muted-foreground">
+                              Cost change
+                            </dt>
+                            <dd className="mt-1 font-mono text-base tabular-nums">
+                              {formatDecimal(item.cost_delta_pct)}%
+                            </dd>
+                          </div>
+                        )}
                       </dl>
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <p className="text-xs text-muted-foreground">

@@ -1,0 +1,1190 @@
+{
+  "synthetic": true,
+  "fixture_version": "measurement-ui-preview-v1",
+  "scope": {
+    "company_id": "00000000-0000-4000-8000-000000000001",
+    "site_id": "00000000-0000-4000-8000-000000000002",
+    "reporting_period_id": "00000000-0000-4000-8000-000000000003",
+    "metric_id": "00000000-0000-4000-8000-000000000102"
+  },
+  "context": {
+    "company": {
+      "id": "00000000-0000-4000-8000-000000000001",
+      "code": "MAVERICK",
+      "name": "Maverick Manufacturing (synthetic)",
+      "is_synthetic": true
+    },
+    "site": {
+      "id": "00000000-0000-4000-8000-000000000002",
+      "code": "PLANT_B",
+      "name": "Plant B (synthetic)",
+      "country_code": "IN",
+      "timezone": "Asia/Kolkata"
+    },
+    "reporting_period": {
+      "id": "00000000-0000-4000-8000-000000000003",
+      "name": "Q3 2026",
+      "start_date": "2026-07-01",
+      "end_date": "2026-09-30",
+      "status": "open"
+    },
+    "metrics": [
+      {
+        "id": "00000000-0000-4000-8000-000000000102",
+        "key": "emissions.scope3.category1",
+        "version": "1.0.0",
+        "name": "Purchased-material emissions",
+        "canonical_unit": "kgCO2e",
+        "dimensions": {},
+        "handler": "measurement.scope3.category1.mass_factor",
+        "method_version": "1.0.0",
+        "description": "Synthetic purchased-material metric"
+      }
+    ],
+    "workflow": "measurement",
+    "actor": null,
+    "supplier_scope": [],
+    "material_scope": [],
+    "constraints": {
+      "max_cost_increase_pct": null,
+      "max_lead_time_days": null,
+      "minimum_circularity_score": null
+    },
+    "analysis_signature": "0a9408fe27ca44a25a7048595d0da894a1714f1a815d73d1c4de784c56a76361"
+  },
+  "metrics": {
+    "company_id": "00000000-0000-4000-8000-000000000001",
+    "items": [
+      {
+        "id": "00000000-0000-4000-8000-000000000102",
+        "key": "emissions.scope3.category1",
+        "version": "1.0.0",
+        "name": "Purchased-material emissions",
+        "canonical_unit": "kgCO2e",
+        "dimensions": {},
+        "handler": "measurement.scope3.category1.mass_factor",
+        "method_version": "1.0.0",
+        "description": "Synthetic purchased-material metric"
+      }
+    ],
+    "count": 1
+  },
+  "records": [
+    {
+      "summary": {
+        "id": "00000000-0000-4000-8000-000000900000",
+        "company_id": "00000000-0000-4000-8000-000000000001",
+        "site_id": "00000000-0000-4000-8000-000000000002",
+        "site_name": "Plant B (synthetic)",
+        "reporting_period_id": "00000000-0000-4000-8000-000000000003",
+        "reporting_period_name": "Q3 2026",
+        "metric_definition_id": "00000000-0000-4000-8000-000000000102",
+        "metric_key": "emissions.scope3.category1",
+        "metric_version": "1.0.0",
+        "category": "emissions.scope3.category1",
+        "value_kgco2e": "18000.000000",
+        "unit": "kgCO2e",
+        "confidence": "0.91500",
+        "status": "verified",
+        "ledger_event_id": "00000000-0000-4000-8000-000000900009",
+        "output_hash": "6e9d53557fe4f27aadfd24439bf4da8a79e70ce270dda33c7319be464223b9ab",
+        "verified_at": "2026-09-30T12:00:00Z",
+        "created_at": "2026-09-30T12:00:00Z"
+      },
+      "detail": {
+        "id": "00000000-0000-4000-8000-000000900000",
+        "company_id": "00000000-0000-4000-8000-000000000001",
+        "site_id": "00000000-0000-4000-8000-000000000002",
+        "site_name": "Plant B (synthetic)",
+        "reporting_period_id": "00000000-0000-4000-8000-000000000003",
+        "reporting_period_name": "Q3 2026",
+        "metric_definition_id": "00000000-0000-4000-8000-000000000102",
+        "metric_key": "emissions.scope3.category1",
+        "metric_version": "1.0.0",
+        "category": "emissions.scope3.category1",
+        "value_kgco2e": "18000.000000",
+        "unit": "kgCO2e",
+        "confidence": "0.91500",
+        "confidence_breakdown": {
+          "source_quality": "0.90",
+          "factor_specificity": "0.95",
+          "factor_recency": "0.85",
+          "record_completeness": "1.0",
+          "source_quality_weight": "0.40",
+          "factor_specificity_weight": "0.30",
+          "factor_recency_weight": "0.20",
+          "record_completeness_weight": "0.10",
+          "overall": "0.91500"
+        },
+        "status": "verified",
+        "formula": "normalized_quantity_kg * factor_kgco2e_per_kg",
+        "output_hash": "6e9d53557fe4f27aadfd24439bf4da8a79e70ce270dda33c7319be464223b9ab",
+        "verified_at": "2026-09-30T12:00:00Z",
+        "created_at": "2026-09-30T12:00:00Z",
+        "calculation_run": {
+          "id": "00000000-0000-4000-8000-000000900001",
+          "method_definition_id": "00000000-0000-4000-8000-000000000103",
+          "method_key": "measurement.scope3.category1.mass_factor",
+          "method_version": "1.0.0",
+          "code_version": "synthetic-ui-preview-v1",
+          "rounding_policy": "ROUND_HALF_EVEN / 0.000001 kgCO2e",
+          "input_hash": "7cba9131e3ad0d515d1187c7c7ed4d906ae2e5855f8ee6ad5de89ec57e3bd014",
+          "output_hash": "6e9d53557fe4f27aadfd24439bf4da8a79e70ce270dda33c7319be464223b9ab",
+          "status": "completed",
+          "started_at": "2026-09-30T12:00:00Z",
+          "completed_at": "2026-09-30T12:00:00Z"
+        },
+        "inputs": [
+          {
+            "activity_record_id": "00000000-0000-4000-8000-000000900002",
+            "raw_activity_record_id": "00000000-0000-4000-8000-000000900003",
+            "data_source_id": "00000000-0000-4000-8000-000000900013",
+            "source_document_id": "00000000-0000-4000-8000-000000900004",
+            "source_row_key": "synthetic-aluminium-row-1",
+            "source_row_number": 1,
+            "raw_checksum": "7cba9131e3ad0d515d1187c7c7ed4d906ae2e5855f8ee6ad5de89ec57e3bd014",
+            "supplier_product_id": null,
+            "product_code": null,
+            "material_code": "RECYCLED_ALUMINIUM",
+            "activity_date": "2026-09-30",
+            "source_quantity": "10000",
+            "source_unit": "kg",
+            "normalized_quantity_kg": "10000",
+            "record_completeness": "1.0"
+          }
+        ],
+        "factors": [
+          {
+            "id": "00000000-0000-4000-8000-000000900005",
+            "factor_code": "SYNTHETIC_ALUMINIUM_PCF",
+            "version": "1.0.0",
+            "name": "Synthetic recycled-aluminium factor",
+            "material_code": "RECYCLED_ALUMINIUM",
+            "product_code": null,
+            "geography": "IN",
+            "factor_value": "1.8",
+            "numerator_unit": "kgCO2e",
+            "denominator_unit": "kg",
+            "normalized_factor_kgco2e_per_kg": "1.8",
+            "effective_from": "2026-01-01",
+            "effective_to": null,
+            "evidence": {
+              "id": "00000000-0000-4000-8000-000000900007",
+              "source_document_id": "00000000-0000-4000-8000-000000900006",
+              "data_source_id": "00000000-0000-4000-8000-000000900013",
+              "source_document_filename": "synthetic-ui-factor.txt",
+              "source_document_checksum": "7cba9131e3ad0d515d1187c7c7ed4d906ae2e5855f8ee6ad5de89ec57e3bd014",
+              "evidence_type": "synthetic_factor",
+              "locator": "preview:factor/1",
+              "checksum": "7cba9131e3ad0d515d1187c7c7ed4d906ae2e5855f8ee6ad5de89ec57e3bd014"
+            }
+          }
+        ],
+        "calculations": [
+          {
+            "id": "00000000-0000-4000-8000-000000900008",
+            "activity_record_id": "00000000-0000-4000-8000-000000900002",
+            "emission_factor_id": "00000000-0000-4000-8000-000000900005",
+            "normalized_quantity_kg": "10000",
+            "factor_kgco2e_per_kg": "1.8",
+            "emissions_kgco2e": "18000.000000",
+            "formula": "normalized_quantity_kg * factor_kgco2e_per_kg",
+            "output_hash": "6e9d53557fe4f27aadfd24439bf4da8a79e70ce270dda33c7319be464223b9ab"
+          }
+        ],
+        "baseline": null,
+        "facts": {
+          "fact_id": "00000000-0000-4000-8000-000000900000",
+          "ledger_event_id": "00000000-0000-4000-8000-000000900009",
+          "output_hash": "6e9d53557fe4f27aadfd24439bf4da8a79e70ce270dda33c7319be464223b9ab",
+          "audit_log_id": null
+        }
+      },
+      "lineage": {
+        "measurement_id": "00000000-0000-4000-8000-000000900000",
+        "root_event_id": "00000000-0000-4000-8000-000000900009",
+        "nodes": [
+          {
+            "id": "00000000-0000-4000-8000-000000900010",
+            "node_type": "ledger_event",
+            "label": "Synthetic raw activity",
+            "entity_type": "raw_activity_record",
+            "entity_id": "00000000-0000-4000-8000-000000900003",
+            "event_type": "activity.imported",
+            "payload": {
+              "synthetic": true,
+              "fixture_version": "measurement-ui-preview-v1",
+              "quantity": "10000",
+              "unit": "kg",
+              "material": "RECYCLED_ALUMINIUM",
+              "row": 1
+            },
+            "payload_hash": "7cba9131e3ad0d515d1187c7c7ed4d906ae2e5855f8ee6ad5de89ec57e3bd014",
+            "created_at": "2026-09-30T12:00:00Z",
+            "metadata": {}
+          },
+          {
+            "id": "00000000-0000-4000-8000-000000900007",
+            "node_type": "evidence",
+            "label": "Synthetic factor evidence",
+            "entity_type": null,
+            "entity_id": null,
+            "event_type": null,
+            "payload": {
+              "synthetic": true,
+              "source_document_id": "00000000-0000-4000-8000-000000900006"
+            },
+            "payload_hash": null,
+            "created_at": null,
+            "metadata": {}
+          },
+          {
+            "id": "00000000-0000-4000-8000-000000900009",
+            "node_type": "ledger_event",
+            "label": "Synthetic measurement result",
+            "entity_type": "measurement",
+            "entity_id": "00000000-0000-4000-8000-000000900000",
+            "event_type": "measurement.verified",
+            "payload": {
+              "synthetic": true,
+              "value_kgco2e": "18000.000000"
+            },
+            "payload_hash": "6e9d53557fe4f27aadfd24439bf4da8a79e70ce270dda33c7319be464223b9ab",
+            "created_at": "2026-09-30T12:00:00Z",
+            "metadata": {}
+          }
+        ],
+        "edges": [
+          {
+            "id": "00000000-0000-4000-8000-000000900014",
+            "source": "00000000-0000-4000-8000-000000900010",
+            "target": "00000000-0000-4000-8000-000000900009",
+            "relationship_type": "derived_from",
+            "metadata": {}
+          },
+          {
+            "id": "00000000-0000-4000-8000-000000900015",
+            "source": "00000000-0000-4000-8000-000000900007",
+            "target": "00000000-0000-4000-8000-000000900009",
+            "relationship_type": "supported_by",
+            "metadata": {}
+          }
+        ],
+        "truncated": false
+      }
+    },
+    {
+      "summary": {
+        "id": "00000000-0000-4000-8000-000000900100",
+        "company_id": "00000000-0000-4000-8000-000000000001",
+        "site_id": "00000000-0000-4000-8000-000000000002",
+        "site_name": "Plant B (synthetic)",
+        "reporting_period_id": "00000000-0000-4000-8000-000000000003",
+        "reporting_period_name": "Q3 2026",
+        "metric_definition_id": "00000000-0000-4000-8000-000000000102",
+        "metric_key": "emissions.scope3.category1",
+        "metric_version": "1.0.0",
+        "category": "emissions.scope3.category1",
+        "value_kgco2e": "5040.000000",
+        "unit": "kgCO2e",
+        "confidence": "0.91500",
+        "status": "draft",
+        "ledger_event_id": "00000000-0000-4000-8000-000000900109",
+        "output_hash": "8af88e38916eefd0837f76d93df052d61f308164ac4fd57544a76155d6375ee2",
+        "verified_at": null,
+        "created_at": "2026-09-29T12:00:00Z"
+      },
+      "detail": {
+        "id": "00000000-0000-4000-8000-000000900100",
+        "company_id": "00000000-0000-4000-8000-000000000001",
+        "site_id": "00000000-0000-4000-8000-000000000002",
+        "site_name": "Plant B (synthetic)",
+        "reporting_period_id": "00000000-0000-4000-8000-000000000003",
+        "reporting_period_name": "Q3 2026",
+        "metric_definition_id": "00000000-0000-4000-8000-000000000102",
+        "metric_key": "emissions.scope3.category1",
+        "metric_version": "1.0.0",
+        "category": "emissions.scope3.category1",
+        "value_kgco2e": "5040.000000",
+        "unit": "kgCO2e",
+        "confidence": "0.91500",
+        "confidence_breakdown": {
+          "source_quality": "0.90",
+          "factor_specificity": "0.95",
+          "factor_recency": "0.85",
+          "record_completeness": "1.0",
+          "source_quality_weight": "0.40",
+          "factor_specificity_weight": "0.30",
+          "factor_recency_weight": "0.20",
+          "record_completeness_weight": "0.10",
+          "overall": "0.91500"
+        },
+        "status": "draft",
+        "formula": "normalized_quantity_kg * factor_kgco2e_per_kg",
+        "output_hash": "8af88e38916eefd0837f76d93df052d61f308164ac4fd57544a76155d6375ee2",
+        "verified_at": null,
+        "created_at": "2026-09-29T12:00:00Z",
+        "calculation_run": {
+          "id": "00000000-0000-4000-8000-000000900101",
+          "method_definition_id": "00000000-0000-4000-8000-000000000103",
+          "method_key": "measurement.scope3.category1.mass_factor",
+          "method_version": "1.0.0",
+          "code_version": "synthetic-ui-preview-v1",
+          "rounding_policy": "ROUND_HALF_EVEN / 0.000001 kgCO2e",
+          "input_hash": "d40453e4fa5de122530c7e8db3a9bd99854fb7f6dbce3958342a6607b50cd75b",
+          "output_hash": "8af88e38916eefd0837f76d93df052d61f308164ac4fd57544a76155d6375ee2",
+          "status": "completed",
+          "started_at": "2026-09-29T12:00:00Z",
+          "completed_at": "2026-09-29T12:00:00Z"
+        },
+        "inputs": [
+          {
+            "activity_record_id": "00000000-0000-4000-8000-000000900102",
+            "raw_activity_record_id": "00000000-0000-4000-8000-000000900103",
+            "data_source_id": "00000000-0000-4000-8000-000000900113",
+            "source_document_id": "00000000-0000-4000-8000-000000900104",
+            "source_row_key": "synthetic-aluminium-row-2",
+            "source_row_number": 2,
+            "raw_checksum": "d40453e4fa5de122530c7e8db3a9bd99854fb7f6dbce3958342a6607b50cd75b",
+            "supplier_product_id": null,
+            "product_code": null,
+            "material_code": "RECYCLED_ALUMINIUM",
+            "activity_date": "2026-09-29",
+            "source_quantity": "2400",
+            "source_unit": "kg",
+            "normalized_quantity_kg": "2400",
+            "record_completeness": "1.0"
+          }
+        ],
+        "factors": [
+          {
+            "id": "00000000-0000-4000-8000-000000900105",
+            "factor_code": "SYNTHETIC_ALUMINIUM_PCF",
+            "version": "1.0.0",
+            "name": "Synthetic recycled-aluminium factor",
+            "material_code": "RECYCLED_ALUMINIUM",
+            "product_code": null,
+            "geography": "IN",
+            "factor_value": "2.1",
+            "numerator_unit": "kgCO2e",
+            "denominator_unit": "kg",
+            "normalized_factor_kgco2e_per_kg": "2.1",
+            "effective_from": "2026-01-01",
+            "effective_to": null,
+            "evidence": {
+              "id": "00000000-0000-4000-8000-000000900107",
+              "source_document_id": "00000000-0000-4000-8000-000000900106",
+              "data_source_id": "00000000-0000-4000-8000-000000900113",
+              "source_document_filename": "synthetic-ui-factor.txt",
+              "source_document_checksum": "d40453e4fa5de122530c7e8db3a9bd99854fb7f6dbce3958342a6607b50cd75b",
+              "evidence_type": "synthetic_factor",
+              "locator": "preview:factor/1",
+              "checksum": "d40453e4fa5de122530c7e8db3a9bd99854fb7f6dbce3958342a6607b50cd75b"
+            }
+          }
+        ],
+        "calculations": [
+          {
+            "id": "00000000-0000-4000-8000-000000900108",
+            "activity_record_id": "00000000-0000-4000-8000-000000900102",
+            "emission_factor_id": "00000000-0000-4000-8000-000000900105",
+            "normalized_quantity_kg": "2400",
+            "factor_kgco2e_per_kg": "2.1",
+            "emissions_kgco2e": "5040.000000",
+            "formula": "normalized_quantity_kg * factor_kgco2e_per_kg",
+            "output_hash": "8af88e38916eefd0837f76d93df052d61f308164ac4fd57544a76155d6375ee2"
+          }
+        ],
+        "baseline": null,
+        "facts": {
+          "fact_id": "00000000-0000-4000-8000-000000900100",
+          "ledger_event_id": "00000000-0000-4000-8000-000000900109",
+          "output_hash": "8af88e38916eefd0837f76d93df052d61f308164ac4fd57544a76155d6375ee2",
+          "audit_log_id": null
+        }
+      },
+      "lineage": {
+        "measurement_id": "00000000-0000-4000-8000-000000900100",
+        "root_event_id": "00000000-0000-4000-8000-000000900109",
+        "nodes": [
+          {
+            "id": "00000000-0000-4000-8000-000000900110",
+            "node_type": "ledger_event",
+            "label": "Synthetic raw activity",
+            "entity_type": "raw_activity_record",
+            "entity_id": "00000000-0000-4000-8000-000000900103",
+            "event_type": "activity.imported",
+            "payload": {
+              "synthetic": true,
+              "fixture_version": "measurement-ui-preview-v1",
+              "quantity": "2400",
+              "unit": "kg",
+              "material": "RECYCLED_ALUMINIUM",
+              "row": 2
+            },
+            "payload_hash": "d40453e4fa5de122530c7e8db3a9bd99854fb7f6dbce3958342a6607b50cd75b",
+            "created_at": "2026-09-29T12:00:00Z",
+            "metadata": {}
+          },
+          {
+            "id": "00000000-0000-4000-8000-000000900107",
+            "node_type": "evidence",
+            "label": "Synthetic factor evidence",
+            "entity_type": null,
+            "entity_id": null,
+            "event_type": null,
+            "payload": {
+              "synthetic": true,
+              "source_document_id": "00000000-0000-4000-8000-000000900106"
+            },
+            "payload_hash": null,
+            "created_at": null,
+            "metadata": {}
+          },
+          {
+            "id": "00000000-0000-4000-8000-000000900109",
+            "node_type": "ledger_event",
+            "label": "Synthetic measurement result",
+            "entity_type": "measurement",
+            "entity_id": "00000000-0000-4000-8000-000000900100",
+            "event_type": "measurement.draft",
+            "payload": {
+              "synthetic": true,
+              "value_kgco2e": "5040.000000"
+            },
+            "payload_hash": "8af88e38916eefd0837f76d93df052d61f308164ac4fd57544a76155d6375ee2",
+            "created_at": "2026-09-29T12:00:00Z",
+            "metadata": {}
+          }
+        ],
+        "edges": [
+          {
+            "id": "00000000-0000-4000-8000-000000900114",
+            "source": "00000000-0000-4000-8000-000000900110",
+            "target": "00000000-0000-4000-8000-000000900109",
+            "relationship_type": "derived_from",
+            "metadata": {}
+          },
+          {
+            "id": "00000000-0000-4000-8000-000000900115",
+            "source": "00000000-0000-4000-8000-000000900107",
+            "target": "00000000-0000-4000-8000-000000900109",
+            "relationship_type": "supported_by",
+            "metadata": {}
+          }
+        ],
+        "truncated": false
+      }
+    },
+    {
+      "summary": {
+        "id": "00000000-0000-4000-8000-000000900200",
+        "company_id": "00000000-0000-4000-8000-000000000001",
+        "site_id": "00000000-0000-4000-8000-000000000002",
+        "site_name": "Plant B (synthetic)",
+        "reporting_period_id": "00000000-0000-4000-8000-000000000003",
+        "reporting_period_name": "Q3 2026",
+        "metric_definition_id": "00000000-0000-4000-8000-000000000102",
+        "metric_key": "emissions.scope3.category1",
+        "metric_version": "1.0.0",
+        "category": "emissions.scope3.category1",
+        "value_kgco2e": "10400.000000",
+        "unit": "kgCO2e",
+        "confidence": "0.91500",
+        "status": "verified",
+        "ledger_event_id": "00000000-0000-4000-8000-000000900209",
+        "output_hash": "af8aa078dfe6ed743fb9357a771a4c87ec6228f54f508ec1af4cda67236936b8",
+        "verified_at": "2026-09-28T12:00:00Z",
+        "created_at": "2026-09-28T12:00:00Z"
+      },
+      "detail": {
+        "id": "00000000-0000-4000-8000-000000900200",
+        "company_id": "00000000-0000-4000-8000-000000000001",
+        "site_id": "00000000-0000-4000-8000-000000000002",
+        "site_name": "Plant B (synthetic)",
+        "reporting_period_id": "00000000-0000-4000-8000-000000000003",
+        "reporting_period_name": "Q3 2026",
+        "metric_definition_id": "00000000-0000-4000-8000-000000000102",
+        "metric_key": "emissions.scope3.category1",
+        "metric_version": "1.0.0",
+        "category": "emissions.scope3.category1",
+        "value_kgco2e": "10400.000000",
+        "unit": "kgCO2e",
+        "confidence": "0.91500",
+        "confidence_breakdown": {
+          "source_quality": "0.90",
+          "factor_specificity": "0.95",
+          "factor_recency": "0.85",
+          "record_completeness": "1.0",
+          "source_quality_weight": "0.40",
+          "factor_specificity_weight": "0.30",
+          "factor_recency_weight": "0.20",
+          "record_completeness_weight": "0.10",
+          "overall": "0.91500"
+        },
+        "status": "verified",
+        "formula": "normalized_quantity_kg * factor_kgco2e_per_kg",
+        "output_hash": "af8aa078dfe6ed743fb9357a771a4c87ec6228f54f508ec1af4cda67236936b8",
+        "verified_at": "2026-09-28T12:00:00Z",
+        "created_at": "2026-09-28T12:00:00Z",
+        "calculation_run": {
+          "id": "00000000-0000-4000-8000-000000900201",
+          "method_definition_id": "00000000-0000-4000-8000-000000000103",
+          "method_key": "measurement.scope3.category1.mass_factor",
+          "method_version": "1.0.0",
+          "code_version": "synthetic-ui-preview-v1",
+          "rounding_policy": "ROUND_HALF_EVEN / 0.000001 kgCO2e",
+          "input_hash": "0d871efd08e9282b68ec5b4006ad0f9c49e82525a64628c3202dc38c4ca05e58",
+          "output_hash": "af8aa078dfe6ed743fb9357a771a4c87ec6228f54f508ec1af4cda67236936b8",
+          "status": "completed",
+          "started_at": "2026-09-28T12:00:00Z",
+          "completed_at": "2026-09-28T12:00:00Z"
+        },
+        "inputs": [
+          {
+            "activity_record_id": "00000000-0000-4000-8000-000000900202",
+            "raw_activity_record_id": "00000000-0000-4000-8000-000000900203",
+            "data_source_id": "00000000-0000-4000-8000-000000900213",
+            "source_document_id": "00000000-0000-4000-8000-000000900204",
+            "source_row_key": "synthetic-aluminium-row-3",
+            "source_row_number": 3,
+            "raw_checksum": "0d871efd08e9282b68ec5b4006ad0f9c49e82525a64628c3202dc38c4ca05e58",
+            "supplier_product_id": null,
+            "product_code": null,
+            "material_code": "RECYCLED_ALUMINIUM",
+            "activity_date": "2026-09-28",
+            "source_quantity": "6500",
+            "source_unit": "kg",
+            "normalized_quantity_kg": "6500",
+            "record_completeness": "1.0"
+          }
+        ],
+        "factors": [
+          {
+            "id": "00000000-0000-4000-8000-000000900205",
+            "factor_code": "SYNTHETIC_ALUMINIUM_PCF",
+            "version": "1.0.0",
+            "name": "Synthetic recycled-aluminium factor",
+            "material_code": "RECYCLED_ALUMINIUM",
+            "product_code": null,
+            "geography": "IN",
+            "factor_value": "1.6",
+            "numerator_unit": "kgCO2e",
+            "denominator_unit": "kg",
+            "normalized_factor_kgco2e_per_kg": "1.6",
+            "effective_from": "2026-01-01",
+            "effective_to": null,
+            "evidence": {
+              "id": "00000000-0000-4000-8000-000000900207",
+              "source_document_id": "00000000-0000-4000-8000-000000900206",
+              "data_source_id": "00000000-0000-4000-8000-000000900213",
+              "source_document_filename": "synthetic-ui-factor.txt",
+              "source_document_checksum": "0d871efd08e9282b68ec5b4006ad0f9c49e82525a64628c3202dc38c4ca05e58",
+              "evidence_type": "synthetic_factor",
+              "locator": "preview:factor/1",
+              "checksum": "0d871efd08e9282b68ec5b4006ad0f9c49e82525a64628c3202dc38c4ca05e58"
+            }
+          }
+        ],
+        "calculations": [
+          {
+            "id": "00000000-0000-4000-8000-000000900208",
+            "activity_record_id": "00000000-0000-4000-8000-000000900202",
+            "emission_factor_id": "00000000-0000-4000-8000-000000900205",
+            "normalized_quantity_kg": "6500",
+            "factor_kgco2e_per_kg": "1.6",
+            "emissions_kgco2e": "10400.000000",
+            "formula": "normalized_quantity_kg * factor_kgco2e_per_kg",
+            "output_hash": "af8aa078dfe6ed743fb9357a771a4c87ec6228f54f508ec1af4cda67236936b8"
+          }
+        ],
+        "baseline": null,
+        "facts": {
+          "fact_id": "00000000-0000-4000-8000-000000900200",
+          "ledger_event_id": "00000000-0000-4000-8000-000000900209",
+          "output_hash": "af8aa078dfe6ed743fb9357a771a4c87ec6228f54f508ec1af4cda67236936b8",
+          "audit_log_id": null
+        }
+      },
+      "lineage": {
+        "measurement_id": "00000000-0000-4000-8000-000000900200",
+        "root_event_id": "00000000-0000-4000-8000-000000900209",
+        "nodes": [
+          {
+            "id": "00000000-0000-4000-8000-000000900210",
+            "node_type": "ledger_event",
+            "label": "Synthetic raw activity",
+            "entity_type": "raw_activity_record",
+            "entity_id": "00000000-0000-4000-8000-000000900203",
+            "event_type": "activity.imported",
+            "payload": {
+              "synthetic": true,
+              "fixture_version": "measurement-ui-preview-v1",
+              "quantity": "6500",
+              "unit": "kg",
+              "material": "RECYCLED_ALUMINIUM",
+              "row": 3
+            },
+            "payload_hash": "0d871efd08e9282b68ec5b4006ad0f9c49e82525a64628c3202dc38c4ca05e58",
+            "created_at": "2026-09-28T12:00:00Z",
+            "metadata": {}
+          },
+          {
+            "id": "00000000-0000-4000-8000-000000900207",
+            "node_type": "evidence",
+            "label": "Synthetic factor evidence",
+            "entity_type": null,
+            "entity_id": null,
+            "event_type": null,
+            "payload": {
+              "synthetic": true,
+              "source_document_id": "00000000-0000-4000-8000-000000900206"
+            },
+            "payload_hash": null,
+            "created_at": null,
+            "metadata": {}
+          },
+          {
+            "id": "00000000-0000-4000-8000-000000900209",
+            "node_type": "ledger_event",
+            "label": "Synthetic measurement result",
+            "entity_type": "measurement",
+            "entity_id": "00000000-0000-4000-8000-000000900200",
+            "event_type": "measurement.verified",
+            "payload": {
+              "synthetic": true,
+              "value_kgco2e": "10400.000000"
+            },
+            "payload_hash": "af8aa078dfe6ed743fb9357a771a4c87ec6228f54f508ec1af4cda67236936b8",
+            "created_at": "2026-09-28T12:00:00Z",
+            "metadata": {}
+          }
+        ],
+        "edges": [
+          {
+            "id": "00000000-0000-4000-8000-000000900214",
+            "source": "00000000-0000-4000-8000-000000900210",
+            "target": "00000000-0000-4000-8000-000000900209",
+            "relationship_type": "derived_from",
+            "metadata": {}
+          },
+          {
+            "id": "00000000-0000-4000-8000-000000900215",
+            "source": "00000000-0000-4000-8000-000000900207",
+            "target": "00000000-0000-4000-8000-000000900209",
+            "relationship_type": "supported_by",
+            "metadata": {}
+          }
+        ],
+        "truncated": false
+      }
+    },
+    {
+      "summary": {
+        "id": "00000000-0000-4000-8000-000000900300",
+        "company_id": "00000000-0000-4000-8000-000000000001",
+        "site_id": "00000000-0000-4000-8000-000000000002",
+        "site_name": "Plant B (synthetic)",
+        "reporting_period_id": "00000000-0000-4000-8000-000000000003",
+        "reporting_period_name": "Q3 2026",
+        "metric_definition_id": "00000000-0000-4000-8000-000000000102",
+        "metric_key": "emissions.scope3.category1",
+        "metric_version": "1.0.0",
+        "category": "emissions.scope3.category1",
+        "value_kgco2e": "20000.000000",
+        "unit": "kgCO2e",
+        "confidence": "0.91500",
+        "status": "superseded",
+        "ledger_event_id": "00000000-0000-4000-8000-000000900309",
+        "output_hash": "9dc70ba0cbcf33b6b5a2d33ab907536b6b6ee540bed4dd2b12483de08060140d",
+        "verified_at": "2026-09-27T12:00:00Z",
+        "created_at": "2026-09-27T12:00:00Z"
+      },
+      "detail": {
+        "id": "00000000-0000-4000-8000-000000900300",
+        "company_id": "00000000-0000-4000-8000-000000000001",
+        "site_id": "00000000-0000-4000-8000-000000000002",
+        "site_name": "Plant B (synthetic)",
+        "reporting_period_id": "00000000-0000-4000-8000-000000000003",
+        "reporting_period_name": "Q3 2026",
+        "metric_definition_id": "00000000-0000-4000-8000-000000000102",
+        "metric_key": "emissions.scope3.category1",
+        "metric_version": "1.0.0",
+        "category": "emissions.scope3.category1",
+        "value_kgco2e": "20000.000000",
+        "unit": "kgCO2e",
+        "confidence": "0.91500",
+        "confidence_breakdown": {
+          "source_quality": "0.90",
+          "factor_specificity": "0.95",
+          "factor_recency": "0.85",
+          "record_completeness": "1.0",
+          "source_quality_weight": "0.40",
+          "factor_specificity_weight": "0.30",
+          "factor_recency_weight": "0.20",
+          "record_completeness_weight": "0.10",
+          "overall": "0.91500"
+        },
+        "status": "superseded",
+        "formula": "normalized_quantity_kg * factor_kgco2e_per_kg",
+        "output_hash": "9dc70ba0cbcf33b6b5a2d33ab907536b6b6ee540bed4dd2b12483de08060140d",
+        "verified_at": "2026-09-27T12:00:00Z",
+        "created_at": "2026-09-27T12:00:00Z",
+        "calculation_run": {
+          "id": "00000000-0000-4000-8000-000000900301",
+          "method_definition_id": "00000000-0000-4000-8000-000000000103",
+          "method_key": "measurement.scope3.category1.mass_factor",
+          "method_version": "1.0.0",
+          "code_version": "synthetic-ui-preview-v1",
+          "rounding_policy": "ROUND_HALF_EVEN / 0.000001 kgCO2e",
+          "input_hash": "0639348899c3525dc54965c8f620cfbf8f8cd67c6a5adb8d578f892e1bc26538",
+          "output_hash": "9dc70ba0cbcf33b6b5a2d33ab907536b6b6ee540bed4dd2b12483de08060140d",
+          "status": "completed",
+          "started_at": "2026-09-27T12:00:00Z",
+          "completed_at": "2026-09-27T12:00:00Z"
+        },
+        "inputs": [
+          {
+            "activity_record_id": "00000000-0000-4000-8000-000000900302",
+            "raw_activity_record_id": "00000000-0000-4000-8000-000000900303",
+            "data_source_id": "00000000-0000-4000-8000-000000900313",
+            "source_document_id": "00000000-0000-4000-8000-000000900304",
+            "source_row_key": "synthetic-aluminium-row-4",
+            "source_row_number": 4,
+            "raw_checksum": "0639348899c3525dc54965c8f620cfbf8f8cd67c6a5adb8d578f892e1bc26538",
+            "supplier_product_id": null,
+            "product_code": null,
+            "material_code": "RECYCLED_ALUMINIUM",
+            "activity_date": "2026-09-27",
+            "source_quantity": "10000",
+            "source_unit": "kg",
+            "normalized_quantity_kg": "10000",
+            "record_completeness": "1.0"
+          }
+        ],
+        "factors": [
+          {
+            "id": "00000000-0000-4000-8000-000000900305",
+            "factor_code": "SYNTHETIC_ALUMINIUM_PCF",
+            "version": "1.0.0",
+            "name": "Synthetic recycled-aluminium factor",
+            "material_code": "RECYCLED_ALUMINIUM",
+            "product_code": null,
+            "geography": "IN",
+            "factor_value": "2.0",
+            "numerator_unit": "kgCO2e",
+            "denominator_unit": "kg",
+            "normalized_factor_kgco2e_per_kg": "2.0",
+            "effective_from": "2026-01-01",
+            "effective_to": null,
+            "evidence": {
+              "id": "00000000-0000-4000-8000-000000900307",
+              "source_document_id": "00000000-0000-4000-8000-000000900306",
+              "data_source_id": "00000000-0000-4000-8000-000000900313",
+              "source_document_filename": "synthetic-ui-factor.txt",
+              "source_document_checksum": "0639348899c3525dc54965c8f620cfbf8f8cd67c6a5adb8d578f892e1bc26538",
+              "evidence_type": "synthetic_factor",
+              "locator": "preview:factor/1",
+              "checksum": "0639348899c3525dc54965c8f620cfbf8f8cd67c6a5adb8d578f892e1bc26538"
+            }
+          }
+        ],
+        "calculations": [
+          {
+            "id": "00000000-0000-4000-8000-000000900308",
+            "activity_record_id": "00000000-0000-4000-8000-000000900302",
+            "emission_factor_id": "00000000-0000-4000-8000-000000900305",
+            "normalized_quantity_kg": "10000",
+            "factor_kgco2e_per_kg": "2.0",
+            "emissions_kgco2e": "20000.000000",
+            "formula": "normalized_quantity_kg * factor_kgco2e_per_kg",
+            "output_hash": "9dc70ba0cbcf33b6b5a2d33ab907536b6b6ee540bed4dd2b12483de08060140d"
+          }
+        ],
+        "baseline": null,
+        "facts": {
+          "fact_id": "00000000-0000-4000-8000-000000900300",
+          "ledger_event_id": "00000000-0000-4000-8000-000000900309",
+          "output_hash": "9dc70ba0cbcf33b6b5a2d33ab907536b6b6ee540bed4dd2b12483de08060140d",
+          "audit_log_id": null
+        }
+      },
+      "lineage": {
+        "measurement_id": "00000000-0000-4000-8000-000000900300",
+        "root_event_id": "00000000-0000-4000-8000-000000900309",
+        "nodes": [
+          {
+            "id": "00000000-0000-4000-8000-000000900310",
+            "node_type": "ledger_event",
+            "label": "Synthetic raw activity",
+            "entity_type": "raw_activity_record",
+            "entity_id": "00000000-0000-4000-8000-000000900303",
+            "event_type": "activity.imported",
+            "payload": {
+              "synthetic": true,
+              "fixture_version": "measurement-ui-preview-v1",
+              "quantity": "10000",
+              "unit": "kg",
+              "material": "RECYCLED_ALUMINIUM",
+              "row": 4
+            },
+            "payload_hash": "0639348899c3525dc54965c8f620cfbf8f8cd67c6a5adb8d578f892e1bc26538",
+            "created_at": "2026-09-27T12:00:00Z",
+            "metadata": {}
+          },
+          {
+            "id": "00000000-0000-4000-8000-000000900307",
+            "node_type": "evidence",
+            "label": "Synthetic factor evidence",
+            "entity_type": null,
+            "entity_id": null,
+            "event_type": null,
+            "payload": {
+              "synthetic": true,
+              "source_document_id": "00000000-0000-4000-8000-000000900306"
+            },
+            "payload_hash": null,
+            "created_at": null,
+            "metadata": {}
+          },
+          {
+            "id": "00000000-0000-4000-8000-000000900309",
+            "node_type": "ledger_event",
+            "label": "Synthetic measurement result",
+            "entity_type": "measurement",
+            "entity_id": "00000000-0000-4000-8000-000000900300",
+            "event_type": "measurement.superseded",
+            "payload": {
+              "synthetic": true,
+              "value_kgco2e": "20000.000000"
+            },
+            "payload_hash": "9dc70ba0cbcf33b6b5a2d33ab907536b6b6ee540bed4dd2b12483de08060140d",
+            "created_at": "2026-09-27T12:00:00Z",
+            "metadata": {}
+          }
+        ],
+        "edges": [
+          {
+            "id": "00000000-0000-4000-8000-000000900314",
+            "source": "00000000-0000-4000-8000-000000900310",
+            "target": "00000000-0000-4000-8000-000000900309",
+            "relationship_type": "derived_from",
+            "metadata": {}
+          },
+          {
+            "id": "00000000-0000-4000-8000-000000900315",
+            "source": "00000000-0000-4000-8000-000000900307",
+            "target": "00000000-0000-4000-8000-000000900309",
+            "relationship_type": "supported_by",
+            "metadata": {}
+          }
+        ],
+        "truncated": false
+      }
+    },
+    {
+      "summary": {
+        "id": "00000000-0000-4000-8000-000000900400",
+        "company_id": "00000000-0000-4000-8000-000000000001",
+        "site_id": "00000000-0000-4000-8000-000000000002",
+        "site_name": "Plant B (synthetic)",
+        "reporting_period_id": "00000000-0000-4000-8000-000000000003",
+        "reporting_period_name": "Q3 2026",
+        "metric_definition_id": "00000000-0000-4000-8000-000000000102",
+        "metric_key": "emissions.scope3.category1",
+        "metric_version": "1.0.0",
+        "category": "emissions.scope3.category1",
+        "value_kgco2e": "3420.000000",
+        "unit": "kgCO2e",
+        "confidence": "0.91500",
+        "status": "draft",
+        "ledger_event_id": "00000000-0000-4000-8000-000000900409",
+        "output_hash": "0de1a4dc8046e1f09cd50b1b1c41230828b6f9311686f30947b7119ead219bf8",
+        "verified_at": null,
+        "created_at": "2026-09-26T12:00:00Z"
+      },
+      "detail": {
+        "id": "00000000-0000-4000-8000-000000900400",
+        "company_id": "00000000-0000-4000-8000-000000000001",
+        "site_id": "00000000-0000-4000-8000-000000000002",
+        "site_name": "Plant B (synthetic)",
+        "reporting_period_id": "00000000-0000-4000-8000-000000000003",
+        "reporting_period_name": "Q3 2026",
+        "metric_definition_id": "00000000-0000-4000-8000-000000000102",
+        "metric_key": "emissions.scope3.category1",
+        "metric_version": "1.0.0",
+        "category": "emissions.scope3.category1",
+        "value_kgco2e": "3420.000000",
+        "unit": "kgCO2e",
+        "confidence": "0.91500",
+        "confidence_breakdown": {
+          "source_quality": "0.90",
+          "factor_specificity": "0.95",
+          "factor_recency": "0.85",
+          "record_completeness": "1.0",
+          "source_quality_weight": "0.40",
+          "factor_specificity_weight": "0.30",
+          "factor_recency_weight": "0.20",
+          "record_completeness_weight": "0.10",
+          "overall": "0.91500"
+        },
+        "status": "draft",
+        "formula": "normalized_quantity_kg * factor_kgco2e_per_kg",
+        "output_hash": "0de1a4dc8046e1f09cd50b1b1c41230828b6f9311686f30947b7119ead219bf8",
+        "verified_at": null,
+        "created_at": "2026-09-26T12:00:00Z",
+        "calculation_run": {
+          "id": "00000000-0000-4000-8000-000000900401",
+          "method_definition_id": "00000000-0000-4000-8000-000000000103",
+          "method_key": "measurement.scope3.category1.mass_factor",
+          "method_version": "1.0.0",
+          "code_version": "synthetic-ui-preview-v1",
+          "rounding_policy": "ROUND_HALF_EVEN / 0.000001 kgCO2e",
+          "input_hash": "12be96f6813cd85e32e4a36a6a2efe0d33f40bd4b9a4e4ee6fd048ea5a06bfaa",
+          "output_hash": "0de1a4dc8046e1f09cd50b1b1c41230828b6f9311686f30947b7119ead219bf8",
+          "status": "completed",
+          "started_at": "2026-09-26T12:00:00Z",
+          "completed_at": "2026-09-26T12:00:00Z"
+        },
+        "inputs": [
+          {
+            "activity_record_id": "00000000-0000-4000-8000-000000900402",
+            "raw_activity_record_id": "00000000-0000-4000-8000-000000900403",
+            "data_source_id": "00000000-0000-4000-8000-000000900413",
+            "source_document_id": "00000000-0000-4000-8000-000000900404",
+            "source_row_key": "synthetic-aluminium-row-5",
+            "source_row_number": 5,
+            "raw_checksum": "12be96f6813cd85e32e4a36a6a2efe0d33f40bd4b9a4e4ee6fd048ea5a06bfaa",
+            "supplier_product_id": null,
+            "product_code": null,
+            "material_code": "RECYCLED_ALUMINIUM",
+            "activity_date": "2026-09-26",
+            "source_quantity": "1800",
+            "source_unit": "kg",
+            "normalized_quantity_kg": "1800",
+            "record_completeness": "1.0"
+          }
+        ],
+        "factors": [
+          {
+            "id": "00000000-0000-4000-8000-000000900405",
+            "factor_code": "SYNTHETIC_ALUMINIUM_PCF",
+            "version": "1.0.0",
+            "name": "Synthetic recycled-aluminium factor",
+            "material_code": "RECYCLED_ALUMINIUM",
+            "product_code": null,
+            "geography": "IN",
+            "factor_value": "1.9",
+            "numerator_unit": "kgCO2e",
+            "denominator_unit": "kg",
+            "normalized_factor_kgco2e_per_kg": "1.9",
+            "effective_from": "2026-01-01",
+            "effective_to": null,
+            "evidence": {
+              "id": "00000000-0000-4000-8000-000000900407",
+              "source_document_id": "00000000-0000-4000-8000-000000900406",
+              "data_source_id": "00000000-0000-4000-8000-000000900413",
+              "source_document_filename": "synthetic-ui-factor.txt",
+              "source_document_checksum": "12be96f6813cd85e32e4a36a6a2efe0d33f40bd4b9a4e4ee6fd048ea5a06bfaa",
+              "evidence_type": "synthetic_factor",
+              "locator": "preview:factor/1",
+              "checksum": "12be96f6813cd85e32e4a36a6a2efe0d33f40bd4b9a4e4ee6fd048ea5a06bfaa"
+            }
+          }
+        ],
+        "calculations": [
+          {
+            "id": "00000000-0000-4000-8000-000000900408",
+            "activity_record_id": "00000000-0000-4000-8000-000000900402",
+            "emission_factor_id": "00000000-0000-4000-8000-000000900405",
+            "normalized_quantity_kg": "1800",
+            "factor_kgco2e_per_kg": "1.9",
+            "emissions_kgco2e": "3420.000000",
+            "formula": "normalized_quantity_kg * factor_kgco2e_per_kg",
+            "output_hash": "0de1a4dc8046e1f09cd50b1b1c41230828b6f9311686f30947b7119ead219bf8"
+          }
+        ],
+        "baseline": null,
+        "facts": {
+          "fact_id": "00000000-0000-4000-8000-000000900400",
+          "ledger_event_id": "00000000-0000-4000-8000-000000900409",
+          "output_hash": "0de1a4dc8046e1f09cd50b1b1c41230828b6f9311686f30947b7119ead219bf8",
+          "audit_log_id": null
+        }
+      },
+      "lineage": {
+        "measurement_id": "00000000-0000-4000-8000-000000900400",
+        "root_event_id": "00000000-0000-4000-8000-000000900409",
+        "nodes": [
+          {
+            "id": "00000000-0000-4000-8000-000000900410",
+            "node_type": "ledger_event",
+            "label": "Synthetic raw activity",
+            "entity_type": "raw_activity_record",
+            "entity_id": "00000000-0000-4000-8000-000000900403",
+            "event_type": "activity.imported",
+            "payload": {
+              "synthetic": true,
+              "fixture_version": "measurement-ui-preview-v1",
+              "quantity": "1800",
+              "unit": "kg",
+              "material": "RECYCLED_ALUMINIUM",
+              "row": 5
+            },
+            "payload_hash": "12be96f6813cd85e32e4a36a6a2efe0d33f40bd4b9a4e4ee6fd048ea5a06bfaa",
+            "created_at": "2026-09-26T12:00:00Z",
+            "metadata": {}
+          },
+          {
+            "id": "00000000-0000-4000-8000-000000900407",
+            "node_type": "evidence",
+            "label": "Synthetic factor evidence",
+            "entity_type": null,
+            "entity_id": null,
+            "event_type": null,
+            "payload": {
+              "synthetic": true,
+              "source_document_id": "00000000-0000-4000-8000-000000900406"
+            },
+            "payload_hash": null,
+            "created_at": null,
+            "metadata": {}
+          },
+          {
+            "id": "00000000-0000-4000-8000-000000900409",
+            "node_type": "ledger_event",
+            "label": "Synthetic measurement result",
+            "entity_type": "measurement",
+            "entity_id": "00000000-0000-4000-8000-000000900400",
+            "event_type": "measurement.draft",
+            "payload": {
+              "synthetic": true,
+              "value_kgco2e": "3420.000000"
+            },
+            "payload_hash": "0de1a4dc8046e1f09cd50b1b1c41230828b6f9311686f30947b7119ead219bf8",
+            "created_at": "2026-09-26T12:00:00Z",
+            "metadata": {}
+          }
+        ],
+        "edges": [
+          {
+            "id": "00000000-0000-4000-8000-000000900414",
+            "source": "00000000-0000-4000-8000-000000900410",
+            "target": "00000000-0000-4000-8000-000000900409",
+            "relationship_type": "derived_from",
+            "metadata": {}
+          },
+          {
+            "id": "00000000-0000-4000-8000-000000900415",
+            "source": "00000000-0000-4000-8000-000000900407",
+            "target": "00000000-0000-4000-8000-000000900409",
+            "relationship_type": "supported_by",
+            "metadata": {}
+          }
+        ],
+        "truncated": false
+      }
+    },
+    {
+      "summary": {
+        "id": "00000000-0000-4000-8000-000000900500",
+        "company_id": "00000000-0000-4000-8000-000000000001",
+        "site_id": "00000000-0000-4000-8000-000000000002",
+        "site_name": "Plant B (synthetic)",
+        "reporting_period_id": "00000000-0000-4000-8000-000000000003",
+        "reporting_period_name": "Q3 2026",
+        "metric_definition_id": "00000000-0000-4000-8000-000000000102",
+        "metric_key": "emissions.scope3.category1",
+        "metric_version": "1.0.0",
+        "category": "emissions.scope3.category1",
+        "value_kgco2e": "0.000000",
+        "unit": "kgCO2e",
+        "confidence": "0",
+        "status": "unsupported",
+        "ledger_event_id": null,
+        "output_hash": "66fa34ec91765e69994e4c6641b1a06546d9e1b48773f85ead3cdfea099a4175",
+        "verified_at": null,
+        "created_at": "2026-09-25T12:00:00Z"
+      },
+      "detail": {
+        "id": "00000000-0000-4000-8000-000000900500",
+        "company_id": "00000000-0000-4000-8000-000000000001",
+        "site_id": "00000000-0000-4000-8000-000000000002",
+        "site_name": "Plant B (synthetic)",
+        "reporting_period_id": "00000000-0000-4000-8000-000000000003",
+        "reporting_period_name": "Q3 2026",
+        "metric_definition_id": "00000000-0000-4000-8000-000000000102",
+        "metric_key": "emissions.scope3.category1",
+        "metric_version": "1.0.0",
+        "category": "emissions.scope3.category1",
+        "value_kgco2e": "0.000000",
+        "unit": "kgCO2e",
+        "confidence": "0",
+        "confidence_breakdown": {
+          "source_quality": "0",
+          "factor_specificity": "0",
+          "factor_recency": "0",
+          "record_completeness": "0",
+          "source_quality_weight": "0.40",
+          "factor_specificity_weight": "0.30",
+          "factor_recency_weight": "0.20",
+          "record_completeness_weight": "0.10",
+          "overall": "0"
+        },
+        "status": "unsupported",
+        "formula": "normalized_quantity_kg * factor_kgco2e_per_kg",
+        "output_hash": "66fa34ec91765e69994e4c6641b1a06546d9e1b48773f85ead3cdfea099a4175",
+        "verified_at": null,
+        "created_at": "2026-09-25T12:00:00Z",
+        "calculation_run": {
+          "id": "00000000-0000-4000-8000-000000900501",
+          "method_definition_id": "00000000-0000-4000-8000-000000000103",
+          "method_key": "measurement.scope3.category1.mass_factor",
+          "method_version": "1.0.0",
+          "code_version": "synthetic-ui-preview-v1",
+          "rounding_policy": "ROUND_HALF_EVEN / 0.000001 kgCO2e",
+          "input_hash": "d97c6fcdebffa442cfa9779b0017bfafae9458501b5d1593400c46be5adf73b3",
+          "output_hash": "66fa34ec91765e69994e4c6641b1a06546d9e1b48773f85ead3cdfea099a4175",
+          "status": "failed",
+          "started_at": "2026-09-25T12:00:00Z",
+          "completed_at": "2026-09-25T12:00:00Z"
+        },
+        "inputs": [
+          {
+            "activity_record_id": "00000000-0000-4000-8000-000000900502",
+            "raw_activity_record_id": "00000000-0000-4000-8000-000000900503",
+            "data_source_id": "00000000-0000-4000-8000-000000900513",
+            "source_document_id": "00000000-0000-4000-8000-000000900504",
+            "source_row_key": "synthetic-aluminium-row-6",
+            "source_row_number": 6,
+            "raw_checksum": "d97c6fcdebffa442cfa9779b0017bfafae9458501b5d1593400c46be5adf73b3",
+            "supplier_product_id": null,
+            "product_code": null,
+            "material_code": "RECYCLED_ALUMINIUM",
+            "activity_date": "2026-09-25",
+            "source_quantity": "0",
+            "source_unit": "kg",
+            "normalized_quantity_kg": "0",
+            "record_completeness": "1.0"
+          }
+        ],
+        "factors": [],
+        "calculations": [],
+        "baseline": null,
+        "facts": {
+          "fact_id": "00000000-0000-4000-8000-000000900500",
+          "ledger_event_id": null,
+          "output_hash": "66fa34ec91765e69994e4c6641b1a06546d9e1b48773f85ead3cdfea099a4175",
+          "audit_log_id": null
+        }
+      },
+      "lineage": {
+        "measurement_id": "00000000-0000-4000-8000-000000900500",
+        "root_event_id": null,
+        "nodes": [],
+        "edges": [],
+        "truncated": false
+      }
+    }
+  ]
+}
