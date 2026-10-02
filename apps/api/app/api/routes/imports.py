@@ -15,6 +15,7 @@ from app.modules.imports.schemas import (
     SupplierImportRequest,
 )
 from app.modules.imports.service import (
+    ImportIdempotencyConflict,
     ImportReferenceNotFound,
     ImportRunNotFound,
     ImportService,
@@ -40,6 +41,8 @@ async def import_activity(
         return await ImportService(session).import_activity(request)
     except ImportReferenceNotFound as error:
         raise _http_error(status.HTTP_404_NOT_FOUND, error, trace_id) from error
+    except ImportIdempotencyConflict as error:
+        raise _http_error(status.HTTP_409_CONFLICT, error, trace_id) from error
     except InvalidImportContext as error:
         raise _http_error(status.HTTP_422_UNPROCESSABLE_ENTITY, error, trace_id) from error
     except IntegrityError as error:
@@ -75,6 +78,8 @@ async def import_suppliers(
         return await ImportService(session).import_suppliers(request)
     except ImportReferenceNotFound as error:
         raise _http_error(status.HTTP_404_NOT_FOUND, error, trace_id) from error
+    except ImportIdempotencyConflict as error:
+        raise _http_error(status.HTTP_409_CONFLICT, error, trace_id) from error
     except IntegrityError as error:
         raise _database_error(
             status.HTTP_409_CONFLICT,
@@ -102,9 +107,7 @@ async def get_import(
 ) -> ImportResult:
     """Read an import run. The path identifier is the persisted DataSource ID."""
     try:
-        return await ImportService(session).get_import(
-            company_id=company_id, import_id=import_id
-        )
+        return await ImportService(session).get_import(company_id=company_id, import_id=import_id)
     except ImportRunNotFound as error:
         raise _http_error(status.HTTP_404_NOT_FOUND, error, trace_id) from error
     except SQLAlchemyError as error:

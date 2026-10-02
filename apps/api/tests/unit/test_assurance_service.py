@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from types import SimpleNamespace
@@ -457,6 +458,23 @@ def test_material_hashes_ignore_reseed_timestamps_but_bind_context_and_source_st
     assert (
         _hash(_source_state(dependencies, [requirement], [similarity_changed], event))
         != baseline_source
+    )
+
+
+@pytest.mark.parametrize("coverage", [{}, {"full_reporting_period": False}])
+def test_partial_hourly_measurement_cannot_support_a_period_total(coverage) -> None:
+    dependencies = replace(_dependencies(), measurement_coverage=coverage)
+    requirement = _requirement(evidence_rules={"fact_binding_required": True, "unit": "kgCO2e"})
+    requirement.claim_template = "Scope 2 emissions were {scope2_total}."
+    plan = _service()._plan_numeric_claim(
+        dependencies, requirement, (_evidence(),), {"scope2_total"}, {}
+    )
+    assert plan.support_status == "unsupported"
+    assert plan.rendered_text is None
+    assert "incomplete_reporting_period_coverage" in plan.validation_details["reasons"]
+    baseline = replace(dependencies, measurement_coverage={"full_reporting_period": True})
+    assert _hash(_base_context(baseline, [requirement])) != _hash(
+        _base_context(dependencies, [requirement])
     )
 
 

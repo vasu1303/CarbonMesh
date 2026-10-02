@@ -5,6 +5,7 @@ def test_requested_api_surface_is_registered() -> None:
     paths = app.openapi()["paths"]
     expected = {
         ("get", "/api/health"),
+        ("get", "/api/health/ready"),
         ("post", "/api/demo/reset"),
         ("get", "/api/semantic/metrics"),
         ("post", "/api/context/resolve"),
@@ -12,9 +13,12 @@ def test_requested_api_surface_is_registered() -> None:
         ("post", "/api/imports/suppliers"),
         ("get", "/api/imports/{import_id}"),
         ("get", "/api/quality/issues"),
+        ("patch", "/api/quality/issues/{issue_id}"),
         ("post", "/api/measurement/calculate"),
         ("get", "/api/measurements"),
         ("get", "/api/measurements/{measurement_id}"),
+        ("get", "/api/measurements/{measurement_id}/breakdown"),
+        ("get", "/api/approvals/{approval_id}"),
         ("post", "/api/sources/upload"),
         ("get", "/api/assurance/standards"),
         ("post", "/api/assurance/drafts"),

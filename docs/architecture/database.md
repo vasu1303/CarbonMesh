@@ -190,9 +190,9 @@ single-module run and the four-module path.
 | `variance_alerts` | Measurement-to-baseline variance, threshold and workflow state. |
 
 The Electricity Maps history adapter writes immutable, timestamped
-`grid_intensity_points` with source-document and evidence provenance. Exact
-timestamp alignment and calculation of hourly Scope 2 measurements remain
-application work.
+`grid_intensity_points` with source-document and evidence provenance. Hourly
+Scope 2 calculations reference exact timestamp-aligned grid-point IDs and
+persist coverage, versioned confidence, calculation hashes, and lineage.
 
 ### `ledger`
 
@@ -202,6 +202,11 @@ application work.
 | `lineage_edges` | Typed directed edge from a source ledger event to a derived event. |
 | `ledger_event_evidence` | Many-to-many event/evidence link with role; composite primary key. |
 | `fact_bindings` | Generic artifact placeholder bound to a ledger fact, value/display snapshot, evidence, context and binding hashes. |
+
+`fact_bindings.agent_run_id` is nullable: direct API commands persist the same
+artifact, ledger, evidence, context, and binding hashes without inventing an
+agent run. Existing databases with the old NOT NULL column need a reviewed
+operator transition or a fresh disposable bootstrap. Startup never applies DDL.
 
 PostgreSQL rejects UPDATE and DELETE on `ledger.ledger_events`. Corrections append
 a new event and use supersession/lineage; they never rewrite numerical truth.

@@ -69,6 +69,7 @@ from app.modules.ledger.service import (
     normalize_json,
     payload_sha256,
 )
+from app.modules.measurement.domain import sha256_payload as measurement_payload_hash
 from app.modules.sources.embedding import EMBEDDING_MODEL_ID, hash_embedding
 
 VALIDATION_METHOD_ID = "assurance-claim-validation-v1"
@@ -309,6 +310,8 @@ def _base_context(
             "status": dependencies.measurement.status,
             "output_hash": dependencies.measurement.output_hash,
             "formula": dependencies.measurement.formula,
+            "coverage": dependencies.measurement_coverage,
+            "calculation": dependencies.measurement_calculation,
         },
         "agent_run_id": dependencies.agent_run.id if dependencies.agent_run else None,
         "validation_method": VALIDATION_METHOD_ID,
@@ -1038,16 +1041,52 @@ class AssuranceService:
             raise AssuranceValidationError(
                 "Only a verified measurement with ledger lineage can support a draft."
             )
+        calculation = dependencies.measurement_calculation
+        if calculation is not None:
+            if (
+                calculation.get("status") != "completed"
+                or calculation.get("reporting_period_id") != period.id
+                or calculation.get("is_active") is not True
+                or calculation.get("effective_from") is None
+                or calculation["effective_from"] > period.end_date
+                or (
+                    calculation.get("effective_to") is not None
+                    and calculation["effective_to"] < period.start_date
+                )
+            ):
+                raise AssuranceValidationError(
+                    "The measurement calculation or its effective method is no longer valid."
+                )
+            method_changed = (
+                calculation.get("run_method_version") != calculation.get("method_version")
+                or calculation.get("run_code_version") != calculation.get("code_version")
+            )
+            frozen_method = calculation.get("frozen_method")
+            if frozen_method is not None:
+                current_method = {
+                    "method_definition_id": calculation["method_id"],
+                    "method_key": calculation["method_key"],
+                    "method_version": calculation["method_version"],
+                    "code_version": calculation["code_version"],
+                    "method_configuration": calculation["configuration"],
+                }
+                method_changed |= normalize_json(frozen_method) != normalize_json(current_method)
+            recorded_method_hash = calculation.get("recorded_method_hash")
+            if recorded_method_hash is not None:
+                method_changed |= recorded_method_hash != measurement_payload_hash({
+                    "key": calculation["method_key"],
+                    "version": calculation["method_version"],
+                    "configuration": calculation["configuration"],
+                })
+            if method_changed:
+                raise AssuranceValidationError(
+                    "The measurement method has changed since the verified calculation."
+                )
         fact_requirements = [
             item
             for item in requirements
             if item.evidence_rules.get("fact_binding_required") is True
         ]
-        if fact_requirements and dependencies.agent_run is None:
-            raise AssuranceValidationError(
-                "A persisted agent run is required to bind numerical disclosure facts.",
-                field_details={"agent_run_id": "required_for_fact_binding"},
-            )
         mismatched_metrics = [
             item.requirement_code
             for item in fact_requirements
@@ -1170,6 +1209,9 @@ class AssuranceService:
         unknown = placeholders - allowed
         expected_unit = requirement.evidence_rules.get("unit")
         reasons: list[str] = []
+        coverage = dependencies.measurement_coverage
+        if coverage is not None and coverage.get("full_reporting_period") is not True:
+            reasons.append("incomplete_reporting_period_coverage")
         if unknown or "scope2_total" not in placeholders:
             reasons.append("unbound_numeric_placeholder")
         if (
@@ -1313,13 +1355,12 @@ class AssuranceService:
         fact_binding_id = None
         if plan.fact_placeholder is not None:
             if (
-                dependencies.agent_run is None
-                or plan.fact_value_snapshot is None
+                plan.fact_value_snapshot is None
                 or plan.ledger_event_id is None
                 or plan.fact_display_value is None
             ):
                 raise AssuranceValidationError(
-                    "A numerical claim cannot be persisted without an agent run and fact."
+                    "A numerical claim cannot be persisted without a verified ledger fact."
                 )
             normalized_snapshot = normalize_json(plan.fact_value_snapshot)
             if not isinstance(normalized_snapshot, dict):
@@ -1352,7 +1393,7 @@ class AssuranceService:
                     artifact_type="disclosure_draft",
                     artifact_id=draft.id,
                     recommendation_id=None,
-                    agent_run_id=dependencies.agent_run.id,
+                    agent_run_id=dependencies.agent_run.id if dependencies.agent_run else None,
                     ledger_event_id=plan.ledger_event_id,
                     evidence_item_id=(plan.evidence[0].evidence.id if plan.evidence else None),
                     placeholder=plan.fact_placeholder,

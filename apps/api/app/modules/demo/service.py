@@ -9,7 +9,10 @@ from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.bootstrap import load_model_registry
-from app.db.models.core import Company
+from app.db.models.carbon import ActivityRecord, EmissionFactor
+from app.db.models.core import Company, DataSource
+from app.db.models.procurement import SupplierProduct
+from app.db.models.semantic import MetricDefinition
 from app.modules.demo.fixtures import (
     DEMO_COMPANY_ID,
     DEMO_PERIOD_ID,
@@ -42,11 +45,12 @@ def _truncate_statement() -> str:
         f'"{table.schema}"."{table.name}"'
         for table in sorted(metadata.tables.values(), key=lambda item: item.fullname)
     )
-    return f"TRUNCATE TABLE {qualified_tables} RESTART IDENTITY CASCADE"
+    return f"TRUNCATE TABLE {qualified_tables} RESTART IDENTITY RESTRICT"
 
 
 async def reset_and_seed_demo(session: AsyncSession) -> DemoResetSummary:
     """Atomically clear an all-synthetic database and install stable demo records."""
+    records = build_demo_records()
     async with session.begin():
         await session.execute(
             text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
@@ -55,23 +59,31 @@ async def reset_and_seed_demo(session: AsyncSession) -> DemoResetSummary:
         # Prevent a non-synthetic tenant insert from racing the safety check and
         # being removed by the following TRUNCATE.
         await session.execute(
-            text('LOCK TABLE "core"."companies" IN SHARE ROW EXCLUSIVE MODE')
+            text(
+                'LOCK TABLE "core"."companies", "core"."data_sources" '
+                'IN SHARE ROW EXCLUSIVE MODE'
+            )
         )
         non_synthetic_count = await session.scalar(
             select(func.count())
             .select_from(Company)
             .where(Company.is_synthetic.is_(False))
         )
-        if non_synthetic_count:
+        non_synthetic_sources = await session.scalar(
+            select(func.count())
+            .select_from(DataSource)
+            .where(DataSource.is_synthetic.is_(False))
+        )
+        if non_synthetic_count or non_synthetic_sources:
             raise DemoResetBlockedError(
-                "Demo reset is disabled while non-synthetic company data exists."
+                "Demo reset is disabled while non-synthetic companies or data sources exist."
             )
 
         await session.execute(text(_truncate_statement()))
         # Models intentionally do not expose cascading ORM relationships. Flush
         # the small fixture in declared dependency order so every FK target is
         # present before its dependent row, independent of mapper sort details.
-        for record in build_demo_records():
+        for record in records:
             session.add(record)
             await session.flush()
 
@@ -79,8 +91,8 @@ async def reset_and_seed_demo(session: AsyncSession) -> DemoResetSummary:
         company_id=DEMO_COMPANY_ID,
         site_id=DEMO_SITE_ID,
         reporting_period_id=DEMO_PERIOD_ID,
-        metric_count=9,
-        activity_record_count=1,
-        supplier_product_count=4,
-        emission_factor_count=1,
+        metric_count=sum(isinstance(record, MetricDefinition) for record in records),
+        activity_record_count=sum(isinstance(record, ActivityRecord) for record in records),
+        supplier_product_count=sum(isinstance(record, SupplierProduct) for record in records),
+        emission_factor_count=sum(isinstance(record, EmissionFactor) for record in records),
     )

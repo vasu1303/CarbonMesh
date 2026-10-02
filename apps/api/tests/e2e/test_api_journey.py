@@ -295,7 +295,7 @@ async def test_all_requested_apis_as_one_synthetic_journey(
                 "decision": "approve",
                 "preview_hash": preview_hash,
                 "actor_id": str(ids.approver_id),
-                "decision_note": "The note is ignored on an idempotent replay.",
+                "decision_note": "Approved in the synthetic API journey.",
             },
         )
         assert replay_response.status_code == 200
@@ -325,6 +325,7 @@ async def test_all_requested_apis_as_one_synthetic_journey(
             params={**company_params, "site_id": str(ids.site_id)},
             json={
                 "zone": "IN",
+                "mode": "live",
                 "start": "2026-09-29T00:00:00Z",
                 "end": "2026-09-29T02:00:00Z",
                 "disable_estimations": False,

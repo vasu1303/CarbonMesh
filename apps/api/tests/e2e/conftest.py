@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
+from sqlalchemy.types import TypeEngine
 
 import app.db.models.ai
 import app.db.models.assurance
@@ -32,6 +33,7 @@ import app.db.models.procurement
 import app.db.models.semantic
 from app.db.base import Base
 from app.db.ddl import APPLICATION_SCHEMAS, install_database_objects
+from app.db.models.core import EvidenceItem
 from app.db.session import normalize_database_url
 from app.dependencies.database import get_db_session_factory
 from app.main import app
@@ -174,12 +176,32 @@ def _portable_test_metadata() -> MetaData:
     return metadata
 
 
+def _set_test_embedding_type(column_type: TypeEngine) -> None:
+    """Keep ORM comparator caches aligned with the temporary test storage type."""
+    attribute = EvidenceItem.embedding
+    column = EvidenceItem.__table__.c.embedding
+    column.type = column_type
+    column._reset_memoizations()
+    # Unit tests may have already memoized an annotated VECTOR column. Merely
+    # replacing Table.c.embedding.type leaves its cosine operator cached on the
+    # ORM comparator, producing an invalid ARRAY <=> parameter query in E2E.
+    for owner, name in (
+        (attribute.comparator, "__clause_element__"),
+        (attribute.comparator, "expressions"),
+        (attribute, "expression"),
+    ):
+        try:
+            delattr(owner, name)
+        except AttributeError:
+            pass
+
+
 @pytest_asyncio.fixture
 async def e2e_context(e2e_database: DatabaseProcess) -> AsyncIterator[E2EContext]:
     """Create tables and arrange test-only prerequisites in a disposable database."""
 
     original_vector_type = Base.metadata.tables["core.evidence_items"].c.embedding.type
-    Base.metadata.tables["core.evidence_items"].c.embedding.type = ARRAY(Float)
+    _set_test_embedding_type(ARRAY(Float))
     engine = create_async_engine(
         e2e_database.url,
         connect_args=e2e_database.connect_args,
@@ -205,7 +227,7 @@ async def e2e_context(e2e_database: DatabaseProcess) -> AsyncIterator[E2EContext
         yield E2EContext(engine=engine, session_factory=session_factory, ids=ids)
     finally:
         await engine.dispose()
-        Base.metadata.tables["core.evidence_items"].c.embedding.type = original_vector_type
+        _set_test_embedding_type(original_vector_type)
 
 
 @pytest_asyncio.fixture

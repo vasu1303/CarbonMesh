@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import asdict, replace
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from types import SimpleNamespace
@@ -168,16 +168,7 @@ class FakeMeasurementRepository:
             started_at=datetime(2026, 9, 30, tzinfo=UTC),
             completed_at=datetime(2026, 9, 30, tzinfo=UTC),
             summary={
-                "confidence": {
-                    "source_quality": str(plan.confidence.source_quality),
-                    "factor_specificity": str(plan.confidence.factor_specificity),
-                    "factor_recency": str(plan.confidence.factor_recency),
-                    "record_completeness": str(plan.confidence.record_completeness),
-                    "overall": str(plan.confidence.overall),
-                    "weights": {
-                        name: str(value) for name, value in plan.confidence.weights.items()
-                    },
-                },
+                "confidence": asdict(plan.confidence),
                 "baseline": None,
             },
         )

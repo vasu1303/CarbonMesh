@@ -7,7 +7,7 @@ from sqlalchemy import func, select
 
 from app.db.models.core import Approval, DataSource, SourceDocument
 from app.db.models.dispatch import DispatchRecommendation, DispatchScenario, GridForecast
-from app.db.models.ledger import LedgerEvent, LedgerEventEvidence, LineageEdge
+from app.db.models.ledger import FactBinding, LedgerEvent, LedgerEventEvidence, LineageEdge
 from tests.e2e.conftest import E2EContext
 
 
@@ -141,6 +141,10 @@ async def test_dispatch_api_vertical_slice_is_deterministic_and_advisory(
     assert replayed_infeasible.json() == infeasible_optimization.json()
 
     async with e2e_context.session_factory() as session:
+        bindings = list((await session.scalars(select(FactBinding))).all())
+        assert len(bindings) == 4
+        assert all(binding.agent_run_id is None for binding in bindings)
+        assert all(binding.binding_hash and binding.context_hash for binding in bindings)
         assert await session.scalar(select(func.count()).select_from(GridForecast)) == 24
         assert await session.scalar(select(func.count()).select_from(SourceDocument)) == 2
         assert await session.scalar(select(func.count()).select_from(DataSource)) == 2

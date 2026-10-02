@@ -1,6 +1,6 @@
 # CarbonMesh Project Context
 
-Last updated: 2026-10-01
+Last updated: 2026-10-02
 
 ## Authoritative context
 
@@ -100,33 +100,41 @@ confirmed disposable target with rollback available.
 
 ## Current implementation snapshot
 
-The audited repository is a strong two-module application baseline on top of
-the implemented four-module database contract:
+The backend now exposes deterministic services across all four modules on the
+46-table database contract. The agent runtime and frontend remain incomplete:
 
-- CSV/JSON activity and supplier imports with raw rows, checksums, typed issues,
-  and deterministic normalization.
-- Purchased-material Measurement with factor resolution, `Decimal` formulas,
-  confidence, variance, evidence, ledger, lineage, and audit.
+- CSV/JSON material, hourly electricity, and supplier imports with raw rows,
+  checksums, idempotency, typed issues, and audited resolve/waive decisions.
+- Purchased-material and exact-hour Scope 2 Measurement with versioned
+  confidence, coverage, breakdown, evidence, ledger, lineage, and audit.
+- Assurance standards, atomic claims, retrieval, citation/gap validation,
+  exact previews, and unsupported/partial-period claim blocking.
 - Procurement with hard constraints, deterministic scoring, impact, fact-bound
   narrative, stale-preview validation, and idempotent approval.
 - Persistent agent run snapshots and replayable SSE.
-- Electricity Maps historical adapter and immutable response evidence.
+- Fixture/live grid history and Dispatch forecasts with immutable evidence;
+  deterministic advisory Dispatch under frozen hard constraints.
+- Generic approval list/detail/decision and persistent fact bindings for
+  Assurance, Procurement, and Dispatch, including direct non-agent commands.
 - Provider-neutral LLM HTTP wrappers.
-- Safe synthetic reset/seed for the prior Nova packaging scenario.
+- Atomic Maverick reset/seed that rejects non-synthetic companies and sources.
+- Process health and read-only complete database-contract readiness.
 - Exact 46-table/eight-schema SQLAlchemy model and clean bootstrap verifier.
 - Tenant-scoped ledger event search/detail with bounded immediate lineage.
 
 Still missing for the target architecture:
 
-- Hourly Scope 2 calculation and timestamped grid-point use.
-- Assurance services/RAG/citation validation and approval; its tables now exist.
-- Dispatch forecast/optimizer/recommendation and approval; its tables now exist.
-- Generic approvals and fact binding across all three consequential modules.
 - Five LangGraph graphs, live model use, 24 tools, checkpoint/resume, and real
   model telemetry.
-- Maverick fixtures, forecast/history fixture parity, golden replay, and 12
-  release-blocking journeys.
-- Complete target API operations, browser E2E, OpenTelemetry, and submission assets.
+- One four-module agent-orchestrated run and all 12 release-blocking journeys.
+- Complete frontend screens, remaining target API operations, browser E2E,
+  OpenTelemetry, and submission assets.
+
+Hourly fixture coverage is 90 days, while Q3 contains 92 days. Missing/duplicate
+intervals and partial-period disclosure support fail closed. Existing databases
+must match the nullable `ledger.fact_bindings.agent_run_id` contract; use the
+read-only readiness check and a reviewed operator change or fresh disposable
+bootstrap. Application startup never updates schemas.
 
 Audit baseline on 2026-10-01:
 

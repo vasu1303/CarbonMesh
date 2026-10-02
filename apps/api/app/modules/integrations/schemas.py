@@ -35,6 +35,7 @@ class ElectricityMapsTestResult(BaseModel):
 class GridIntensitySyncRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    mode: Literal["fixture", "live"] = "fixture"
     zone: str | None = Field(default=None, min_length=2, max_length=100)
     start: datetime | None = None
     end: datetime | None = None

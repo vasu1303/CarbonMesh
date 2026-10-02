@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import UTC, date, datetime
+from collections import Counter
+from datetime import UTC, date, datetime, timedelta
 from decimal import ROUND_HALF_EVEN, Decimal, InvalidOperation, localcontext
 from typing import Any
 from uuid import UUID, uuid4
@@ -21,6 +22,8 @@ from app.modules.imports.schemas import (
     ActivityRow,
     DataQualityIssueList,
     DataQualityIssueRead,
+    DataQualityIssueUpdate,
+    HourlyElectricityRow,
     ImportResult,
     SupplierImportRequest,
     SupplierProductRow,
@@ -54,6 +57,7 @@ _MASS_TO_KG = {
     "metric tonne": Decimal(1000),
     "metric tonnes": Decimal(1000),
 }
+_ENERGY_TO_KWH = {"wh": Decimal("0.001"), "kwh": Decimal(1), "mwh": Decimal(1000)}
 
 
 class ImportServiceError(RuntimeError):
@@ -76,6 +80,22 @@ class ImportRunNotFound(ImportServiceError):
     code = "import_not_found"
 
 
+class ImportIdempotencyConflict(ImportServiceError):
+    code = "import_idempotency_conflict"
+
+
+class QualityIssueNotFound(ImportServiceError):
+    code = "quality_issue_not_found"
+
+
+class QualityIssueConflict(ImportServiceError):
+    code = "quality_issue_conflict"
+
+
+class QualityIssueForbidden(ImportServiceError):
+    code = "quality_issue_forbidden"
+
+
 class UnsupportedUnitConversion(ValueError):
     """The source and canonical units do not have an allowlisted conversion."""
 
@@ -96,25 +116,53 @@ class ImportService:
         self.repository = repository or ImportRepository(session)
 
     async def import_activity(self, request: ActivityImportRequest) -> ImportResult:
+        try:
+            replay = await self._replay_import(request, "activity")
+            if replay is not None:
+                return replay
+            return await self._import_activity(request)
+        except Exception:
+            await self.session.rollback()
+            raise
+
+    async def _import_activity(self, request: ActivityImportRequest) -> ImportResult:
         period, metric = await self._validate_activity_context(request)
+        hourly = metric.key == "activity.electricity_consumption"
         payload_bytes = document_bytes(request.content)
         checksum = _sha256(payload_bytes)
-        source = await self._create_source(
-            company_id=request.company_id,
-            site_id=request.site_id,
-            source_name=request.source_name,
-            source_type=_source_type(request.content_type),
-            external_reference=request.external_reference,
-            import_type="activity",
-            filename=request.filename,
-            checksum=checksum,
-            is_synthetic=request.is_synthetic,
-        )
-        issues: list[DataQualityIssue] = []
-
         duplicate_document = await self.repository.find_document_by_checksum(
             request.company_id, checksum
         )
+        source = None
+        document = None
+        if duplicate_document is not None and hourly:
+            source = await self._claim_pending_hourly_document(request, duplicate_document)
+            if source is not None:
+                document = duplicate_document
+                duplicate_document = None
+        if source is None:
+            source = await self._create_source(
+                company_id=request.company_id,
+                site_id=request.site_id,
+                source_name=request.source_name,
+                source_type=_source_type(request.content_type),
+                external_reference=request.external_reference,
+                import_type="activity",
+                filename=request.filename,
+                checksum=checksum,
+                is_synthetic=request.is_synthetic,
+                idempotency_key=request.idempotency_key,
+                request_hash=_import_request_hash(request),
+            )
+        issues: list[DataQualityIssue] = []
+        source.configuration = {
+            **source.configuration,
+            "activity_kind": "hourly_electricity" if hourly else "purchased_material",
+            "site_id": str(request.site_id),
+            "reporting_period_id": str(request.reporting_period_id),
+            "metric_definition_id": str(request.metric_definition_id),
+        }
+
         if duplicate_document is not None:
             issues.append(
                 await self._create_general_issue(
@@ -133,14 +181,15 @@ class ImportService:
                 issues=issues,
             )
 
-        document = await self._create_document(
-            source=source,
-            filename=request.filename,
-            content_type=request.content_type,
-            checksum=checksum,
-            payload_bytes=payload_bytes,
-            import_type="activity",
-        )
+        if document is None:
+            document = await self._create_document(
+                source=source,
+                filename=request.filename,
+                content_type=request.content_type,
+                checksum=checksum,
+                payload_bytes=payload_bytes,
+                import_type="activity",
+            )
         if request.checksum is not None and request.checksum != checksum:
             issues.append(
                 await self._create_general_issue(
@@ -235,13 +284,34 @@ class ImportService:
                 issues=issues,
             )
 
+        hourly_rows: dict[int, HourlyElectricityRow] = {}
+        existing_timestamps: set[datetime] = set()
+        if hourly:
+            for index, raw_row in enumerate(parsed.records):
+                try:
+                    hourly_rows[index] = HourlyElectricityRow.model_validate(raw_row)
+                except ValidationError:
+                    pass  # Persist the raw row and its typed validation errors below.
+            existing = await self.repository.list_hourly_activity_payloads(
+                company_id=request.company_id,
+                site_id=request.site_id,
+                reporting_period_id=request.reporting_period_id,
+                metric_definition_id=request.metric_definition_id,
+            )
+            for payload in existing:
+                try:
+                    existing_timestamps.add(HourlyElectricityRow.model_validate(payload).timestamp)
+                except ValidationError as error:
+                    raise InvalidImportContext(
+                        "Existing hourly activity has an invalid timestamp or quantity."
+                    ) from error
+        timestamp_counts = Counter(row.timestamp for row in hourly_rows.values())
+        accepted_timestamps = set(existing_timestamps)
         accepted_count = 0
         rejected_count = 0
         seen_row_keys: set[str] = set()
         persisted_row_keys: set[str] = set()
-        for row_number, raw_row in zip(
-            parsed.row_numbers, parsed.records, strict=True
-        ):
+        for row_number, raw_row in zip(parsed.row_numbers, parsed.records, strict=True):
             row_checksum = _row_checksum(raw_row)
             requested_row_key = str(raw_row.get("row_key") or row_checksum).strip()
             safe_row_key = _safe_row_key(requested_row_key, row_checksum, row_number)
@@ -286,13 +356,35 @@ class ImportService:
                 continue
 
             try:
-                row = ActivityRow.model_validate(raw_row)
+                row = (
+                    HourlyElectricityRow.model_validate(raw_row)
+                    if hourly
+                    else ActivityRow.model_validate(raw_row)
+                )
             except ValidationError as error:
                 issues.extend(
                     await self._create_validation_issues(
                         source=source,
                         raw_record=raw_record,
                         error=error,
+                    )
+                )
+                raw_record.import_status = "rejected"
+                rejected_count += 1
+                continue
+
+            if isinstance(row, HourlyElectricityRow) and (
+                timestamp_counts[row.timestamp] > 1 or row.timestamp in existing_timestamps
+            ):
+                issues.append(
+                    await self._create_row_issue(
+                        source=source,
+                        raw_record=raw_record,
+                        code="duplicate_timestamp",
+                        issue_type="duplicate",
+                        field_name="timestamp",
+                        message="The UTC hourly interval is duplicated in the selected context.",
+                        details={"timestamp": row.timestamp.isoformat()},
                     )
                 )
                 raw_record.import_status = "rejected"
@@ -313,9 +405,7 @@ class ImportService:
                 rejected_count += 1
                 continue
 
-            normalized_quantity = normalize_quantity(
-                row.quantity, row.unit, metric.canonical_unit
-            )
+            normalized_quantity = normalize_quantity(row.quantity, row.unit, metric.canonical_unit)
             activity = await self.repository.create_activity(
                 company_id=request.company_id,
                 raw_activity_record_id=raw_record.id,
@@ -342,6 +432,53 @@ class ImportService:
                 raise RuntimeError("Validated supplier product material changed during import.")
             raw_record.import_status = "accepted"
             accepted_count += 1
+            if isinstance(row, HourlyElectricityRow):
+                accepted_timestamps.add(row.timestamp)
+
+        if hourly:
+            observed = [
+                row.timestamp
+                for row in hourly_rows.values()
+                if period.start_date <= row.timestamp.date() <= period.end_date
+            ]
+            interval_start = request.interval_start or (min(observed) if observed else None)
+            interval_end = request.interval_end or (
+                max(observed) + timedelta(hours=1) if observed else None
+            )
+            if interval_start is not None and interval_end is not None:
+                source.configuration = {
+                    **source.configuration,
+                    "interval_start": interval_start.isoformat(),
+                    "interval_end": interval_end.isoformat(),
+                    "expected_intervals": int(
+                        (interval_end - interval_start).total_seconds() // 3600
+                    ),
+                }
+                next_expected = interval_start
+                gaps: list[tuple[datetime, datetime]] = []
+                for timestamp in sorted(
+                    value for value in accepted_timestamps if interval_start <= value < interval_end
+                ):
+                    if timestamp > next_expected:
+                        gaps.append((next_expected, timestamp))
+                    next_expected = timestamp + timedelta(hours=1)
+                if next_expected < interval_end:
+                    gaps.append((next_expected, interval_end))
+                for gap_start, gap_end in gaps:
+                    issues.append(
+                        await self._create_general_issue(
+                            source=source,
+                            code="missing_interval",
+                            issue_type="completeness",
+                            field_name="timestamp",
+                            message="The hourly activity interval is incomplete; no values were inferred.",
+                            details={
+                                "interval_start": gap_start.isoformat(),
+                                "interval_end": gap_end.isoformat(),
+                                "missing_count": int((gap_end - gap_start).total_seconds() // 3600),
+                            },
+                        )
+                    )
 
         return await self._finish_import(
             source=source,
@@ -352,10 +489,18 @@ class ImportService:
         )
 
     async def import_suppliers(self, request: SupplierImportRequest) -> ImportResult:
+        try:
+            replay = await self._replay_import(request, "suppliers")
+            if replay is not None:
+                return replay
+            return await self._import_suppliers(request)
+        except Exception:
+            await self.session.rollback()
+            raise
+
+    async def _import_suppliers(self, request: SupplierImportRequest) -> ImportResult:
         if not await self.repository.company_exists(request.company_id):
-            raise ImportReferenceNotFound(
-                "The company does not exist.", field_name="company_id"
-            )
+            raise ImportReferenceNotFound("The company does not exist.", field_name="company_id")
 
         payload_bytes = document_bytes(request.content)
         checksum = _sha256(payload_bytes)
@@ -369,6 +514,8 @@ class ImportService:
             filename=request.filename,
             checksum=checksum,
             is_synthetic=request.is_synthetic,
+            idempotency_key=request.idempotency_key,
+            request_hash=_import_request_hash(request),
         )
         issues: list[DataQualityIssue] = []
 
@@ -500,9 +647,7 @@ class ImportService:
         seen_products: set[tuple[str, str]] = set()
         seen_locators: set[str] = set()
         supplier_cache: dict[str, Supplier] = {}
-        for row_number, raw_row in zip(
-            parsed.row_numbers, parsed.records, strict=True
-        ):
+        for row_number, raw_row in zip(parsed.row_numbers, parsed.records, strict=True):
             try:
                 row = SupplierProductRow.model_validate(raw_row)
             except ValidationError as error:
@@ -585,9 +730,7 @@ class ImportService:
 
             supplier = supplier_cache.get(row.supplier_code)
             if supplier is None:
-                supplier = await self.repository.get_supplier(
-                    request.company_id, row.supplier_code
-                )
+                supplier = await self.repository.get_supplier(request.company_id, row.supplier_code)
                 if supplier is None:
                     supplier = await self.repository.create_supplier(
                         company_id=request.company_id,
@@ -681,9 +824,7 @@ class ImportService:
                 recycled_content_pct=row.recycled_content_pct.quantize(
                     _FOUR_PLACES, rounding=ROUND_HALF_EVEN
                 ),
-                recyclable_pct=row.recyclable_pct.quantize(
-                    _FOUR_PLACES, rounding=ROUND_HALF_EVEN
-                ),
+                recyclable_pct=row.recyclable_pct.quantize(_FOUR_PLACES, rounding=ROUND_HALF_EVEN),
                 evidence_quality_score=row.evidence_quality_score.quantize(
                     _FOUR_PLACES, rounding=ROUND_HALF_EVEN
                 ),
@@ -703,6 +844,66 @@ class ImportService:
             rejected_count=rejected_count,
             issues=issues,
         )
+
+    async def _claim_pending_hourly_document(
+        self, request: ActivityImportRequest, document: SourceDocument
+    ) -> DataSource | None:
+        """Consume a declared, unprocessed synthetic fixture once under the document lock."""
+        if (
+            not request.is_synthetic
+            or document.content_type != request.content_type
+            or (request.checksum is not None and request.checksum != document.checksum)
+        ):
+            return None
+        source = await self.repository.get_data_source(request.company_id, document.data_source_id)
+        if source is None or not source.is_synthetic or source.site_id != request.site_id:
+            return None
+        configuration = source.configuration
+        if not (
+            configuration.get("import_type") == "hourly_electricity"
+            and configuration.get("import_status") == "pending"
+            and configuration.get("reporting_period_id") == str(request.reporting_period_id)
+            and configuration.get("metric_definition_id") == str(request.metric_definition_id)
+        ):
+            return None
+        if await self.repository.has_raw_rows_for_document(request.company_id, document.id):
+            return None
+        source.configuration = {
+            **configuration,
+            "import_type": "activity",
+            "import_status": "processing",
+            "source_name": request.source_name,
+            "filename": request.filename,
+            "document_checksum": document.checksum,
+            "accepted_count": 0,
+            "rejected_count": 0,
+            "issue_count": 0,
+            "idempotency_key": request.idempotency_key,
+            "request_hash": _import_request_hash(request),
+        }
+        return source
+
+    async def _replay_import(
+        self, request: ActivityImportRequest | SupplierImportRequest, import_type: str
+    ) -> ImportResult | None:
+        if request.idempotency_key is None:
+            return None
+        lock_bytes = hashlib.sha256(
+            f"{request.company_id}:{import_type}:{request.idempotency_key}".encode()
+        ).digest()[:8]
+        await self.repository.lock_import_key(int.from_bytes(lock_bytes, "big", signed=True))
+        existing = await self.repository.find_import_by_key(
+            request.company_id, import_type, request.idempotency_key
+        )
+        if existing is None:
+            return None
+        if existing.configuration.get("request_hash") != _import_request_hash(request):
+            raise ImportIdempotencyConflict(
+                "The idempotency key is already bound to a different import payload."
+            )
+        result = await self.get_import(company_id=request.company_id, import_id=existing.id)
+        await self.session.commit()
+        return result
 
     async def get_import(self, *, company_id: UUID, import_id: UUID) -> ImportResult:
         source = await self.repository.get_data_source(company_id, import_id)
@@ -728,9 +929,7 @@ class ImportService:
         offset: int = 0,
     ) -> DataQualityIssueList:
         if not await self.repository.company_exists(company_id):
-            raise ImportReferenceNotFound(
-                "The company does not exist.", field_name="company_id"
-            )
+            raise ImportReferenceNotFound("The company does not exist.", field_name="company_id")
         rows, total = await self.repository.list_issues(
             company_id=company_id,
             status=status,
@@ -748,13 +947,70 @@ class ImportService:
             offset=offset,
         )
 
+    async def update_data_quality_issue(
+        self,
+        issue_id: UUID,
+        request: DataQualityIssueUpdate,
+        *,
+        trace_id: str | None = None,
+    ) -> DataQualityIssueRead:
+        """Record a human review; rejected input never becomes valid by review alone."""
+        try:
+            issue = await self.repository.get_issue_for_update(request.company_id, issue_id)
+            if issue is None:
+                raise QualityIssueNotFound("The requested data-quality issue does not exist.")
+            actor = await self.repository.get_actor(request.company_id, request.actor_id)
+            if actor is None or actor.role not in {"sustainability_analyst", "approver"}:
+                raise QualityIssueForbidden(
+                    "An active sustainability analyst or approver must review this issue."
+                )
+            decision = {
+                "status": request.status,
+                "actor_id": str(request.actor_id),
+                "decision_note": request.decision_note,
+            }
+            previous_decision = issue.details.get("review")
+            if issue.status != "open":
+                if previous_decision == decision:
+                    result = _to_issue_read(issue)
+                    await self.session.commit()
+                    return result
+                raise QualityIssueConflict("The issue already has a different review decision.")
+            if request.status == "waived" and issue.severity == "error":
+                raise QualityIssueConflict(
+                    "Blocking errors cannot be waived; correct the source data and resolve the issue."
+                )
+            previous_status = issue.status
+            issue.status = request.status
+            issue.updated_at = datetime.now(UTC)
+            issue.details = {
+                **issue.details,
+                "review": decision,
+                "reviewed_at": issue.updated_at.isoformat(),
+                "data_validity_unchanged": True,
+            }
+            await self.repository.create_audit_log(
+                company_id=request.company_id,
+                actor_id=request.actor_id,
+                action=f"data_quality.{request.status}",
+                entity_type="data_quality_issue",
+                entity_id=issue.id,
+                trace_id=trace_id or f"quality:{issue.id}",
+                details={"previous_status": previous_status, **decision},
+            )
+            await self.session.flush()
+            result = _to_issue_read(issue)
+            await self.session.commit()
+            return result
+        except Exception:
+            await self.session.rollback()
+            raise
+
     async def _validate_activity_context(
         self, request: ActivityImportRequest
     ) -> tuple[ReportingPeriod, MetricDefinition]:
         if not await self.repository.company_exists(request.company_id):
-            raise ImportReferenceNotFound(
-                "The company does not exist.", field_name="company_id"
-            )
+            raise ImportReferenceNotFound("The company does not exist.", field_name="company_id")
         site = await self.repository.get_site(request.company_id, request.site_id)
         if site is None or not site.is_active:
             raise ImportReferenceNotFound(
@@ -776,14 +1032,30 @@ class ImportService:
                 "The active metric definition does not exist for this company.",
                 field_name="metric_definition_id",
             )
-        if (
-            metric.key != "activity.purchased_material_mass"
-            or _normalize_unit(metric.canonical_unit) not in {"kg", "kilogram", "kilograms"}
-        ):
+        is_material = metric.key == "activity.purchased_material_mass" and _normalize_unit(
+            metric.canonical_unit
+        ) in {"kg", "kilogram", "kilograms"}
+        is_electricity = (
+            metric.key == "activity.electricity_consumption"
+            and _normalize_unit(metric.canonical_unit) == "kwh"
+        )
+        if not (is_material or is_electricity):
             raise InvalidImportContext(
-                "Activity imports require the purchased-material mass metric in canonical kg.",
+                "Activity imports require the purchased-material mass metric in canonical kg "
+                "or the hourly electricity consumption metric in canonical kWh.",
                 field_name="metric_definition_id",
             )
+        if request.interval_start is not None:
+            if not is_electricity:
+                raise InvalidImportContext(
+                    "Hourly interval bounds are only supported for electricity activity."
+                )
+            assert request.interval_end is not None
+            if not (
+                period.start_date <= request.interval_start.date()
+                and (request.interval_end - timedelta(microseconds=1)).date() <= period.end_date
+            ):
+                raise InvalidImportContext("The hourly interval is outside the reporting period.")
         return period, metric
 
     async def _validate_activity_row(
@@ -845,8 +1117,7 @@ class ImportService:
                     code="unsupported_unit",
                     issue_type="validation",
                     message=(
-                        f"Unit {row.unit!r} cannot be normalized to "
-                        f"{metric.canonical_unit!r}."
+                        f"Unit {row.unit!r} cannot be normalized to {metric.canonical_unit!r}."
                     ),
                     field_name="unit",
                 )
@@ -862,6 +1133,37 @@ class ImportService:
                     field_name="quantity",
                 )
             )
+
+        if isinstance(row, HourlyElectricityRow):
+            if (
+                request.interval_start is not None
+                and request.interval_end is not None
+                and not (request.interval_start <= row.timestamp < request.interval_end)
+            ):
+                issues.append(
+                    await self._create_row_issue(
+                        source=source,
+                        raw_record=raw_record,
+                        code="timestamp_outside_interval",
+                        issue_type="validation",
+                        message="The timestamp is outside the declared hourly import interval.",
+                        field_name="timestamp",
+                    )
+                )
+            if row.site_code is not None:
+                site = await self.repository.get_site(request.company_id, request.site_id)
+                if site is None or row.site_code != site.code:
+                    issues.append(
+                        await self._create_row_issue(
+                            source=source,
+                            raw_record=raw_record,
+                            code="context_mismatch",
+                            issue_type="reference",
+                            message="Row site_code does not match the frozen import context.",
+                            field_name="site_code",
+                        )
+                    )
+            return issues, None
 
         product = await self._resolve_activity_product(request.company_id, row)
         has_product_reference = row.supplier_product_id is not None or row.supplier_code is not None
@@ -928,6 +1230,8 @@ class ImportService:
         filename: str,
         checksum: str,
         is_synthetic: bool,
+        idempotency_key: str | None = None,
+        request_hash: str | None = None,
     ) -> DataSource:
         unique_name = f"{source_name[:140]} [{uuid4().hex[:12]}]"
         return await self.repository.create_data_source(
@@ -945,6 +1249,8 @@ class ImportService:
                 "accepted_count": 0,
                 "rejected_count": 0,
                 "issue_count": 0,
+                "idempotency_key": idempotency_key,
+                "request_hash": request_hash,
             },
             is_synthetic=is_synthetic,
         )
@@ -985,6 +1291,7 @@ class ImportService:
     ) -> DataQualityIssue:
         issue_details = {
             "import_id": str(source.id),
+            **_hourly_issue_context(source),
             **(details or {}),
         }
         return await self.repository.create_issue(
@@ -1019,6 +1326,7 @@ class ImportService:
             details={
                 "import_id": str(source.id),
                 "row_number": raw_record.row_number,
+                **_hourly_issue_context(source),
                 **(details or {}),
             },
         )
@@ -1034,9 +1342,7 @@ class ImportService:
         for item in error.errors(include_input=False, include_context=False):
             field_name = _validation_field(item.get("loc", ()))
             code = (
-                "missing_required_field"
-                if item.get("type") == "missing"
-                else "invalid_field_value"
+                "missing_required_field" if item.get("type") == "missing" else "invalid_field_value"
             )
             issues.append(
                 await self._create_row_issue(
@@ -1062,9 +1368,7 @@ class ImportService:
         for item in error.errors(include_input=False, include_context=False):
             field_name = _validation_field(item.get("loc", ()))
             code = (
-                "missing_required_field"
-                if item.get("type") == "missing"
-                else "invalid_field_value"
+                "missing_required_field" if item.get("type") == "missing" else "invalid_field_value"
             )
             issues.append(
                 await self._create_general_issue(
@@ -1121,7 +1425,7 @@ class ImportService:
 
 
 def normalize_quantity(quantity: Decimal, source_unit: str, canonical_unit: str) -> Decimal:
-    """Normalize a mass quantity with Decimal-only arithmetic."""
+    """Normalize allowlisted mass or energy units with Decimal-only arithmetic."""
     source_key = _normalize_unit(source_unit)
     target_key = _normalize_unit(canonical_unit)
     with localcontext() as context:
@@ -1129,9 +1433,10 @@ def normalize_quantity(quantity: Decimal, source_unit: str, canonical_unit: str)
         if source_key == target_key:
             normalized = quantity
         else:
-            if source_key not in _MASS_TO_KG or target_key not in _MASS_TO_KG:
+            conversions = _ENERGY_TO_KWH if target_key in _ENERGY_TO_KWH else _MASS_TO_KG
+            if source_key not in conversions or target_key not in conversions:
                 raise UnsupportedUnitConversion("Unsupported unit conversion")
-            normalized = quantity * _MASS_TO_KG[source_key] / _MASS_TO_KG[target_key]
+            normalized = quantity * conversions[source_key] / conversions[target_key]
         try:
             quantized = normalized.quantize(_SIX_PLACES, rounding=ROUND_HALF_EVEN)
         except InvalidOperation as error:
@@ -1139,16 +1444,28 @@ def normalize_quantity(quantity: Decimal, source_unit: str, canonical_unit: str)
                 "Normalized quantity is outside Numeric(24,6)."
             ) from error
     if quantized.copy_abs() >= Decimal(10) ** 18:
-        raise NormalizedQuantityOutOfRange(
-            "Normalized quantity is outside Numeric(24,6)."
-        )
+        raise NormalizedQuantityOutOfRange("Normalized quantity is outside Numeric(24,6).")
     return quantized
 
 
+def _hourly_issue_context(source: DataSource) -> dict[str, Any]:
+    if source.configuration.get("activity_kind") != "hourly_electricity":
+        return {}
+    return {
+        "blocks_verification": True,
+        "activity_kind": "hourly_electricity",
+        "site_id": source.configuration["site_id"],
+        "reporting_period_id": source.configuration["reporting_period_id"],
+        "metric_definition_id": source.configuration["metric_definition_id"],
+    }
+
+
+def _import_request_hash(request: ActivityImportRequest | SupplierImportRequest) -> str:
+    return _row_checksum(request.model_dump(mode="json", exclude={"idempotency_key"}))
+
+
 def _normalize_unit(value: str) -> str:
-    return " ".join(
-        value.strip().casefold().replace("_", " ").replace("-", " ").split()
-    )
+    return " ".join(value.strip().casefold().replace("_", " ").replace("-", " ").split())
 
 
 def _source_type(content_type: str) -> str:

@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 MeasurementStatus = Literal["draft", "verified", "superseded", "unsupported"]
 MeasurementTerminalState = Literal[
@@ -39,10 +39,29 @@ class MeasurementCalculateRequest(StrictSchema):
         "measurement.scope3.category1.mass_factor"
     )
     geography: Annotated[str | None, Field(min_length=2, max_length=100)] = None
-    activity_record_ids: Annotated[list[UUID] | None, Field(min_length=1, max_length=500)] = None
+    activity_record_ids: Annotated[list[UUID] | None, Field(min_length=1, max_length=3000)] = None
+    grid_zone: Annotated[str | None, Field(min_length=1, max_length=100)] = None
+    grid_method_version: Annotated[str | None, Field(min_length=1, max_length=100)] = None
     actor_id: UUID | None = None
     agent_run_id: UUID | None = None
     trace_id: Annotated[str | None, Field(min_length=1, max_length=100)] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def scope2_defaults(cls, value: object) -> object:
+        if not isinstance(value, dict):
+            return value
+        if (
+            value.get("activity_metric_key") == "activity.electricity_consumption"
+            or value.get("output_metric_key") == "emissions.scope2.location_based"
+            or value.get("method_key") == "measurement.scope2.location_based.hourly"
+        ):
+            value = dict(value)
+            value.setdefault("activity_metric_key", "activity.electricity_consumption")
+            value.setdefault("output_metric_key", "emissions.scope2.location_based")
+            value.setdefault("method_key", "measurement.scope2.location_based.hourly")
+            value.setdefault("material_code", "ELECTRICITY")
+        return value
 
     @field_validator(
         "material_code",
@@ -51,6 +70,8 @@ class MeasurementCalculateRequest(StrictSchema):
         "method_key",
         "geography",
         "trace_id",
+        "grid_zone",
+        "grid_method_version",
         mode="before",
     )
     @classmethod
@@ -103,7 +124,9 @@ class MeasurementInput(StrictSchema):
     activity_date: date | None
     source_quantity: NonNegativeDecimal
     source_unit: str
-    normalized_quantity_kg: NonNegativeDecimal
+    normalized_quantity_kg: NonNegativeDecimal | None = None
+    normalized_quantity_kwh: NonNegativeDecimal | None = None
+    interval_start: datetime | None = None
     record_completeness: DecimalZeroToOne
 
 
@@ -127,9 +150,13 @@ class EmissionFactorReference(StrictSchema):
 class EmissionCalculationDetail(StrictSchema):
     id: UUID
     activity_record_id: UUID
-    emission_factor_id: UUID
-    normalized_quantity_kg: NonNegativeDecimal
-    factor_kgco2e_per_kg: NonNegativeDecimal
+    emission_factor_id: UUID | None
+    grid_intensity_point_id: UUID | None = None
+    normalized_quantity_kg: NonNegativeDecimal | None = None
+    factor_kgco2e_per_kg: NonNegativeDecimal | None = None
+    normalized_quantity_kwh: NonNegativeDecimal | None = None
+    intensity_gco2e_per_kwh: NonNegativeDecimal | None = None
+    interval_start: datetime | None = None
     emissions_kgco2e: NonNegativeDecimal
     formula: str
     output_hash: str
@@ -145,6 +172,38 @@ class ConfidenceBreakdownResponse(StrictSchema):
     factor_recency_weight: DecimalZeroToOne
     record_completeness_weight: DecimalZeroToOne
     overall: DecimalZeroToOne
+
+
+class ConfidenceV2Response(StrictSchema):
+    version: Literal["2.0.0"] = "2.0.0"
+    source_quality: DecimalZeroToOne
+    method_fit: DecimalZeroToOne
+    temporal_match: DecimalZeroToOne
+    completeness: DecimalZeroToOne
+    weights: dict[str, DecimalZeroToOne]
+    overall: DecimalZeroToOne
+
+
+class GridPointReference(StrictSchema):
+    id: UUID
+    provider: str
+    zone: str
+    observed_at: datetime
+    temporal_granularity: str
+    intensity_gco2e_per_kwh: NonNegativeDecimal
+    is_estimated: bool
+    method_version: str
+    point_hash: str
+    evidence: EvidenceReference
+
+
+class MeasurementCoverage(StrictSchema):
+    interval_start: datetime
+    interval_end: datetime
+    observed_hours: Annotated[int, Field(ge=1)]
+    reporting_period_hours: Annotated[int, Field(ge=1)]
+    reporting_period_fraction: DecimalZeroToOne
+    full_reporting_period: bool
 
 
 class BaselineComparison(StrictSchema):
@@ -163,6 +222,8 @@ class CalculationRunReference(StrictSchema):
     method_key: str
     method_version: str
     code_version: str
+    method_hash: str | None = None
+    code_hash: str | None = None
     rounding_policy: str
     input_hash: str
     output_hash: str
@@ -192,7 +253,7 @@ class MeasurementDetail(StrictSchema):
     value_kgco2e: NonNegativeDecimal
     unit: str
     confidence: DecimalZeroToOne
-    confidence_breakdown: ConfidenceBreakdownResponse
+    confidence_breakdown: ConfidenceBreakdownResponse | ConfidenceV2Response
     status: MeasurementStatus
     formula: str
     output_hash: str
@@ -201,6 +262,8 @@ class MeasurementDetail(StrictSchema):
     calculation_run: CalculationRunReference
     inputs: list[MeasurementInput]
     factors: list[EmissionFactorReference]
+    grid_points: list[GridPointReference] = Field(default_factory=list)
+    coverage: MeasurementCoverage | None = None
     calculations: list[EmissionCalculationDetail]
     baseline: BaselineComparison | None
     facts: MeasurementFactReference
@@ -238,3 +301,29 @@ class MeasurementListResponse(StrictSchema):
     total: Annotated[int, Field(ge=0)]
     limit: Annotated[int, Field(ge=1, le=100)]
     offset: Annotated[int, Field(ge=0)]
+
+
+class MeasurementBreakdownItem(StrictSchema):
+    calculation_id: UUID
+    activity_record_id: UUID
+    raw_activity_record_id: UUID
+    source_document_id: UUID
+    interval_start: datetime | None
+    activity_date: date | None
+    material_code: str
+    quantity: NonNegativeDecimal
+    quantity_unit: Literal["kg", "kWh"]
+    emissions_kgco2e: NonNegativeDecimal
+    emission_factor_id: UUID | None
+    grid_intensity_point_id: UUID | None
+    output_hash: str
+
+
+class MeasurementBreakdown(StrictSchema):
+    measurement_id: UUID
+    metric_key: str
+    status: MeasurementStatus
+    unit: Literal["kgCO2e"] = "kgCO2e"
+    total_kgco2e: NonNegativeDecimal
+    facts: MeasurementFactReference
+    items: list[MeasurementBreakdownItem]

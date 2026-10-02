@@ -1,6 +1,6 @@
 # CarbonMesh Current API Reference
 
-Last updated: 2026-10-01
+Last updated: 2026-10-02
 
 ## Scope
 
@@ -32,6 +32,7 @@ the four-module operations that are still missing.
 | Method | Path | Purpose |
 | --- | --- | --- |
 | GET | `/api/health` | Process liveness response. |
+| GET | `/api/health/ready` | Read-only verification of the complete database contract; 503 when unavailable or incompatible. |
 | GET | `/api/db/demo` | Sanitized asynchronous database connectivity diagnostic. |
 | POST | `/api/demo/reset` | Guarded destructive reset of the current synthetic fixture. |
 
@@ -45,6 +46,7 @@ the four-module operations that are still missing.
 | GET | `/api/imports/{import_id}` | Read bounded import status and issues. |
 | POST | `/api/activities/import` | Import CSV/JSON activity through raw and normalized records. |
 | GET | `/api/quality/issues` | Filter/paginate typed quality findings. |
+| PATCH | `/api/quality/issues/{issue_id}` | Audited, tenant/actor-scoped resolve or waive decision. |
 
 ### Measurement and grid history
 
@@ -53,17 +55,33 @@ the four-module operations that are still missing.
 | GET | `/api/measurements` | Filter/paginate measurement summaries. |
 | GET | `/api/measurements/{measurement_id}` | Read inputs, factor, formula, confidence, facts, and evidence. |
 | GET | `/api/measurements/{measurement_id}/lineage` | Read bounded source-to-measurement lineage. |
-| POST | `/api/measurement/calculate` | Existing deterministic purchased-material calculation. |
+| GET | `/api/measurements/{measurement_id}/breakdown` | Read calculation-backed chart values and lineage identities. |
+| POST | `/api/measurement/calculate` | Deterministic purchased-material or exact-hour Scope 2 calculation. |
 | POST | `/api/integrations/electricity-maps/test` | Test the server-side provider credential/access safely. |
 | POST | `/api/measurement/grid/history/sync` | Synchronize history with explicit company and site query scope. |
 | GET | `/api/measurement/grid/latest` | Read the latest cached grid-intensity point with explicit company and site query scope. |
 
-The implemented calculation handles purchased-material mass. Hourly Scope 2 is
-not yet implemented. Historical sync stores versioned hourly points
+The implemented calculation handles purchased-material mass and hourly Scope 2
+with exact UTC timestamp alignment and `kWh * gCO2e_per_kWh / 1000` using
+Decimal. Missing, duplicate, ambiguous, and structurally invalid intervals fail
+closed. Scope 2 uses method version `2.0.0` and confidence weights 35/25/20/20;
+historical measurements retain their original methods. Coverage is explicit;
+an incomplete reporting period cannot support an Assurance period-total claim.
+Historical sync stores versioned hourly points
 in `carbon.grid_intensity_points`; the latest-point query reads that store and
 returns both canonical kgCO2e/kWh and the original provider gCO2e/kWh value with
 source-document and evidence provenance, including explicit fixture/live and
 synthetic markers.
+
+History sync accepts `mode: "fixture"` (default) or `mode: "live"`. Fixture
+requests must specify dates present in the synthetic history (starting
+`2026-07-01T00:00:00Z`), with at most 240 hours per request. Live mode requires
+the server's configured credential and never silently falls back to fixtures.
+
+For Scope 2, send the existing company/site/period context plus
+`output_metric_key: "emissions.scope2.location_based"`; the request selects the
+hourly activity/method keys and `ELECTRICITY` material by default. An explicit
+`grid_method_version` resolves multiple immutable grid versions at one hour.
 
 ### Sources and Assurance
 
@@ -92,8 +110,8 @@ company, requester, idempotency key, and an optional expected context hash; it
 returns the full draft, a typed terminal state, support/gap counts, and replay
 state. Required unsupported claims or error gaps produce `unsupported` and no
 preview. An eligible draft stores an exact `disclosure_draft` preview in
-`core.approvals`; a numerical claim currently requires the draft's agent run
-for its persisted fact binding. Evidence packs include ordered claims, gaps,
+`core.approvals`; numerical facts persist bindings for both direct requests and
+agent runs. Evidence packs include ordered claims, gaps,
 fact bindings, safe evidence summaries, hashes, and the POC disclaimer.
 
 ### Suppliers and Procurement
@@ -114,9 +132,8 @@ result without weakening constraints.
 
 The scenario score operation treats the path `scenario_id` as authoritative;
 its body contains only `company_id`, preventing conflicting scenario IDs.
-Recommendation review payloads retain deterministic binding snapshots, but the
-shared `ledger.fact_bindings` model currently requires an agent run. Direct
-non-agent Procurement requests therefore do not yet persist binding rows.
+Recommendation review payloads retain deterministic binding snapshots and
+persist matching `ledger.fact_bindings` rows, including direct non-agent calls.
 
 ### Advisory Dispatch
 
@@ -162,21 +179,19 @@ remain work.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| GET | `/api/approvals` | List pending/decided Procurement approvals. |
+| GET | `/api/approvals` | List pending/decided Procurement, Assurance, and Dispatch approvals. |
+| GET | `/api/approvals/{approval_id}` | Read the exact frozen payload, hashes, context, expiry, and freshness. |
 | POST | `/api/approvals/{approval_id}/decision` | Approve/reject after preview/hash/staleness revalidation. |
 | GET | `/api/audit/{entity_type}/{entity_id}` | Read a chronological audit/lineage summary. |
 | GET | `/api/ledger/events` | Tenant-scoped bounded ledger search. |
 | GET | `/api/ledger/events/{event_id}` | Ledger payload, safe evidence metadata, and immediate lineage. |
 
-Approval persistence is now generic in `core.approvals`, but current list and
-decision services still join Procurement recommendations. Dispatch optimization
-creates and returns an exact preview in a generic approval row, but the shared
-approval queue/decision endpoints do not yet handle that target type. Assurance
-validation likewise creates an exact generic `disclosure_draft` preview, but
-the shared queue/decision endpoints do not yet handle that target type, and
-generic approval detail is still missing. The same shared agent-run requirement
-prevents direct non-agent Dispatch requests from persisting
-`ledger.fact_bindings` rows.
+Generic `core.approvals` supports `procurement_recommendation`,
+`disclosure_draft`, and `dispatch_recommendation`. Decisions revalidate the
+frozen payload and current domain dependencies, serialize competing decisions,
+and append one ledger decision event. Exact repeats are idempotent; mismatched
+decisions fail closed. Dispatch approval records an advisory decision only.
+All three modules persist `ledger.fact_bindings` without requiring an agent run.
 
 ## Important operation behavior
 
@@ -184,8 +199,10 @@ prevents direct non-agent Dispatch requests from persisting
 
 `POST /api/demo/reset` requires `X-Demo-Reset-Token` to match the configured
 server secret. It is disabled when the secret is absent and returns
-`demo_reset_blocked` if any non-synthetic company exists. It replaces all
-synthetic rows atomically and must run only on a disposable rehearsal database.
+`demo_reset_blocked` if any non-synthetic company or data source exists. It
+replaces synthetic rows atomically and rolls back the entire reset on seed
+failure. Truncation is restricted to the model catalogue and cannot cascade to
+unrelated tables. Run only on a disposable rehearsal database.
 
 The current seed is Maverick Manufacturing (synthetic), Plant B (synthetic), Q3
 2026. It includes the recycled-aluminium Procurement inputs, one Assurance
@@ -196,9 +213,9 @@ integration paths.
 
 The companion `data/demo/manifest-v1.json` and `expected-results.json` describe
 the complete synthetic four-module fixture and its deterministic golden values.
-The hourly Scope 2 entry remains a replay expectation rather than an implemented
-HTTP calculation; the Assurance claim outcomes are now exposed by the canonical
-draft and validation operations above.
+Hourly Scope 2 executes through the calculation endpoint. The 90-day fixture
+must not be treated as complete coverage of the 92-day Q3 reporting period;
+coverage and missing intervals remain explicit validation inputs.
 
 ### Imports
 
@@ -207,6 +224,22 @@ or JSON rows. They preserve source/document/raw-row checksums even when
 normalization rejects a row. The result reports accepted/rejected counts and
 typed issue summaries. Supplier import creates evidence-backed product records;
 it does not contact a supplier.
+
+Activity and supplier imports accept an optional `idempotency_key`. Concurrent
+identical requests return the original import ID; a changed payload with the
+same tenant/kind/key returns a conflict. Hourly electricity rows accept an
+offset-aware exact-hour `timestamp` and `kwh`, or `quantity` and an allowed
+energy unit. Optional `interval_start`/`interval_end` declare the expected
+coverage so missing leading and trailing hours become explicit issues.
+
+Quality PATCH accepts `company_id`, `actor_id`, `status` (`resolved` or
+`waived`), and `decision_note`. It records one audit entry for an exact repeated
+decision. Error issues cannot be waived, and closing a review does not convert
+invalid source rows into valid activity.
+
+Correction imports with explicit replacement/supersession lineage are not yet
+implemented. Structural issues therefore remain blocking after review; a
+synthetic rehearsal can reset or use a clean context to import corrected data.
 
 ### Measurement transaction
 
@@ -273,9 +306,8 @@ must treat terminal events as final and may fall back to bounded polling.
 
 ## Known contract gaps
 
-The current OpenAPI intentionally does not claim success endpoints for issue
-resolution, Scope 2 breakdown, run resume, generic approval detail/decision
-support for every target, recursive ledger traversal, or agent-sustainability
+The current OpenAPI intentionally does not claim success endpoints for durable
+run resume, generalized recursive ledger traversal, or agent-sustainability
 metrics. Their required paths and ownership are in [contract.md](contract.md)
 and the [implementation plan](../planning/implementation-plan.md).
 

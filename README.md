@@ -146,13 +146,15 @@ recommendation, and module-prefixed aliases are not mounted.
 
 Implemented, substantive capabilities include:
 
-- health and sanitized database diagnostics;
+- process health, read-only database-contract readiness, and sanitized diagnostics;
 - guarded synthetic reset for Maverick Manufacturing, Plant B, Q3 2026;
 - semantic context resolution;
-- CSV/JSON activity and supplier imports with typed quality issues;
+- CSV/JSON material, hourly electricity, and supplier imports with typed quality
+  issues and audited resolve/waive decisions;
 - bounded text/CSV/JSON/PDF source upload with checksums, extraction, chunking,
   deterministic embeddings, and tenant/context-filtered evidence retrieval;
-- deterministic purchased-material Measurement, evidence, lineage, and audit;
+- deterministic purchased-material and exact-hour Scope 2 Measurement,
+  versioned confidence, chart breakdown, evidence, lineage, and audit;
 - Assurance standards and requirements, immutable-context disclosure drafts,
   atomic claims, fact bindings, citations, evidence gaps, staleness checks,
   structured evidence packs, and eligible generic approval previews;
@@ -167,7 +169,11 @@ Implemented, substantive capabilities include:
   and exact approval previews;
 - persisted bounded run state with SSE replay;
 - tenant-scoped ledger event search and detail with safe evidence summaries and
-  immediate lineage neighbors.
+  immediate lineage neighbors;
+- generic exact-preview approval list/detail/decision for Assurance,
+  Procurement, and advisory Dispatch, with stale-source validation and
+  idempotent decisions;
+- persisted fact bindings for agent and direct API workflows.
 
 The fully synthetic `data/demo` assets cover the four-module Maverick target:
 90 days of hourly electricity, recycled-aluminium Procurement inputs,
@@ -177,16 +183,11 @@ and include fixture, method, input, output, context, and analysis hashes.
 
 Still missing or incomplete:
 
-- hourly Scope 2 calculation and persistence using
-  `carbon.grid_intensity_points`; its golden fixture result does not substitute
-  for the missing service;
-- generic approval list/detail/decision handling beyond the current
-  Procurement-specific queue and commit service; Assurance and Dispatch create
-  exact previews but cannot be decided through that shared endpoint;
-- persisted fact bindings for direct non-agent Procurement and Dispatch calls;
+- correction imports with replacement/supersession lineage; quality decisions
+  close review records while structural data errors continue to block verification;
 - five LangGraph graphs, 24 typed tools, durable resume, model-provider
   execution from the agent runtime, and persisted run-step telemetry;
-- dependency-aware readiness and agent-sustainability metrics.
+- agent-sustainability metrics and the complete frontend experience.
 
 See the [current API reference](docs/api/reference.md),
 [target API contract](docs/api/contract.md), and
@@ -253,6 +254,23 @@ npm run build
 Live Neon tests are opt-in and must use only a disposable branch. API E2E tests
 may drop and rebuild application schemas when explicitly configured; never aim
 them at data that must be preserved.
+
+With local PostgreSQL binaries on `PATH`, API E2E tests automatically create a
+temporary cluster on a free loopback port and remove it after the run. They do
+not use `DATABASE_URL`. For a Windows PostgreSQL 18 installation, from `apps/api`:
+
+```powershell
+$env:PATH = 'C:/Program Files/PostgreSQL/18/bin;' + $env:PATH
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+These API journey tests substitute PostgreSQL array storage for unused vector
+index storage; the separate bootstrap verifier covers the pgvector contract.
+CI runs them against a dedicated disposable PostgreSQL 16 service container.
+`GET /api/health/ready` verifies the real database contract without modifying it.
+Existing databases with a required `ledger.fact_bindings.agent_run_id` need a
+reviewed operator change or a fresh disposable bootstrap for direct API fact
+bindings; application startup never applies schema changes.
 
 ## Repository map
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID
@@ -14,8 +14,10 @@ from app.db.models.carbon import (
     CalculationRun,
     CarbonBaseline,
     CarbonMeasurement,
+    DataQualityIssue,
     EmissionCalculation,
     EmissionFactor,
+    GridIntensityPoint,
     RawActivityRecord,
     VarianceAlert,
 )
@@ -33,12 +35,14 @@ from app.db.models.procurement import SupplierProduct
 from app.db.models.semantic import MethodDefinition, MetricDefinition
 from app.modules.measurement.domain import (
     ConfidenceBreakdown,
+    ConfidenceV2,
     VarianceResult,
     canonical_json_value,
+    measurement_code_hash,
     sha256_payload,
 )
 
-MAX_CALCULATION_ACTIVITY_ROWS = 500
+MAX_CALCULATION_ACTIVITY_ROWS = 3000
 MAX_FACTOR_CANDIDATES = 100
 
 
@@ -71,6 +75,18 @@ class CalculationPersistenceItem:
 
 
 @dataclass(frozen=True, slots=True)
+class GridCalculationPersistenceItem:
+    source: ActivitySource
+    grid_point: GridIntensityPoint
+    interval_start: datetime
+    normalized_quantity_kwh: Decimal
+    emissions_kgco2e: Decimal
+    record_completeness: Decimal
+    formula: str
+    output_hash: str
+
+
+@dataclass(frozen=True, slots=True)
 class MeasurementPersistencePlan:
     company_id: UUID
     actor_id: UUID | None
@@ -83,11 +99,12 @@ class MeasurementPersistencePlan:
     rounding_policy: str
     formula: str
     value_kgco2e: Decimal
-    confidence: ConfidenceBreakdown
-    items: tuple[CalculationPersistenceItem, ...]
+    confidence: ConfidenceBreakdown | ConfidenceV2
+    items: tuple[CalculationPersistenceItem | GridCalculationPersistenceItem, ...]
     baseline: CarbonBaseline | None
     variance: VarianceResult | None
     supersedes_measurement: CarbonMeasurement | None
+    input_snapshot: dict | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,11 +139,105 @@ class MeasurementDetailBundle:
     ]
     baseline: CarbonBaseline | None
     variance_alert: VarianceAlert | None
+    grid_calculations: tuple = ()
 
 
 class MeasurementRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    async def list_grid_points(
+        self,
+        *,
+        company_id: UUID,
+        site_id: UUID,
+        zone: str,
+        start: datetime,
+        end: datetime,
+        method_version: str | None,
+    ) -> list[GridIntensityPoint]:
+        statement = (
+            select(GridIntensityPoint)
+            .join(
+                MetricDefinition,
+                and_(
+                    MetricDefinition.company_id == GridIntensityPoint.company_id,
+                    MetricDefinition.id == GridIntensityPoint.metric_definition_id,
+                ),
+            )
+            .where(
+                GridIntensityPoint.company_id == company_id,
+                GridIntensityPoint.site_id == site_id,
+                GridIntensityPoint.zone == zone,
+                GridIntensityPoint.observed_at >= start,
+                GridIntensityPoint.observed_at <= end,
+                GridIntensityPoint.temporal_granularity == "hourly",
+                MetricDefinition.key == "electricity.grid_carbon_intensity",
+                MetricDefinition.canonical_unit == "gCO2e/kWh",
+            )
+            .order_by(GridIntensityPoint.observed_at, GridIntensityPoint.id)
+        )
+        if method_version is not None:
+            statement = statement.where(GridIntensityPoint.method_version == method_version)
+        return list(
+            (
+                await self.session.scalars(statement.limit(MAX_CALCULATION_ACTIVITY_ROWS * 2 + 1))
+            ).all()
+        )
+
+    async def has_blocking_hourly_issues(
+        self,
+        *,
+        company_id: UUID,
+        source_document_ids: set[UUID],
+        data_source_ids: set[UUID],
+    ) -> bool:
+        return (
+            await self.session.scalar(
+                select(DataQualityIssue.id)
+                .outerjoin(
+                    RawActivityRecord,
+                    and_(
+                        RawActivityRecord.company_id == DataQualityIssue.company_id,
+                        RawActivityRecord.id == DataQualityIssue.raw_activity_record_id,
+                    ),
+                )
+                .where(
+                    DataQualityIssue.company_id == company_id,
+                    (
+                        RawActivityRecord.source_document_id.in_(source_document_ids)
+                        | DataQualityIssue.details["import_id"]
+                        .as_string()
+                        .in_([str(identifier) for identifier in data_source_ids])
+                    ),
+                    DataQualityIssue.severity == "error",
+                    DataQualityIssue.details["blocks_verification"].as_boolean().is_(True),
+                )
+                .limit(1)
+            )
+            is not None
+        )
+
+    async def get_grid_evidence(self, *, company_id: UUID, evidence_item_ids: set[UUID]):
+        return {
+            item.id: (item, document)
+            for item, document in (
+                await self.session.execute(
+                    select(EvidenceItem, SourceDocument)
+                    .join(
+                        SourceDocument,
+                        and_(
+                            SourceDocument.company_id == EvidenceItem.company_id,
+                            SourceDocument.id == EvidenceItem.source_document_id,
+                        ),
+                    )
+                    .where(
+                        EvidenceItem.company_id == company_id,
+                        EvidenceItem.id.in_(evidence_item_ids),
+                    )
+                )
+            ).all()
+        }
 
     async def company_exists(self, *, company_id: UUID) -> bool:
         identifier = await self.session.scalar(
@@ -405,20 +516,27 @@ class MeasurementRepository:
     ) -> PersistedMeasurement:
         now = datetime.now(UTC)
         confidence = plan.confidence
+        mass_items = [item for item in plan.items if isinstance(item, CalculationPersistenceItem)]
+        grid_items = [
+            item for item in plan.items if isinstance(item, GridCalculationPersistenceItem)
+        ]
         summary = canonical_json_value(
             {
                 "trace_id": plan.trace_id,
                 "material_code": plan.material_code,
                 "activity_record_ids": [item.source.activity.id for item in plan.items],
-                "emission_factor_ids": sorted({item.factor.id for item in plan.items}, key=str),
-                "confidence": {
-                    "source_quality": confidence.source_quality,
-                    "factor_specificity": confidence.factor_specificity,
-                    "factor_recency": confidence.factor_recency,
-                    "record_completeness": confidence.record_completeness,
-                    "overall": confidence.overall,
-                    "weights": confidence.weights,
-                },
+                "emission_factor_ids": sorted({item.factor.id for item in mass_items}, key=str),
+                "grid_intensity_point_ids": [item.grid_point.id for item in grid_items],
+                "confidence": asdict(confidence),
+                "input_snapshot": plan.input_snapshot,
+                "method_hash": sha256_payload(
+                    {
+                        "key": plan.context.method.key,
+                        "version": plan.context.method.version,
+                        "configuration": plan.context.method.configuration,
+                    }
+                ),
+                "code_hash": measurement_code_hash(),
                 "baseline": (
                     {
                         "id": plan.baseline.id,
@@ -456,15 +574,23 @@ class MeasurementRepository:
 
         calculations: list[EmissionCalculation] = []
         for item in plan.items:
+            is_grid = isinstance(item, GridCalculationPersistenceItem)
             calculation = EmissionCalculation(
                 company_id=plan.company_id,
                 calculation_run_id=run.id,
                 activity_record_id=item.source.activity.id,
-                emission_factor_id=item.factor.id,
-                normalized_quantity=item.normalized_quantity_kg,
-                quantity_unit="kg",
-                factor_value=item.factor_kgco2e_per_kg,
-                factor_unit="kgCO2e/kg",
+                emission_factor_id=None if is_grid else item.factor.id,
+                grid_intensity_point_id=item.grid_point.id if is_grid else None,
+                normalized_quantity=(
+                    item.normalized_quantity_kwh if is_grid else item.normalized_quantity_kg
+                ),
+                quantity_unit="kWh" if is_grid else "kg",
+                factor_value=(
+                    item.grid_point.intensity_gco2e_per_kwh
+                    if is_grid
+                    else item.factor_kgco2e_per_kg
+                ),
+                factor_unit="gCO2e/kWh" if is_grid else "kgCO2e/kg",
                 emissions_kgco2e=item.emissions_kgco2e,
                 formula=item.formula,
                 output_hash=item.output_hash,
@@ -498,7 +624,8 @@ class MeasurementRepository:
                 "reporting_period_id": plan.context.reporting_period.id,
                 "metric_definition_id": plan.context.output_metric.id,
                 "activity_record_ids": [item.source.activity.id for item in plan.items],
-                "emission_factor_ids": sorted({item.factor.id for item in plan.items}, key=str),
+                "emission_factor_ids": sorted({item.factor.id for item in mass_items}, key=str),
+                "grid_intensity_point_ids": [item.grid_point.id for item in grid_items],
                 "value_kgco2e": plan.value_kgco2e,
                 "unit": "kgCO2e",
                 "confidence": confidence.overall,
@@ -506,6 +633,9 @@ class MeasurementRepository:
                 "output_hash": plan.output_hash,
                 "method_version": plan.context.method.version,
                 "code_version": plan.context.method.code_version,
+                "method_hash": summary["method_hash"],
+                "code_hash": summary["code_hash"],
+                "coverage": plan.input_snapshot.get("coverage") if plan.input_snapshot else None,
             }
         )
         measurement_event = LedgerEvent(
@@ -539,7 +669,17 @@ class MeasurementRepository:
                     "raw_checksum": item.source.raw_activity.checksum,
                     "source_quantity": activity.quantity,
                     "source_unit": activity.unit,
-                    "normalized_quantity_kg": item.normalized_quantity_kg,
+                    "normalized_quantity": (
+                        item.normalized_quantity_kwh
+                        if isinstance(item, GridCalculationPersistenceItem)
+                        else item.normalized_quantity_kg
+                    ),
+                    "normalized_unit": activity.normalized_unit,
+                    "interval_start": (
+                        item.interval_start
+                        if isinstance(item, GridCalculationPersistenceItem)
+                        else None
+                    ),
                     "material_code": activity.material_code,
                     "product_code": item.source.product_code,
                 }
@@ -558,7 +698,7 @@ class MeasurementRepository:
             self.session.add(event)
 
         factor_events: dict[UUID, LedgerEvent] = {}
-        factors = {item.factor.id: item.factor for item in plan.items}
+        factors = {item.factor.id: item.factor for item in mass_items}
         for factor_id, factor in factors.items():
             payload = canonical_json_value(
                 {
@@ -582,6 +722,36 @@ class MeasurementRepository:
                 created_by=plan.actor_id,
             )
             factor_events[factor_id] = event
+            self.session.add(event)
+
+        grid_events: dict[UUID, LedgerEvent] = {}
+        for item in grid_items:
+            point = item.grid_point
+            payload = canonical_json_value(
+                {
+                    "grid_intensity_point_id": point.id,
+                    "observed_at": point.observed_at,
+                    "zone": point.zone,
+                    "provider": point.provider,
+                    "intensity_gco2e_per_kwh": point.intensity_gco2e_per_kwh,
+                    "point_hash": point.point_hash,
+                    "method_version": point.method_version,
+                    "source_document_id": point.source_document_id,
+                    "evidence_item_id": point.evidence_item_id,
+                    "is_estimated": point.is_estimated,
+                }
+            )
+            event = LedgerEvent(
+                company_id=plan.company_id,
+                event_type="measurement.grid_point_used",
+                entity_type="grid_intensity_point",
+                entity_id=point.id,
+                payload=payload,
+                payload_hash=sha256_payload(payload),
+                analysis_signature=plan.input_hash,
+                created_by=plan.actor_id,
+            )
+            grid_events[point.id] = event
             self.session.add(event)
 
         baseline_event: LedgerEvent | None = None
@@ -631,6 +801,16 @@ class MeasurementRepository:
                     edge_metadata={"calculation_run_id": str(run.id)},
                 )
             )
+        for event in grid_events.values():
+            self.session.add(
+                LineageEdge(
+                    company_id=plan.company_id,
+                    parent_event_id=event.id,
+                    child_event_id=measurement_event.id,
+                    relationship_type="used_grid_point",
+                    edge_metadata={"calculation_run_id": str(run.id)},
+                )
+            )
         if baseline_event is not None:
             self.session.add(
                 LineageEdge(
@@ -643,6 +823,26 @@ class MeasurementRepository:
             )
 
         measurement_evidence_ids: set[UUID] = set()
+        for item in grid_items:
+            point = item.grid_point
+            self.session.add(
+                LedgerEventEvidence(
+                    company_id=plan.company_id,
+                    ledger_event_id=grid_events[point.id].id,
+                    evidence_item_id=point.evidence_item_id,
+                    relevance="Supports hourly grid intensity",
+                )
+            )
+            if point.evidence_item_id not in measurement_evidence_ids:
+                measurement_evidence_ids.add(point.evidence_item_id)
+                self.session.add(
+                    LedgerEventEvidence(
+                        company_id=plan.company_id,
+                        ledger_event_id=measurement_event.id,
+                        evidence_item_id=point.evidence_item_id,
+                        relevance="Supports verified Scope 2",
+                    )
+                )
         for factor_id, factor in factors.items():
             factor_event = factor_events[factor_id]
             self.session.add(
@@ -836,6 +1036,63 @@ class MeasurementRepository:
             )
         ).all()
 
+        grid_calculation_rows = []
+        if metric.key == "emissions.scope2.location_based":
+            grid_calculation_rows = (
+                await self.session.execute(
+                    select(
+                        EmissionCalculation,
+                        ActivityRecord,
+                        RawActivityRecord,
+                        GridIntensityPoint,
+                        EvidenceItem,
+                        SourceDocument,
+                    )
+                    .join(
+                        ActivityRecord,
+                        and_(
+                            ActivityRecord.company_id == EmissionCalculation.company_id,
+                            ActivityRecord.id == EmissionCalculation.activity_record_id,
+                        ),
+                    )
+                    .join(
+                        RawActivityRecord,
+                        and_(
+                            RawActivityRecord.company_id == ActivityRecord.company_id,
+                            RawActivityRecord.id == ActivityRecord.raw_activity_record_id,
+                        ),
+                    )
+                    .join(
+                        GridIntensityPoint,
+                        and_(
+                            GridIntensityPoint.company_id == EmissionCalculation.company_id,
+                            GridIntensityPoint.id == EmissionCalculation.grid_intensity_point_id,
+                        ),
+                    )
+                    .join(
+                        EvidenceItem,
+                        and_(
+                            EvidenceItem.company_id == GridIntensityPoint.company_id,
+                            EvidenceItem.id == GridIntensityPoint.evidence_item_id,
+                        ),
+                    )
+                    .join(
+                        SourceDocument,
+                        and_(
+                            SourceDocument.company_id == EvidenceItem.company_id,
+                            SourceDocument.id == EvidenceItem.source_document_id,
+                        ),
+                    )
+                    .where(
+                        EmissionCalculation.company_id == company_id,
+                        EmissionCalculation.calculation_run_id == run.id,
+                    )
+                    .order_by(
+                        GridIntensityPoint.observed_at, EmissionCalculation.activity_record_id
+                    )
+                )
+            ).all()
+
         baseline = None
         summary = run.summary if isinstance(run.summary, dict) else {}
         baseline_was_frozen = "baseline" in summary
@@ -888,6 +1145,7 @@ class MeasurementRepository:
             calculations=tuple(calculation_rows),
             baseline=baseline,
             variance_alert=variance_alert,
+            grid_calculations=tuple(grid_calculation_rows),
         )
 
     async def list_measurements(

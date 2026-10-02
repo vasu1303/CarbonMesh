@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.carbon import ActivityRecord, DataQualityIssue, RawActivityRecord
 from app.db.models.core import (
+    Actor,
     AuditLog,
     Company,
     DataSource,
@@ -29,10 +30,21 @@ class ImportRepository:
         self.session = session
 
     async def company_exists(self, company_id: UUID) -> bool:
-        statement = select(Company.id).where(
-            Company.id == company_id, Company.is_active.is_(True)
-        )
+        statement = select(Company.id).where(Company.id == company_id, Company.is_active.is_(True))
         return (await self.session.execute(statement)).scalar_one_or_none() is not None
+
+    async def lock_import_key(self, lock_id: int) -> None:
+        await self.session.execute(select(func.pg_advisory_xact_lock(lock_id)))
+
+    async def find_import_by_key(
+        self, company_id: UUID, import_type: str, idempotency_key: str
+    ) -> DataSource | None:
+        statement = select(DataSource).where(
+            DataSource.company_id == company_id,
+            DataSource.configuration["import_type"].astext == import_type,
+            DataSource.configuration["idempotency_key"].astext == idempotency_key,
+        )
+        return (await self.session.execute(statement)).scalar_one_or_none()
 
     async def get_site(self, company_id: UUID, site_id: UUID) -> Site | None:
         statement = select(Site).where(Site.company_id == company_id, Site.id == site_id)
@@ -41,9 +53,13 @@ class ImportRepository:
     async def get_reporting_period(
         self, company_id: UUID, reporting_period_id: UUID
     ) -> ReportingPeriod | None:
-        statement = select(ReportingPeriod).where(
-            ReportingPeriod.company_id == company_id,
-            ReportingPeriod.id == reporting_period_id,
+        statement = (
+            select(ReportingPeriod)
+            .where(
+                ReportingPeriod.company_id == company_id,
+                ReportingPeriod.id == reporting_period_id,
+            )
+            .with_for_update()
         )
         return (await self.session.execute(statement)).scalar_one_or_none()
 
@@ -124,7 +140,14 @@ class ImportRepository:
             SourceDocument.company_id == company_id,
             SourceDocument.checksum == checksum,
         )
-        return (await self.session.execute(statement)).scalar_one_or_none()
+        return (await self.session.execute(statement.with_for_update())).scalar_one_or_none()
+
+    async def has_raw_rows_for_document(self, company_id: UUID, document_id: UUID) -> bool:
+        statement = select(RawActivityRecord.id).where(
+            RawActivityRecord.company_id == company_id,
+            RawActivityRecord.source_document_id == document_id,
+        ).limit(1)
+        return (await self.session.execute(statement)).scalar_one_or_none() is not None
 
     async def create_data_source(
         self,
@@ -302,13 +325,15 @@ class ImportRepository:
         entity_id: UUID,
         trace_id: str,
         details: dict[str, Any],
+        actor_id: UUID | None = None,
+        entity_type: str = "data_source",
     ) -> AuditLog:
         audit = AuditLog(
             company_id=company_id,
-            actor_id=None,
+            actor_id=actor_id,
             agent_run_id=None,
             action=action,
-            entity_type="data_source",
+            entity_type=entity_type,
             entity_id=entity_id,
             trace_id=trace_id,
             details=details,
@@ -316,6 +341,55 @@ class ImportRepository:
         self.session.add(audit)
         await self.session.flush()
         return audit
+
+    async def get_actor(self, company_id: UUID, actor_id: UUID) -> Actor | None:
+        statement = select(Actor).where(
+            Actor.company_id == company_id,
+            Actor.id == actor_id,
+            Actor.is_active.is_(True),
+        )
+        return (await self.session.execute(statement)).scalar_one_or_none()
+
+    async def get_issue_for_update(
+        self, company_id: UUID, issue_id: UUID
+    ) -> DataQualityIssue | None:
+        statement = (
+            select(DataQualityIssue)
+            .where(
+                DataQualityIssue.company_id == company_id,
+                DataQualityIssue.id == issue_id,
+            )
+            .with_for_update()
+        )
+        return (await self.session.execute(statement)).scalar_one_or_none()
+
+    async def list_hourly_activity_payloads(
+        self,
+        *,
+        company_id: UUID,
+        site_id: UUID,
+        reporting_period_id: UUID,
+        metric_definition_id: UUID,
+    ) -> Sequence[dict[str, Any]]:
+        statement = (
+            select(RawActivityRecord.raw_payload)
+            .join(
+                ActivityRecord,
+                and_(
+                    ActivityRecord.company_id == RawActivityRecord.company_id,
+                    ActivityRecord.raw_activity_record_id == RawActivityRecord.id,
+                ),
+            )
+            .where(
+                ActivityRecord.company_id == company_id,
+                ActivityRecord.site_id == site_id,
+                ActivityRecord.reporting_period_id == reporting_period_id,
+                ActivityRecord.metric_definition_id == metric_definition_id,
+                ActivityRecord.status == "valid",
+                RawActivityRecord.import_status == "accepted",
+            )
+        )
+        return (await self.session.execute(statement)).scalars().all()
 
     async def get_data_source(self, company_id: UUID, import_id: UUID) -> DataSource | None:
         statement = select(DataSource).where(
