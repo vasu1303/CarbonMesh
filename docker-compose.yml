@@ -8,7 +8,7 @@ services:
       POSTGRES_USER: carbonmesh
       POSTGRES_PASSWORD: ${CARBONMESH_LOCAL_DB_PASSWORD:-carbonmesh-local-only}
     ports:
-      - "${CARBONMESH_DB_PORT:-5432}:5432"
+      - "127.0.0.1:${CARBONMESH_DB_PORT:-5432}:5432"
     volumes:
       - carbonmesh_postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -20,17 +20,17 @@ services:
 
   api:
     build:
-      context: ./apps/api
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: apps/api/Dockerfile
+    env_file:
+      - ./apps/api/.env
     environment:
       DATABASE_URL: postgresql://carbonmesh:${CARBONMESH_LOCAL_DB_PASSWORD:-carbonmesh-local-only}@db:5432/carbonmesh?sslmode=disable
-      DEMO_RESET_TOKEN: ${DEMO_RESET_TOKEN:-carbonmesh-local-reset-token}
-      AI_PROVIDER: ${AI_PROVIDER:-auto}
-      ELECTRICITY_MAPS_API_TOKEN: ${ELECTRICITY_MAPS_API_TOKEN:-}
-      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      GEMINI_MODEL: ${GEMINI_MODEL:-}
+      SOURCE_STORAGE_DIR: /app/.data/sources
+    volumes:
+      - carbonmesh_source_documents:/app/.data/sources
     ports:
-      - "${CARBONMESH_API_PORT:-8000}:8000"
+      - "127.0.0.1:${CARBONMESH_API_PORT:-8000}:8000"
     depends_on:
       db:
         condition: service_healthy
@@ -47,3 +47,4 @@ services:
 
 volumes:
   carbonmesh_postgres_data:
+  carbonmesh_source_documents:

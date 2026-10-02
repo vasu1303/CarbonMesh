@@ -237,20 +237,39 @@ async def test_all_requested_apis_as_one_synthetic_journey(
         )
         assert run_response.status_code == 200
         run = run_response.json()
-        assert run["terminal_state"] == "completed"
+        assert run["terminal_state"] == "needs_clarification"
+        assert run["stage"] == "interrupted"
         assert run["workflow"] == "cross_module"
-        assert run["telemetry"]["model_calls"] == 0
-        assert run["telemetry"]["tool_calls"] == 3
-        assert len(run["facts"]) == 3
-        assert run["recommendation"]["recommendation_id"] == recommendation_id
-        assert run["approval_requirement"]["approval_id"] == approval_id
+        assert run["error_code"] == "context_incomplete"
+        assert run["missing_fields"] == ["context.procurement_scenario_id"]
+        assert run["pending_interrupt"]["kind"] == "clarification"
+        assert run["pending_interrupt"]["missing_fields"] == [
+            "context.procurement_scenario_id"
+        ]
+        assert run["facts"] == []
+        assert run["recommendation"] is None
+        assert run["approval_requirement"]["required"] is False
+        assert run["telemetry"]["provider"] == "gemini"
+        assert run["telemetry"]["provider_status"] == "completed"
+        assert run["telemetry"]["model_id"] == "e2e-strict-structured-planner-v1"
+        assert run["telemetry"]["model_calls"] == 1
+        assert run["telemetry"]["tool_calls"] == 0
+        assert run["telemetry"]["planning_selection"]["modules"] == [
+            "measurement",
+            "procurement",
+        ]
 
         events_response = await api_client.get(
             f"/api/runs/{run_id}/events", params=company_params
         )
         assert events_response.status_code == 200
         assert "event: run.started\n" in events_response.text
-        assert "event: run.completed\n" in events_response.text
+        assert "event: provider.completed\n" in events_response.text
+        assert "event: tool.completed\n" not in events_response.text
+        assert "event: fact.created\n" not in events_response.text
+        assert "event: clarification.required\n" in events_response.text
+        assert "event: run.stopped\n" in events_response.text
+        assert "event: run.completed\n" not in events_response.text
 
         approvals_response = await api_client.get(
             "/api/approvals", params={**company_params, "status": "pending"}

@@ -1,4 +1,0 @@
-{
-  "python.envFile": "${workspaceFolder}/apps/api/.env",
-  "python.terminal.useEnvFile": true
-}

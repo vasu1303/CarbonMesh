@@ -6,7 +6,6 @@ import argparse
 import csv
 import hashlib
 import json
-import shutil
 import sys
 from datetime import UTC, date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
@@ -16,7 +15,6 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "apps" / "api"))
 DEMO = ROOT / "data" / "demo"
-PACKAGED_DEMO = ROOT / "apps" / "api" / "app" / "demo_fixtures"
 GOLDEN_INPUT_NAMES = (
     "activity.csv",
     "electricity-hourly.csv",
@@ -179,6 +177,93 @@ def build_history_fixture() -> int:
         },
     )
     return len(points)
+
+
+def build_complete_quarter_fixtures() -> None:
+    """Generate a separate complete quarter; never repair the quality-case inputs."""
+    end = datetime(2026, 10, 1, tzinfo=UTC)
+    hours = int((end - START).total_seconds() // 3600)
+    fixture_id = "maverick-q3-2026-complete-v1"
+    activity_name = "electricity-hourly-complete-q3-v1.csv"
+    material_name = "activity-material-complete-q3-v1.csv"
+    history_name = "grid-history-complete-q3-v1.json"
+    rows = []
+    points = []
+    total_kwh = Decimal(0)
+    total_kgco2e = Decimal(0)
+    for offset in range(hours):
+        timestamp = START + timedelta(hours=offset)
+        kwh = electricity_kwh(timestamp)
+        intensity = grid_intensity(timestamp)
+        total_kwh += kwh
+        total_kgco2e += kwh * intensity / Decimal(1000)
+        rows.append({
+            "row_key": f"complete-q3-v1-electricity-{timestamp:%Y%m%dT%H%MZ}",
+            "timestamp": iso_z(timestamp),
+            "kwh": format(kwh, "f"),
+            "unit": "kWh",
+            "site_code": "PLANT-B",
+            "synthetic": "true",
+            "fixture_version": fixture_id,
+        })
+        points.append({
+            "zone": ZONE,
+            "carbonIntensity": int(intensity),
+            "datetime": iso_z(timestamp),
+            "updatedAt": iso_z(timestamp + timedelta(minutes=20)),
+            "createdAt": iso_z(timestamp + timedelta(minutes=10)),
+            "emissionFactorType": "lifecycle",
+            "flowTraced": True,
+            "isEstimated": timestamp == ESTIMATED_GRID_AT,
+            "estimationMethod": "SYNTHETIC_GAP_FILL" if timestamp == ESTIMATED_GRID_AT else None,
+            "temporalGranularity": "hourly",
+        })
+    with (DEMO / activity_name).open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(rows[0]), lineterminator="\n")
+        writer.writeheader()
+        writer.writerows(rows)
+    write_json(DEMO / history_name, {
+        "synthetic": True,
+        "fixtureVersion": fixture_id,
+        "zone": ZONE,
+        "temporalGranularity": "hourly",
+        "aggregationPeriod": "hourly",
+        "data": points,
+    })
+    with (DEMO / "activity.csv").open(encoding="utf-8", newline="") as handle:
+        material_rows = list(csv.DictReader(handle))
+    for row in material_rows:
+        row["row_key"] = f"complete-q3-v1-{row['row_key']}"
+    with (DEMO / material_name).open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(material_rows[0]), lineterminator="\n")
+        writer.writeheader()
+        writer.writerows(material_rows)
+    write_json(DEMO / "complete-q3-manifest-v1.json", {
+        "manifest_version": "1.0.0",
+        "fixture_id": fixture_id,
+        "synthetic": True,
+        "generated_by": "scripts/generate_demo_fixtures.py",
+        "company": "Maverick Manufacturing (synthetic)",
+        "site": "Plant B (synthetic)",
+        "reporting_period": "Q3 2026",
+        "interval_start": iso_z(START),
+        "interval_end": iso_z(end),
+        "hourly_intervals": hours,
+        "fixture_variant": "complete_q3_v1",
+        "expected": {
+            "electricity_kwh": format(total_kwh, "f"),
+            "scope2_kgco2e": format(total_kgco2e.quantize(Decimal("0.000001")), "f"),
+            "formula": "sum(kWh * gCO2e_per_kWh / 1000)",
+            "method_key": "measurement.scope2.location_based.hourly",
+            "method_version": "2.0.0",
+            "full_reporting_period": True,
+        },
+        "artifacts": [
+            {"path": f"data/demo/{name}", "sha256": sha256_bytes((DEMO / name).read_bytes())}
+            for name in (activity_name, material_name, history_name)
+        ],
+        "quality_cases_fixture": "maverick-q3-2026-v1",
+    })
 
 
 def forecast_intensity(index: int) -> int:
@@ -976,14 +1061,6 @@ def build_api_e2e_expected(expected: dict[str, Any]) -> None:
     )
 
 
-def package_demo_fixtures() -> None:
-    """Keep the canonical demo assets inside the API Docker build context."""
-
-    PACKAGED_DEMO.mkdir(parents=True, exist_ok=True)
-    for filename in (*DEMO_ARTIFACT_NAMES, "manifest-v1.json"):
-        shutil.copyfile(DEMO / filename, PACKAGED_DEMO / filename)
-
-
 def build_manifest() -> None:
     artifacts = []
     for name in DEMO_ARTIFACT_NAMES:
@@ -1014,8 +1091,7 @@ def main(output_directory: Path | None = None) -> None:
     expected = build_expected_results(electricity_rows, scope2_total)
     build_api_e2e_expected(expected)
     build_manifest()
-    if output_directory is None:
-        package_demo_fixtures()
+    build_complete_quarter_fixtures()
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from app.dependencies.request import AuthenticatedActorId
 from app.modules.semantic.dependencies import get_semantic_service
 from app.modules.semantic.schemas import (
     APIErrorDetail,
@@ -27,7 +28,10 @@ router = APIRouter()
 async def resolve_context(
     request: ContextResolveRequest,
     service: Annotated[SemanticService, Depends(get_semantic_service)],
+    authenticated_actor: AuthenticatedActorId = None,
 ) -> ContextEnvelope:
+    if request.actor_id is None and authenticated_actor is not None:
+        request = request.model_copy(update={"actor_id": authenticated_actor})
     try:
         return await service.resolve_context(request)
     except ContextResolutionError as error:

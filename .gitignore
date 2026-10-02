@@ -11,20 +11,32 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 *.egg-info/
+apps/api/build/
 
 # Environment and local tooling
 .env
 .env.*
 !.env.example
 .idea/
-.vscode/*
-!.vscode/settings.json
+.vscode/
+.data/
 .DS_Store
 Thumbs.db
 
 # Test output
 coverage/
 htmlcov/
+artifacts/
+docs/verification/
+test-results/
+playwright-report/
+coverage.xml
+pytest-report.xml
+.coverage
+.coverage.*
+verification-reports/
+verification-report*.json
+verification_report*.json
 
 # Unused binary from the Vite starter template
 apps/web/src/assets/hero.png

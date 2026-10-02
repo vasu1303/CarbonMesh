@@ -134,20 +134,3 @@ async def list_adjacent_edges(
         .order_by(LineageEdge.created_at, LineageEdge.id)
     )
     return list(result)
-
-
-async def list_ledger_events_by_id(
-    session: AsyncSession,
-    *,
-    company_id: UUID,
-    event_ids: Collection[UUID],
-) -> list[LedgerEvent]:
-    if not event_ids:
-        return []
-    result = await session.scalars(
-        select(LedgerEvent).where(
-            LedgerEvent.company_id == company_id,
-            LedgerEvent.id.in_(event_ids),
-        )
-    )
-    return list(result)

@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.dependencies.database import DatabaseSession
+from app.dependencies.request import AuthenticatedActorId
 from app.modules.measurement.schemas import (
     MeasurementBreakdown,
     MeasurementCalculateRequest,
@@ -43,7 +44,10 @@ ERROR_RESPONSES = {
 async def calculate_measurement(
     request: MeasurementCalculateRequest,
     service: Annotated[MeasurementService, Depends(get_measurement_service)],
+    authenticated_actor: AuthenticatedActorId = None,
 ) -> MeasurementResult:
+    if request.actor_id is None and authenticated_actor is not None:
+        request = request.model_copy(update={"actor_id": authenticated_actor})
     try:
         return await service.calculate(request)
     except MeasurementServiceError as error:

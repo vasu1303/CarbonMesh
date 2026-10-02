@@ -273,24 +273,28 @@ async def calculate_scope2(
         raise fail(
             "grid_evidence_missing", "A selected grid point lacks accessible supporting evidence."
         )
+    validated_snapshots = {}
     for point in selected:
         item, document = evidence[point.evidence_item_id]
         try:
             provider_point = ElectricityMapsIntensityPoint.model_validate_json(item.content_text)
-            snapshot_data = document.document_metadata["response_snapshot"]
-            snapshot = SnapshotEnvelope.model_validate(snapshot_data)
-            snapshot_hash = hashlib.sha256(
-                json.dumps(
-                    snapshot_data, ensure_ascii=False, separators=(",", ":"), sort_keys=True
-                ).encode("utf-8")
-            ).hexdigest()
+            if document.id not in validated_snapshots:
+                snapshot_data = document.document_metadata["response_snapshot"]
+                snapshot = SnapshotEnvelope.model_validate(snapshot_data)
+                snapshot_hash = hashlib.sha256(
+                    json.dumps(
+                        snapshot_data, ensure_ascii=False, separators=(",", ":"), sort_keys=True
+                    ).encode("utf-8")
+                ).hexdigest()
+                if snapshot_hash != document.checksum or snapshot.site_id != request.site_id:
+                    raise ValueError
+                validated_snapshots[document.id] = snapshot
+            snapshot = validated_snapshots[document.id]
             if (
                 item.source_document_id != point.source_document_id
                 or hashlib.sha256(item.content_text.encode("utf-8")).hexdigest() != item.checksum
                 or item.checksum != point.point_hash
                 or provider_point.datetime != point.observed_at
-                or snapshot_hash != document.checksum
-                or snapshot.site_id != request.site_id
                 or str(snapshot.response.get("zone", "")).upper() != point.zone
                 or (provider_point.zone is not None and provider_point.zone.upper() != point.zone)
                 or provider_point.updated_at != point.provider_updated_at

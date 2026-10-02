@@ -5,7 +5,7 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -40,6 +40,31 @@ from app.modules.imports.service import (
 from app.modules.measurement.domain import normalize_mass_to_kg
 
 DEMO_DIR = Path(__file__).resolve().parents[4] / "data" / "demo"
+
+
+def test_import_issue_order_is_stable_before_truncation() -> None:
+    company_id = uuid4()
+    now = datetime.now(UTC)
+    source = DataSource(
+        id=uuid4(), company_id=company_id, is_synthetic=True,
+        configuration={"import_type": "activity", "import_status": "completed_with_errors"},
+        created_at=now, updated_at=now,
+    )
+    issues = [
+        DataQualityIssue(
+            id=UUID(int=index), company_id=company_id, issue_type="validation",
+            code="invalid_field_value", severity="error", message="Synthetic invalid row",
+            status="open", details={}, created_at=now, updated_at=now,
+        )
+        for index in range(1, MAX_INLINE_ISSUES + 2)
+    ]
+    first = import_service_module._build_import_result(source, None, list(reversed(issues)))
+    replay = import_service_module._build_import_result(source, None, issues)
+
+    assert first == replay
+    assert [issue.id for issue in first.issues] == [issue.id for issue in issues[:-1]]
+    assert first.issue_count == MAX_INLINE_ISSUES + 1
+    assert first.issues_truncated
 
 
 def test_csv_parser_preserves_rows_and_strips_bom() -> None:

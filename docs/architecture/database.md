@@ -1,6 +1,6 @@
 # CarbonMesh Database Architecture
 
-Last updated: 2026-10-01
+Last updated: 2026-10-02
 
 ## Status and source of truth
 
@@ -9,11 +9,10 @@ The checked-in SQLAlchemy metadata implements the target relational contract:
 `apps/api/app/db/models` is the code-level source of truth; this document
 explains its ownership and integrity rules.
 
-This does not mean the old shared Neon branch has been upgraded. The explicit
-bootstrap creates or verifies a pristine/complete database and intentionally
-rejects the earlier five-schema layout. A reviewed, data-preserving transition
-for an existing database remains an operator task and must be rehearsed on a
-disposable copy before it is applied anywhere shared.
+Local Docker and hosted Neon use the canonical database name `carbonmesh`.
+Explicit bootstrap creates a pristine database or verifies a complete contract;
+it rejects partial or incompatible layouts. Application startup never repairs
+a deployed schema.
 
 ## Table catalog
 
@@ -31,25 +30,6 @@ disposable copy before it is applied anywhere shared.
 The registry test fails unless the names and distribution match this catalog
 exactly.
 
-## Implemented physical changes
-
-The model transition makes these changes to the earlier database design:
-
-- agent runs move from the carbon domain to `ai.agent_runs`, with ordered
-  node/tool/provider telemetry in `ai.agent_run_steps`;
-- Procurement-only approvals move to generic `core.approvals`;
-- Procurement-only bindings move to shared `ledger.fact_bindings`;
-- the physical recommendation table becomes
-  `procurement.procurement_recommendations`;
-- `semantic.policy_definitions` stores executable policy identity and content;
-- `carbon.grid_intensity_points` stores timestamped grid observations instead
-  of treating hourly electricity data only as date-ranged material factors;
-- Assurance and Dispatch receive their own six-table and five-table domains.
-
-Temporary Python import aliases keep the implemented Measurement, Procurement,
-approval, audit, and agent services working while their imports are migrated.
-New foreign keys always resolve to the new physical identities.
-
 ## Connection and lifecycle
 
 The API reads one secret-safe `DATABASE_URL` and converts it to the asyncpg
@@ -59,6 +39,9 @@ dialect. The parser accepts two explicit modes:
 | --- | --- | --- |
 | Hosted/remote PostgreSQL | `sslmode=require` is mandatory; certificate chain and hostname are verified | Neon uses `NullPool` and disables prepared-statement caches |
 | Approved local/Docker host | `sslmode=disable` is allowed only for loopback or the allowlisted Compose service names | SQLAlchemy's bounded pool with pre-ping |
+
+Connection URLs select `/carbonmesh`; the login-role name is independent of
+the database name. Disposable test databases use their own explicit names.
 
 Malformed URLs, non-PostgreSQL protocols, unknown TLS modes, and remote
 unencrypted URLs fail with credential-free errors. URLs, driver exceptions,
@@ -144,10 +127,9 @@ The result must contain 46 rows with the distribution above.
 | `approvals` | Generic target, exact preview payload/hash, analysis/context identity, requester/decider, expiry, idempotency, decision ledger link. |
 | `audit_log` | Append-oriented action/entity/trace/run record with sanitized details. |
 
-`core.approvals` temporarily retains a nullable Procurement recommendation
-binding so the existing service remains operational. New Assurance and Dispatch
-services must populate `target_type`, `target_id`, and `preview_payload` and must
-revalidate the target in the decision transaction.
+`core.approvals` binds `target_type`, `target_id`, and `preview_payload` for
+Assurance, Procurement, and Dispatch. The decision transaction revalidates the
+exact target, facts, evidence, context, methods, expiry, and actor role.
 
 ### `semantic`
 
@@ -183,7 +165,7 @@ single-module run and the four-module path.
 | `emission_factors` | Evidence-backed material/product/geography factor and effective dates. |
 | `grid_intensity_points` | Site/zone/provider observation timestamp, gCO2e/kWh value, estimation/flow-traced flags, source/evidence/method identity and point hash. |
 | `calculation_runs` | Deterministic method/code/rounding/input/output identity and run status. |
-| `emission_calculations` | Per-input formula, factor or grid point, exact inputs/result, confidence components and output hash. |
+| `emission_calculations` | Per-input formula, factor or grid point, exact inputs/result and output hash. Confidence components belong to the calculation-run summary. |
 | `carbon_measurements` | Aggregated verified metric fact, confidence, calculation run, ledger event and supersession state. |
 | `data_quality_issues` | Typed source/entity issue, severity, field/details, open/resolved/waived lifecycle. |
 | `carbon_baselines` | Context/metric baseline value, method and effective dates. |
@@ -226,8 +208,8 @@ Raw document/evidence bodies are not returned by those endpoints.
 | `claim_citations` | Claim-to-ledger/evidence citation and deterministic validation state. |
 | `evidence_gaps` | Requirement/claim gap with severity and open/resolved/waived lifecycle. |
 
-These tables are implemented; repositories, validators, retrieval orchestration,
-routes, and approval behavior are not yet implemented.
+Assurance services persist atomic claims, citations, evidence gaps, and exact
+approval previews. Unsupported required claims cannot receive a preview.
 
 ### `procurement`
 
@@ -252,8 +234,8 @@ scenario. Cost is a hard feasibility constraint and is not a weighted score.
 | `dispatch_scenarios` | Frozen load/constraint/forecast/baseline context and analysis identity. |
 | `dispatch_recommendations` | Recommended advisory window, baseline/recommended emissions, avoided impact, hashes, ledger link and invalidation state. |
 
-These tables are implemented. Forecast synchronization, window enumeration,
-optimizer, recommendation service, routes, and approval behavior remain work.
+Dispatch services persist immutable forecasts, constrained scenarios,
+deterministic recommendations, evidence, and generic advisory approvals.
 No table or service authorizes physical actuation.
 
 ## Indexes, views, and immutable behavior
@@ -275,41 +257,20 @@ Important verified objects include:
 - `ledger.prevent_ledger_event_mutation()` and its BEFORE UPDATE OR DELETE
   trigger.
 
-## Existing-database transition
+## Existing databases
 
-SQLAlchemy `create_all()` does not rename, move, or alter existing tables. The
-old shared structure therefore requires an explicit reviewed operation that:
+SQLAlchemy `create_all()` does not rename, move, or alter existing tables.
+An incompatible database requires a fresh disposable target or a separately
+reviewed, data-preserving operator change with a confirmed target and rollback.
+Normal bootstrap is not a migration engine. Run the read-only contract check
+before directing application traffic to a changed target.
 
-1. confirms the exact source contract and backup/rollback target;
-2. creates the new schemas;
-3. moves or renames the four existing physical identities;
-4. adds the generic columns/constraints without losing Procurement history;
-5. creates the new policy, grid, run-step, Assurance, and Dispatch tables;
-6. rebuilds affected foreign keys, indexes, views, and the ledger trigger;
-7. backfills target/artifact identity and validates hashes where required;
-8. runs the complete bootstrap verifier in read-only mode;
-9. executes reset/import/calculate/recommend/approve/replay regression tests;
-10. switches application traffic only after reconciliation counts match.
+## Maintaining the contract
 
-This repository does not yet contain that data-preserving operation. Until it
-does, use a fresh disposable target database and retain the previous branch as
-rollback. Never use normal bootstrap as an improvised migration command.
-
-## Verification coverage
-
-Unit tests verify:
-
-- exact 46-table names and schema distribution;
-- resolution of every foreign key inside registered metadata;
-- tenant-aligned composite foreign keys and `ON DELETE RESTRICT`;
-- absence of floating-point database columns;
-- timezone-aware timestamp columns and UUID server defaults;
-- generic approval/binding fields and moved-model import aliases;
-- largest agent-run persistence budgets;
-- vector dimensions/index options;
-- partial unique indexes, views and trigger definitions;
-- bootstrap pristine/complete/refusal and read-only check behavior.
-
-The opt-in live Neon suite has been updated for the new physical identities but
-must be run only against a confirmed disposable branch. It was not executed as
-part of this documentation/model update to avoid mutating shared data.
+Model/bootstrap tests cover the table registry, tenant-aligned foreign keys,
+exact numerics, UTC timestamps, UUID defaults, checked states, vector/index
+options, views, trigger definitions, and pristine/complete/refusal behavior.
+The read-only bootstrap verifier checks these objects on the actual database.
+Opt-in live database tests can perform mutation probes and therefore require a
+confirmed disposable target. A plain-PostgreSQL array-backed test seam does not
+verify physical pgvector storage or HNSW behavior.

@@ -71,6 +71,7 @@ class EvidenceCandidate:
     embedding_model: str | None
     embedded_at: datetime | None
     similarity: Decimal
+    source_document_version: int = 1
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
@@ -104,6 +105,18 @@ def validate_evidence_candidate(
         reasons.append("evidence_type_not_allowed")
     if candidate.embedding_model != context.embedding_model or candidate.embedded_at is None:
         reasons.append("embedding_model_mismatch")
+    if metadata.get("trust_status", "synthetic") not in ("accepted", "verified", "synthetic"):
+        reasons.append("evidence_untrusted")
+    if (
+        metadata.get("source_version", candidate.source_document_version)
+        != candidate.source_document_version
+    ):
+        reasons.append("source_version_mismatch")
+    if (
+        metadata.get("source_checksum", candidate.source_document_checksum)
+        != candidate.source_document_checksum
+    ):
+        reasons.append("source_checksum_mismatch")
 
     if not SHA256_PATTERN.fullmatch(candidate.checksum):
         reasons.append("evidence_checksum_invalid")
@@ -135,6 +148,7 @@ def validate_evidence_candidate(
     label_site_matches = _required_label_matches(metadata.get("site"), context.site_name)
     if (
         site_id_malformed
+        or (metadata_site_id is not None and metadata_site_id != str(context.site_id))
         or (not stable_site_matches and not label_site_matches)
         or not _optional_label_matches(metadata.get("site"), context.site_name)
     ):
@@ -147,6 +161,10 @@ def validate_evidence_candidate(
     )
     if (
         period_id_malformed
+        or (
+            metadata_period_id is not None
+            and metadata_period_id != str(context.reporting_period_id)
+        )
         or (not stable_period_matches and not label_period_matches)
         or not _optional_label_matches(
             metadata.get("reporting_period"), context.reporting_period_name

@@ -37,6 +37,7 @@ from app.modules.procurement.review import (
     build_recommendation_payload,
     build_review_source_state,
     canonicalize_scenario_context,
+    recommendation_preview_is_current,
     review_source_hash,
     scenario_context_signature,
     stored_recommendation_payload,
@@ -458,6 +459,27 @@ class ProcurementService:
                 invalidated_at=recommendation.invalidated_at,
                 created_at=recommendation.created_at,
             )
+        except ProcurementError:
+            raise
+        except SQLAlchemyError as error:
+            raise self._database_unavailable() from error
+
+    async def is_recommendation_preview_current(
+        self,
+        *,
+        company_id: UUID,
+        recommendation_id: UUID,
+    ) -> bool:
+        """Revalidate every upstream input before exposing an approval preview."""
+
+        try:
+            recommendation = await self.repository.get_recommendation(
+                company_id=company_id,
+                recommendation_id=recommendation_id,
+            )
+            if recommendation is None:
+                raise not_found("recommendation", recommendation_id)
+            return await recommendation_preview_is_current(self.session, recommendation)
         except ProcurementError:
             raise
         except SQLAlchemyError as error:

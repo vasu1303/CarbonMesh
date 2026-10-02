@@ -1,8 +1,10 @@
+import csv
 import hashlib
 import json
 import shutil
 import subprocess
 import sys
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -33,6 +35,8 @@ from app.modules.demo.fixtures import (
 from app.modules.demo.service import DemoResetSummary, _truncate_statement
 from app.modules.imports.parser import parse_import_content
 from app.modules.ledger.service import payload_sha256
+from app.modules.measurement.domain import resolve_factor
+from app.modules.measurement.service import MeasurementService
 from app.modules.procurement.review import scenario_context_signature
 from app.modules.procurement.schemas import ScoringMethod, SupplierProductSummary
 
@@ -197,7 +201,6 @@ def test_demo_fixture_seeds_advisory_batch_process_and_hard_constraints() -> Non
 
 def test_versioned_manifest_covers_every_golden_input_and_matches_hashes() -> None:
     fixture_directory = Path(__file__).resolve().parents[4] / "data" / "demo"
-    packaged_directory = Path(__file__).resolve().parents[2] / "app" / "demo_fixtures"
     manifest = json.loads((fixture_directory / "manifest-v1.json").read_text(encoding="utf-8"))
 
     assert manifest["fixture_id"] == "maverick-q3-2026-v1"
@@ -206,10 +209,69 @@ def test_versioned_manifest_covers_every_golden_input_and_matches_hashes() -> No
         relative = Path(artifact["path"])
         content = (fixture_directory.parent.parent / relative).read_bytes()
         assert hashlib.sha256(content).hexdigest() == artifact["sha256"]
-        assert (packaged_directory / relative.name).read_bytes() == content
-    assert (packaged_directory / "manifest-v1.json").read_bytes() == (
-        fixture_directory / "manifest-v1.json"
-    ).read_bytes()
+
+
+def test_complete_quarter_is_contiguous_and_its_decimal_golden_matches_sources() -> None:
+    directory = Path(__file__).resolve().parents[4] / "data" / "demo"
+    manifest = json.loads((directory / "complete-q3-manifest-v1.json").read_text())
+    assert manifest["fixture_id"] == "maverick-q3-2026-complete-v1"
+    assert manifest["synthetic"] is True
+    for artifact in manifest["artifacts"]:
+        assert hashlib.sha256((directory / Path(artifact["path"]).name).read_bytes()).hexdigest() == artifact["sha256"]
+    with (directory / "electricity-hourly-complete-q3-v1.csv").open(newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    history = json.loads((directory / "grid-history-complete-q3-v1.json").read_text())
+    quality_history = json.loads((directory / "grid-history.json").read_text())
+    complete_points = {point["datetime"]: point for point in history["data"]}
+    assert all(complete_points[point["datetime"]] == point for point in quality_history["data"])
+    assert len(rows) == len(history["data"]) == manifest["hourly_intervals"] == 92 * 24
+    expected_times = [datetime(2026, 7, 1, tzinfo=UTC) + timedelta(hours=i) for i in range(2208)]
+    assert [datetime.fromisoformat(row["timestamp"]) for row in rows] == expected_times
+    assert [datetime.fromisoformat(point["datetime"]) for point in history["data"]] == expected_times
+    assert all(row["synthetic"] == "true" for row in rows)
+    total = sum(
+        Decimal(row["kwh"]) * Decimal(point["carbonIntensity"]) / Decimal(1000)
+        for row, point in zip(rows, history["data"], strict=True)
+    )
+    assert total == Decimal(manifest["expected"]["scope2_kgco2e"])
+    assert sum(Decimal(row["kwh"]) for row in rows) == Decimal(manifest["expected"]["electricity_kwh"])
+
+
+def test_declared_products_have_specific_factors_and_trusted_source_metadata() -> None:
+    records = build_demo_records()
+    products = [item for item in records if isinstance(item, SupplierProduct)]
+    factors = [MeasurementService._factor_candidate(item) for item in records if isinstance(item, EmissionFactor)]
+    for product in products:
+        factor = resolve_factor(
+            factors,
+            material_code=product.material_code,
+            product_code=product.product_code,
+            geography="IN",
+            effective_on=date(2026, 9, 15),
+        )
+        assert factor.candidate.factor_value == product.pcf_kgco2e_per_unit
+    documents = {item.id: item for item in records if isinstance(item, SourceDocument)}
+    for item in records:
+        if isinstance(item, EvidenceItem):
+            document = documents[item.source_document_id]
+            assert item.evidence_metadata["source_version"] == document.version == 1
+            assert item.evidence_metadata["source_checksum"] == document.checksum
+            assert item.evidence_metadata["trust_status"] == "synthetic"
+
+
+def test_runtime_fixture_lookup_loads_container_bundle(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from app.modules.demo import fixtures
+
+    fixture_directory = Path(__file__).resolve().parents[4] / "data" / "demo"
+    bundled = tmp_path / "app" / "demo_fixtures"
+    shutil.copytree(fixture_directory, bundled)
+    monkeypatch.setattr(fixtures, "__file__", str(tmp_path / "app/modules/demo/fixtures.py"))
+
+    assert fixtures._fixture_directory() == bundled
+    assert set(_load_fixture_bundle(fixtures._fixture_directory())) == set(RUNTIME_FIXTURE_NAMES)
 
 
 def test_runtime_fixture_bundle_fails_closed_for_missing_or_corrupt_artifacts(
@@ -258,6 +320,9 @@ def test_maverick_fixture_generator_replays_byte_for_byte(tmp_path: Path) -> Non
         filename = Path(artifact["path"]).name
         assert (tmp_path / filename).read_bytes() == (fixture_directory / filename).read_bytes()
     assert b"\r\n" not in (tmp_path / "electricity-hourly.csv").read_bytes()
+    complete = json.loads((fixture_directory / "complete-q3-manifest-v1.json").read_text())
+    for name in ["complete-q3-manifest-v1.json", *(Path(item["path"]).name for item in complete["artifacts"])]:
+        assert (tmp_path / name).read_bytes() == (fixture_directory / name).read_bytes()
 
     expected = json.loads((tmp_path / "expected-results.json").read_text(encoding="utf-8"))
     assert expected["fixture_id"] == "maverick-q3-2026-v1"

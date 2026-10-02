@@ -924,6 +924,30 @@ def build_demo_records() -> Sequence[DeclarativeBase]:
         factor_recency=Decimal("1.00"),
         status="active",
     )
+    alternative_factors = tuple(
+        EmissionFactor(
+            id=_id(404 + index),
+            company_id=DEMO_COMPANY_ID,
+            metric_definition_id=EMISSIONS_METRIC_ID,
+            evidence_item_id=product.evidence_item_id,
+            factor_code=f"{product.product_code}-PCF",
+            version="1.0.0",
+            name=f"Synthetic declared product carbon footprint: {product.product_code}",
+            material_code=product.material_code,
+            product_code=product.product_code,
+            geography="IN",
+            factor_value=product.pcf_kgco2e_per_unit,
+            numerator_unit="kgCO2e",
+            denominator_unit="kg",
+            effective_from=date(2026, 1, 1),
+            source_quality=product.evidence_quality_score / Decimal(100),
+            factor_specificity=Decimal(1),
+            factor_recency=Decimal(1),
+            status="active",
+        )
+        for index, product in enumerate(products)
+        if product.product_code != "AL-CURRENT"
+    )
     assurance_standard = Standard(
         id=ASSURANCE_STANDARD_ID,
         company_id=DEMO_COMPANY_ID,
@@ -935,6 +959,8 @@ def build_demo_records() -> Sequence[DeclarativeBase]:
         description=("Synthetic POC template only; not an assurance opinion or regulatory filing."),
         template={
             "fixture_version": "maverick-q3-2026-v1",
+            "type": "scope_2_summary",
+            "metric_key": "emissions.scope2.location_based",
             "claim_order": ["S2-BOUNDARY", "S2-TOTAL", "ESRS-E1-TREND-LIMITED"],
             "synthetic": True,
         },
@@ -990,7 +1016,7 @@ def build_demo_records() -> Sequence[DeclarativeBase]:
                 "missing_support_policy": "block",
             },
             minimum_confidence=Decimal("0.80000"),
-            is_required=True,
+            is_required=False,
             is_active=True,
         ),
     )
@@ -1082,6 +1108,18 @@ def build_demo_records() -> Sequence[DeclarativeBase]:
         ),
     )
 
+    documents_by_id = {document.id: document for document in documents}
+    for document in documents:
+        document.version = 1
+    for item in evidence:
+        document = documents_by_id[item.source_document_id]
+        item.evidence_metadata = {
+            **item.evidence_metadata,
+            "trust_status": "synthetic",
+            "source_version": document.version,
+            "source_checksum": document.checksum,
+        }
+
     return (
         company,
         site,
@@ -1101,6 +1139,7 @@ def build_demo_records() -> Sequence[DeclarativeBase]:
         raw_activity,
         activity,
         factor,
+        *alternative_factors,
         flexible_load,
         *dispatch_constraints,
     )

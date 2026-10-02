@@ -3,7 +3,3 @@
 /data/demo/*.json text eol=lf
 /data/demo/*.md text eol=lf
 /data/demo/*.txt text eol=lf
-/apps/api/app/demo_fixtures/*.csv text eol=lf
-/apps/api/app/demo_fixtures/*.json text eol=lf
-/apps/api/app/demo_fixtures/*.md text eol=lf
-/apps/api/app/demo_fixtures/*.txt text eol=lf

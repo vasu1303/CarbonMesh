@@ -23,22 +23,15 @@ from tests.e2e.conftest import E2EContext
 
 async def _electricity_request(e2e_context: E2EContext, content, **overrides):
     ids = e2e_context.ids
-    metric_id = uuid4()
-    async with e2e_context.session_factory() as session, session.begin():
-        session.add(
-            MetricDefinition(
-                id=metric_id,
-                company_id=ids.company_id,
-                key="activity.electricity_consumption",
-                version="1.0.0",
-                name="Synthetic hourly electricity consumption",
-                canonical_unit="kWh",
-                dimensions={"time": "hourly"},
-                handler="measurement.electricity_activity",
-                method_version="1.0.0",
-                is_active=True,
+    async with e2e_context.session_factory() as session:
+        metric_id = await session.scalar(
+            select(MetricDefinition.id).where(
+                MetricDefinition.company_id == ids.company_id,
+                MetricDefinition.key == "activity.electricity_consumption",
+                MetricDefinition.version == "1.0.0",
             )
         )
+    assert metric_id is not None
     return {
         "company_id": str(ids.company_id),
         "site_id": str(ids.site_id),

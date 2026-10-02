@@ -12,6 +12,7 @@ from typing import Any, ClassVar, Protocol
 import httpx
 from pydantic import SecretStr
 
+from app.core.observability import traced_operation
 from app.modules.agents.llm.contracts import AIProviderName, AIRequest, AIResult
 from app.modules.agents.llm.errors import AIProviderError
 
@@ -97,6 +98,7 @@ class HTTPAIModel(ABC):
             if self._http_client is None:
                 await client.aclose()
 
+    @traced_operation("provider.model.http")
     async def _post_with_client(
         self,
         client: httpx.AsyncClient,

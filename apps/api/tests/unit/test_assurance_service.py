@@ -23,11 +23,13 @@ from app.modules.assurance.service import (
     AssuranceServicePort,
     _base_context,
     _bounded_default_title,
+    _gap,
     _hash,
     _minimum_evidence_similarity,
     _PlannedClaim,
     _source_state,
 )
+from app.modules.sources.errors import SourceUploadError
 
 NOW = datetime(2026, 10, 1, 12, tzinfo=UTC)
 
@@ -41,6 +43,7 @@ def _requirement(
     identifier: int = 20,
     sequence: int = 1,
     evidence_rules: dict[str, object] | None = None,
+    is_required: bool = True,
 ) -> SimpleNamespace:
     return SimpleNamespace(
         id=_id(identifier),
@@ -54,7 +57,7 @@ def _requirement(
         claim_template="{company} reports for {site} in {reporting_period}.",
         evidence_rules=evidence_rules or {},
         minimum_confidence=Decimal("0.80000"),
-        is_required=True,
+        is_required=is_required,
         is_active=True,
     )
 
@@ -112,6 +115,17 @@ def _dependencies() -> DraftDependencies:
         output_hash="a" * 64,
         formula="sum(hourly kWh * gCO2e_per_kWh / 1000)",
     )
+    measurement_metric = SimpleNamespace(
+        id=measurement.metric_definition_id,
+        company_id=company.id,
+        key="emissions.scope2.location_based",
+        version="2.0.0",
+        canonical_unit="kgCO2e",
+        dimensions={"company": True, "site": True, "period": True, "time": "hourly"},
+        handler="measurement.scope2_location_based",
+        method_version="scope2-hourly-v1",
+        is_active=True,
+    )
     actor = SimpleNamespace(id=_id(9), company_id=company.id, is_active=True)
     return DraftDependencies(
         company=company,
@@ -119,6 +133,7 @@ def _dependencies() -> DraftDependencies:
         site=site,
         reporting_period=period,
         measurement=measurement,
+        measurement_metric=measurement_metric,
         requested_by=actor,
         agent_run=None,
     )
@@ -202,11 +217,48 @@ def test_service_port_and_default_similarity_policy_are_explicit() -> None:
         _minimum_evidence_similarity(requirement)
 
 
+@pytest.mark.asyncio
+async def test_retrieval_rejects_oversized_query_as_typed_validation(monkeypatch) -> None:
+    provider = SimpleNamespace(embed=AsyncMock(side_effect=SourceUploadError(
+        "Input exceeds embedding bounds.", status_code=422,
+    )))
+    monkeypatch.setattr("app.modules.assurance.service.get_embedding_provider", lambda: provider)
+    with pytest.raises(AssuranceValidationError, match="embedding input bounds"):
+        await _service()._retrieve_evidence(_dependencies(), _requirement())
+
+
 def test_generated_title_is_deterministic_and_bounded_to_database_column() -> None:
     title = _bounded_default_title("S" * 255, "Q" * 100)
     assert len(title) == 255
     assert title.endswith("Q" * 100)
     assert title == _bounded_default_title("S" * 255, "Q" * 100)
+
+
+def test_requirement_scope_keeps_required_claims_and_selected_optional_claims() -> None:
+    required = _requirement(identifier=20, sequence=1)
+    optional = _requirement(identifier=21, sequence=2, is_required=False)
+
+    selected = AssuranceService._select_requirements(
+        [required, optional],
+        (required.id,),
+    )
+
+    assert selected == [required]
+    with pytest.raises(AssuranceValidationError, match="cannot be omitted"):
+        AssuranceService._select_requirements([required, optional], (optional.id,))
+    with pytest.raises(AssuranceValidationError, match="unavailable"):
+        AssuranceService._select_requirements([required, optional], (required.id, _id(99)))
+
+
+def test_optional_claim_with_block_policy_produces_an_error_gap() -> None:
+    requirement = _requirement(
+        is_required=False,
+        evidence_rules={"missing_support_policy": "block"},
+    )
+
+    gap = _gap(requirement, "MISSING", "Synthetic missing support.")
+
+    assert gap.severity == "error"
 
 
 @pytest.mark.asyncio
@@ -217,12 +269,21 @@ async def test_retrieval_pushes_query_embedding_into_repository_ranking() -> Non
         list_evidence_candidates=list_evidence_candidates
     )
 
-    result = await service._retrieve_evidence(_dependencies(), _requirement())
+    allowed_evidence_ids = frozenset({_id(30)})
+    result = await service._retrieve_evidence(
+        _dependencies(),
+        _requirement(),
+        allowed_evidence_item_ids=allowed_evidence_ids,
+    )
 
     assert result == ()
     query_embedding = list_evidence_candidates.await_args.kwargs["query_embedding"]
     assert len(query_embedding) == 768
     assert any(value != 0 for value in query_embedding)
+    assert (
+        list_evidence_candidates.await_args.kwargs["evidence_item_ids"]
+        == allowed_evidence_ids
+    )
 
 
 @pytest.mark.parametrize(("target", "message"), [("company", "company"), ("site", "site")])
@@ -250,6 +311,15 @@ def test_dependency_validation_rejects_nonpositive_or_duplicate_sequences(
 
     with pytest.raises(AssuranceValidationError, match="unique positive"):
         service._validate_draft_dependencies(_dependencies(), requirements)
+
+
+def test_dependency_validation_rejects_scope2_standard_with_scope3_measurement() -> None:
+    service = _service()
+    dependencies = _dependencies()
+    dependencies.measurement_metric.key = "emissions.scope3.category1"
+
+    with pytest.raises(AssuranceValidationError, match="disclosure standard"):
+        service._validate_draft_dependencies(dependencies, [_requirement()])
 
 
 @pytest.mark.asyncio
@@ -322,6 +392,7 @@ async def test_fact_snapshot_is_json_normalized_and_identical_binding_is_reused(
         site=dependencies.site,
         reporting_period=dependencies.reporting_period,
         measurement=dependencies.measurement,
+        measurement_metric=dependencies.measurement_metric,
         requested_by=dependencies.requested_by,
         agent_run=SimpleNamespace(id=_id(70), actor_id=dependencies.requested_by.id),
     )
@@ -505,6 +576,7 @@ async def test_staleness_reloads_active_requirements_and_current_ranked_evidence
             "measurement_id": str(dependencies.measurement.id),
             "requested_by": str(dependencies.requested_by.id),
             "source_hash": source_hash,
+            "evidence_item_scope_ids": [str(current_evidence.evidence.id)],
         },
     )
     list_requirements = AsyncMock(return_value=[requirement])
@@ -529,4 +601,9 @@ async def test_staleness_reloads_active_requirements_and_current_ranked_evidence
         standard_id=dependencies.standard.id,
         active_only=True,
     )
-    service._plan_claim.assert_awaited_once_with(draft, dependencies, requirement)
+    service._plan_claim.assert_awaited_once_with(
+        draft,
+        dependencies,
+        requirement,
+        allowed_evidence_item_ids=frozenset({current_evidence.evidence.id}),
+    )

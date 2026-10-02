@@ -3,9 +3,17 @@ from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import func, select
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models.carbon import CarbonMeasurement, EmissionCalculation, GridIntensityPoint
-from app.db.models.ledger import LedgerEvent
+from app.db.models.carbon import (
+    CalculationRun,
+    CarbonMeasurement,
+    EmissionCalculation,
+    GridIntensityPoint,
+)
+from app.db.models.core import AuditLog
+from app.db.models.ledger import LedgerEvent, LedgerEventEvidence, LineageEdge
 from app.main import app
 from app.modules.demo.fixtures import (
     ASSURANCE_STANDARD_ID,
@@ -14,7 +22,40 @@ from app.modules.demo.fixtures import (
 )
 from app.modules.demo.service import reset_and_seed_demo
 from app.modules.integrations.electricity_maps import get_electricity_maps_client
+from app.modules.measurement.schemas import MeasurementCalculateRequest
+from app.modules.measurement.service import MeasurementService
 from tests.e2e.test_platform_endpoints_e2e import FakeElectricityMapsProvider
+
+
+@pytest.mark.asyncio
+async def test_bulk_measurement_failure_rolls_back_calculations_events_and_lineage(
+    e2e_context, monkeypatch,
+):
+    async with e2e_context.session_factory() as session:
+        seeded = await reset_and_seed_demo(session)
+    original_add = AsyncSession.add
+
+    def fail_final_audit(session, instance, **kwargs):
+        if isinstance(instance, AuditLog) and instance.action == "measurement.calculated":
+            raise SQLAlchemyError("Synthetic final audit failure")
+        return original_add(session, instance, **kwargs)
+
+    monkeypatch.setattr(AsyncSession, "add", fail_final_audit)
+    async with e2e_context.session_factory() as session:
+        with pytest.raises(SQLAlchemyError, match="Synthetic final audit failure"):
+            await MeasurementService(session).calculate(MeasurementCalculateRequest(
+                company_id=seeded.company_id,
+                site_id=seeded.site_id,
+                reporting_period_id=seeded.reporting_period_id,
+                material_code="RECYCLED-ALUMINIUM",
+                actor_id=DEMO_ANALYST_ID,
+            ))
+    async with e2e_context.session_factory() as session:
+        for model in (
+            CalculationRun, CarbonMeasurement, EmissionCalculation,
+            LedgerEvent, LedgerEventEvidence, LineageEdge,
+        ):
+            assert await session.scalar(select(func.count()).select_from(model)) == 0
 
 
 @pytest.mark.asyncio

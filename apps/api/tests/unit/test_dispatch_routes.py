@@ -1,6 +1,7 @@
 from app.api.routes.dispatch import router
 from app.main import app
 from app.modules.dispatch.schemas import ForecastSyncRequest
+from app.modules.integrations.schemas import GridIntensitySyncRequest
 
 
 def test_dispatch_router_exposes_only_the_five_canonical_operations() -> None:
@@ -15,11 +16,12 @@ def test_dispatch_router_exposes_only_the_five_canonical_operations() -> None:
     }
 
 
-def test_forecast_sync_defaults_to_credential_free_fixture_mode() -> None:
+def test_forecast_sync_defaults_to_live_mode() -> None:
     fields = ForecastSyncRequest.model_fields
 
-    assert fields["source_mode"].default == "fixture"
+    assert fields["source_mode"].default == "live"
     assert fields["horizon_hours"].default == 24
+    assert GridIntensitySyncRequest().mode == "live"
 
 
 def test_all_dispatch_operations_are_mounted_under_the_canonical_api_prefix() -> None:
