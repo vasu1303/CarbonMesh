@@ -65,6 +65,19 @@ class SourceRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
+    async def get_document(
+        self, *, company_id: UUID, document_id: UUID, for_update: bool = False
+    ) -> StoredSourceUpload | None:
+        query = select(SourceDocument).where(
+            SourceDocument.company_id == company_id, SourceDocument.id == document_id
+        )
+        if for_update:
+            query = query.with_for_update()
+        document = await self._session.scalar(query)
+        if document is None:
+            return None
+        return await self.get_upload_by_checksum(company_id=company_id, checksum=document.checksum)
+
     async def get_company(self, *, company_id: UUID) -> Company | None:
         return await self._session.scalar(
             select(Company).where(Company.id == company_id, Company.is_active.is_(True))

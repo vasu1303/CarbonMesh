@@ -16,6 +16,7 @@ from app.db.models.carbon import (
     CarbonMeasurement,
     EmissionCalculation,
     EmissionFactor,
+    GridIntensityPoint,
     RawActivityRecord,
 )
 from app.db.models.core import (
@@ -32,6 +33,7 @@ from app.db.models.dispatch import FlexibleLoad, OperatingConstraint
 from app.db.models.ledger import LedgerEvent, LedgerEventEvidence, LineageEdge
 from app.db.models.procurement import Supplier, SupplierProduct
 from app.db.models.semantic import MethodDefinition, MetricDefinition, PolicyDefinition
+from app.modules.measurement.domain import sha256_payload
 from app.modules.sources.embedding import EMBEDDING_MODEL_ID, hash_embedding
 
 
@@ -52,7 +54,12 @@ class ApiE2ESeedIds:
     procurement_manager_id: UUID
     approver_id: UUID
     measurement_id: UUID
+    activity_record_id: UUID
     measurement_ledger_event_id: UUID
+    assurance_metric_id: UUID
+    assurance_measurement_id: UUID
+    assurance_activity_record_id: UUID
+    assurance_measurement_ledger_event_id: UUID
     assurance_standard_id: UUID
     assurance_agent_run_id: UUID
     assurance_evidence_id: UUID
@@ -74,7 +81,12 @@ SEED_IDS = ApiE2ESeedIds(
     procurement_manager_id=_id(5),
     approver_id=_id(6),
     measurement_id=_id(40),
+    activity_record_id=_id(42),
     measurement_ledger_event_id=_id(54),
+    assurance_metric_id=_id(96),
+    assurance_measurement_id=_id(109),
+    assurance_activity_record_id=_id(101),
+    assurance_measurement_ledger_event_id=_id(108),
     assurance_standard_id=_id(90),
     assurance_agent_run_id=_id(94),
     assurance_evidence_id=_id(95),
@@ -114,16 +126,39 @@ async def seed_api_e2e_data(session: AsyncSession) -> ApiE2ESeedIds:
     expensive_supplier_id = _id(35)
     alternative_a_supplier_id = _id(37)
     raw_activity_id = _id(41)
-    activity_id = _id(42)
     factor_id = _id(43)
     calculation_run_id = _id(44)
     emission_calculation_id = _id(45)
     source_event_id = _id(51)
     factor_event_id = _id(52)
     calculation_event_id = _id(53)
+    electricity_activity_metric_id = _id(97)
+    scope2_method_id = _id(98)
+    scope2_grid_evidence_id = _id(99)
+    scope2_raw_activity_id = _id(100)
+    scope2_grid_point_id = _id(102)
+    scope2_calculation_run_id = _id(103)
+    scope2_emission_calculation_id = _id(104)
+    scope2_source_event_id = _id(105)
+    scope2_grid_event_id = _id(106)
+    scope2_calculation_event_id = _id(107)
+    scope2_method_configuration = {
+        "formula": "kWh * gCO2e/kWh / 1000",
+        "missing_interval_policy": "reject",
+        "rounding": "ROUND_HALF_EVEN",
+        "synthetic": True,
+    }
+    scope2_coverage = {
+        "interval_start": "2026-07-01T00:00:00+00:00",
+        "interval_end": "2026-10-01T00:00:00+00:00",
+        "observed_hours": 2208,
+        "reporting_period_hours": 2208,
+        "reporting_period_fraction": "1.00000",
+        "full_reporting_period": True,
+    }
     assurance_support_text = (
         "Maverick Manufacturing (synthetic) reports verified emissions of "
-        "86,000 kgCO2e for Plant B during Q3 2026."
+        "475 kgCO2e of location-based Scope 2 emissions for Plant B during Q3 2026."
     )
 
     objects = [
@@ -183,7 +218,7 @@ async def seed_api_e2e_data(session: AsyncSession) -> ApiE2ESeedIds:
                 "company_id": str(ids.company_id),
                 "site_id": str(ids.site_id),
                 "reporting_period_id": str(ids.reporting_period_id),
-                "measurement_id": str(ids.measurement_id),
+                "measurement_id": str(ids.assurance_measurement_id),
                 "synthetic": True,
             },
             context_hash=_hash("synthetic-assurance-e2e-context"),
@@ -281,6 +316,24 @@ async def seed_api_e2e_data(session: AsyncSession) -> ApiE2ESeedIds:
             embedding_model=EMBEDDING_MODEL_ID,
             embedded_at=now,
         ),
+        EvidenceItem(
+            id=scope2_grid_evidence_id,
+            company_id=ids.company_id,
+            source_document_id=document_id,
+            evidence_type="emission_factor",
+            locator="synthetic:grid/IN/2026-08-15T00:00:00Z",
+            content_text=(
+                "Synthetic Electricity Maps-shaped historical point: "
+                "475 gCO2e/kWh for IN at 2026-08-15T00:00:00Z."
+            ),
+            checksum=_hash("synthetic-grid-IN-2026-08-15T00:00:00Z-475"),
+            evidence_metadata={
+                "synthetic": True,
+                "provider": "electricity-maps-fixture",
+                "zone": "IN",
+                "observed_at": "2026-08-15T00:00:00Z",
+            },
+        ),
         MetricDefinition(
             id=carbon_metric_id,
             company_id=ids.company_id,
@@ -305,6 +358,30 @@ async def seed_api_e2e_data(session: AsyncSession) -> ApiE2ESeedIds:
             method_version="electricity-maps-v4",
             description="Native Electricity Maps grid intensity in gCO2e/kWh.",
         ),
+        MetricDefinition(
+            id=electricity_activity_metric_id,
+            company_id=ids.company_id,
+            key="activity.electricity_consumption",
+            version="1.0.0",
+            name="Hourly electricity consumption",
+            canonical_unit="kWh",
+            dimensions={"company": True, "site": True, "period": True, "time": "hourly"},
+            handler="measurement.electricity_activity",
+            method_version="1.0.0",
+            description="Synthetic pre-created activity artifact for orchestration tests.",
+        ),
+        MetricDefinition(
+            id=ids.assurance_metric_id,
+            company_id=ids.company_id,
+            key="emissions.scope2.location_based",
+            version="2.0.0",
+            name="Location-based Scope 2 emissions",
+            canonical_unit="kgCO2e",
+            dimensions={"company": True, "site": True, "period": True, "time": "hourly"},
+            handler="measurement.scope2_location_based",
+            method_version="scope2-hourly-v1",
+            description="Synthetic pre-created Scope 2 artifact for orchestration tests.",
+        ),
         Standard(
             id=ids.assurance_standard_id,
             company_id=ids.company_id,
@@ -314,7 +391,11 @@ async def seed_api_e2e_data(session: AsyncSession) -> ApiE2ESeedIds:
             name="Synthetic GHG Protocol emissions summary",
             jurisdiction="GLOBAL",
             description="Synthetic POC disclosure template; not an assurance opinion.",
-            template={"type": "scope_2_summary", "synthetic": True},
+            template={
+                "type": "scope_2_summary",
+                "metric_key": "emissions.scope2.location_based",
+                "synthetic": True,
+            },
             effective_from=date(2026, 1, 1),
         ),
         DisclosureRequirement(
@@ -333,7 +414,7 @@ async def seed_api_e2e_data(session: AsyncSession) -> ApiE2ESeedIds:
             id=_id(92),
             company_id=ids.company_id,
             standard_id=ids.assurance_standard_id,
-            metric_definition_id=carbon_metric_id,
+            metric_definition_id=ids.assurance_metric_id,
             requirement_code="S2-TOTAL",
             title="Verified emissions total",
             description="Report the verified emissions total for the period.",
@@ -350,7 +431,7 @@ async def seed_api_e2e_data(session: AsyncSession) -> ApiE2ESeedIds:
             id=_id(93),
             company_id=ids.company_id,
             standard_id=ids.assurance_standard_id,
-            metric_definition_id=carbon_metric_id,
+            metric_definition_id=ids.assurance_metric_id,
             requirement_code="S2-PRIOR-PERIOD",
             title="Prior-period comparison",
             description="Compare emissions with a verified prior period.",
@@ -359,8 +440,10 @@ async def seed_api_e2e_data(session: AsyncSession) -> ApiE2ESeedIds:
             evidence_rules={
                 "allowed_evidence_types": ["disclosure_support"],
                 "comparable_prior_period_required": True,
+                "missing_support_policy": "block",
             },
             minimum_confidence=Decimal("0.90000"),
+            is_required=False,
         ),
         MethodDefinition(
             id=ids.scoring_method_id,
@@ -414,6 +497,17 @@ async def seed_api_e2e_data(session: AsyncSession) -> ApiE2ESeedIds:
             name="Mass multiplied by product emission factor",
             code_version="carbonmesh-api-0.1.0",
             configuration={"rounding": "ROUND_HALF_EVEN"},
+            effective_from=date(2026, 1, 1),
+        ),
+        MethodDefinition(
+            id=scope2_method_id,
+            company_id=ids.company_id,
+            method_type="measurement",
+            key="measurement.scope2.location_based.hourly",
+            version="1.0.0",
+            name="Exact timestamp-aligned location-based Scope 2",
+            code_version="carbonmesh-api-0.1.0",
+            configuration=scope2_method_configuration,
             effective_from=date(2026, 1, 1),
         ),
         Supplier(
@@ -550,7 +644,7 @@ async def seed_api_e2e_data(session: AsyncSession) -> ApiE2ESeedIds:
             import_status="accepted",
         ),
         ActivityRecord(
-            id=activity_id,
+            id=ids.activity_record_id,
             company_id=ids.company_id,
             raw_activity_record_id=raw_activity_id,
             site_id=ids.site_id,
@@ -606,7 +700,7 @@ async def seed_api_e2e_data(session: AsyncSession) -> ApiE2ESeedIds:
             id=emission_calculation_id,
             company_id=ids.company_id,
             calculation_run_id=calculation_run_id,
-            activity_record_id=activity_id,
+            activity_record_id=ids.activity_record_id,
             emission_factor_id=factor_id,
             normalized_quantity=Decimal(10000),
             quantity_unit="kg",
@@ -621,7 +715,7 @@ async def seed_api_e2e_data(session: AsyncSession) -> ApiE2ESeedIds:
             company_id=ids.company_id,
             event_type="activity.normalized",
             entity_type="activity_record",
-            entity_id=activity_id,
+            entity_id=ids.activity_record_id,
             payload={
                 "label": "Normalized purchased material",
                 "quantity": "10000",
@@ -691,6 +785,192 @@ async def seed_api_e2e_data(session: AsyncSession) -> ApiE2ESeedIds:
             status="verified",
             formula="10000 kg * 8.6 kgCO2e/kg = 86000 kgCO2e",
             output_hash=_hash("maverick-carbon-measurement"),
+            verified_at=now,
+        ),
+        # These Scope 2 rows are deliberately pre-created test artifacts. They
+        # prove cross-module orchestration over a semantically valid upstream
+        # result without implementing Person 2's hourly calculation service.
+        RawActivityRecord(
+            id=scope2_raw_activity_id,
+            company_id=ids.company_id,
+            data_source_id=source_id,
+            source_document_id=document_id,
+            row_key="maverick-plant-b-2026-08-15T00:00:00Z-electricity",
+            row_number=2,
+            raw_payload={
+                "synthetic": True,
+                "site": "Plant B",
+                "timestamp": "2026-08-15T00:00:00Z",
+                "quantity": "1000",
+                "unit": "kWh",
+            },
+            checksum=_hash("maverick-plant-b-2026-08-15T00:00:00Z-electricity-row"),
+            import_status="accepted",
+        ),
+        ActivityRecord(
+            id=ids.assurance_activity_record_id,
+            company_id=ids.company_id,
+            raw_activity_record_id=scope2_raw_activity_id,
+            site_id=ids.site_id,
+            reporting_period_id=ids.reporting_period_id,
+            metric_definition_id=electricity_activity_metric_id,
+            material_code="ELECTRICITY",
+            activity_date=date(2026, 8, 15),
+            quantity=Decimal(1000),
+            unit="kWh",
+            normalized_quantity=Decimal(1000),
+            normalized_unit="kWh",
+            status="valid",
+        ),
+        GridIntensityPoint(
+            id=scope2_grid_point_id,
+            company_id=ids.company_id,
+            site_id=ids.site_id,
+            source_document_id=document_id,
+            evidence_item_id=scope2_grid_evidence_id,
+            metric_definition_id=grid_metric_id,
+            provider="electricity-maps-fixture",
+            zone="IN",
+            observed_at=datetime(2026, 8, 15, 0, tzinfo=UTC),
+            provider_updated_at=datetime(2026, 8, 15, 1, tzinfo=UTC),
+            temporal_granularity="hourly",
+            emission_factor_type="lifecycle",
+            flow_traced=True,
+            is_estimated=False,
+            intensity_gco2e_per_kwh=Decimal(475),
+            method_version="electricity-maps-v4",
+            point_hash=_hash("synthetic-grid-IN-2026-08-15T00:00:00Z-475-point"),
+            provider_metadata={"synthetic": True, "fixture_version": "e2e-v1"},
+        ),
+        CalculationRun(
+            id=scope2_calculation_run_id,
+            company_id=ids.company_id,
+            agent_run_id=ids.assurance_agent_run_id,
+            reporting_period_id=ids.reporting_period_id,
+            method_definition_id=scope2_method_id,
+            method_version="1.0.0",
+            code_version="carbonmesh-api-0.1.0",
+            rounding_policy="ROUND_HALF_EVEN:6",
+            input_hash=_hash("maverick-scope2-measurement-input"),
+            output_hash=_hash("maverick-scope2-measurement-output"),
+            status="completed",
+            started_at=now,
+            completed_at=now,
+            summary={
+                "synthetic": True,
+                "pre_created_test_artifact": True,
+                "fixture_representation": "condensed_constant_hourly_series",
+                "records": 2208,
+                "input_snapshot": {
+                    "method_definition_id": str(scope2_method_id),
+                    "method_key": "measurement.scope2.location_based.hourly",
+                    "method_version": "1.0.0",
+                    "code_version": "carbonmesh-api-0.1.0",
+                    "method_configuration": scope2_method_configuration,
+                    "coverage": scope2_coverage,
+                },
+                "method_hash": sha256_payload(
+                    {
+                        "key": "measurement.scope2.location_based.hourly",
+                        "version": "1.0.0",
+                        "configuration": scope2_method_configuration,
+                    }
+                ),
+            },
+        ),
+        EmissionCalculation(
+            id=scope2_emission_calculation_id,
+            company_id=ids.company_id,
+            calculation_run_id=scope2_calculation_run_id,
+            activity_record_id=ids.assurance_activity_record_id,
+            grid_intensity_point_id=scope2_grid_point_id,
+            normalized_quantity=Decimal(1000),
+            quantity_unit="kWh",
+            factor_value=Decimal(475),
+            factor_unit="gCO2e/kWh",
+            emissions_kgco2e=Decimal(475),
+            formula="1000 kWh * 475 gCO2e/kWh / 1000 = 475 kgCO2e",
+            output_hash=_hash("maverick-scope2-emission-calculation-output"),
+        ),
+        LedgerEvent(
+            id=scope2_source_event_id,
+            company_id=ids.company_id,
+            event_type="activity.normalized",
+            entity_type="activity_record",
+            entity_id=ids.assurance_activity_record_id,
+            payload={
+                "label": "Normalized hourly electricity activity",
+                "timestamp": "2026-08-15T00:00:00Z",
+                "quantity": "1000",
+                "unit": "kWh",
+                "source_row_id": str(scope2_raw_activity_id),
+                "synthetic": True,
+            },
+            payload_hash=_hash("ledger-scope2-activity-normalized"),
+            created_by=ids.analyst_id,
+        ),
+        LedgerEvent(
+            id=scope2_grid_event_id,
+            company_id=ids.company_id,
+            event_type="grid_intensity.selected",
+            entity_type="grid_intensity_point",
+            entity_id=scope2_grid_point_id,
+            payload={
+                "label": "Selected exact-timestamp synthetic grid point",
+                "timestamp": "2026-08-15T00:00:00Z",
+                "intensity": "475",
+                "unit": "gCO2e/kWh",
+                "evidence_item_id": str(scope2_grid_evidence_id),
+            },
+            payload_hash=_hash("ledger-scope2-grid-point-selected"),
+            created_by=ids.analyst_id,
+        ),
+        LedgerEvent(
+            id=scope2_calculation_event_id,
+            company_id=ids.company_id,
+            event_type="emissions.calculated",
+            entity_type="emission_calculation",
+            entity_id=scope2_emission_calculation_id,
+            payload={
+                "label": "Pre-created deterministic Scope 2 calculation artifact",
+                "formula": "1000 * 475 / 1000",
+                "value": "475",
+                "unit": "kgCO2e",
+                "synthetic": True,
+            },
+            payload_hash=_hash("ledger-scope2-emissions-calculated"),
+            created_by=ids.analyst_id,
+        ),
+        LedgerEvent(
+            id=ids.assurance_measurement_ledger_event_id,
+            company_id=ids.company_id,
+            event_type="measurement.verified",
+            entity_type="carbon_measurement",
+            entity_id=ids.assurance_measurement_id,
+            payload={
+                "label": "Verified location-based Scope 2 test artifact",
+                "value": "475",
+                "unit": "kgCO2e",
+                "confidence": "0.95",
+                "synthetic": True,
+            },
+            payload_hash=_hash("ledger-scope2-measurement-verified"),
+            created_by=ids.analyst_id,
+        ),
+        CarbonMeasurement(
+            id=ids.assurance_measurement_id,
+            company_id=ids.company_id,
+            calculation_run_id=scope2_calculation_run_id,
+            site_id=ids.site_id,
+            reporting_period_id=ids.reporting_period_id,
+            metric_definition_id=ids.assurance_metric_id,
+            ledger_event_id=ids.assurance_measurement_ledger_event_id,
+            value_kgco2e=Decimal(475),
+            unit="kgCO2e",
+            confidence=Decimal("0.95000"),
+            status="verified",
+            formula="1000 kWh * 475 gCO2e/kWh / 1000 = 475 kgCO2e",
+            output_hash=_hash("maverick-scope2-carbon-measurement"),
             verified_at=now,
         ),
         FlexibleLoad(
@@ -793,11 +1073,41 @@ async def seed_api_e2e_data(session: AsyncSession) -> ApiE2ESeedIds:
             relationship_type="produces",
             edge_metadata={"synthetic": True},
         ),
+        LineageEdge(
+            id=_id(110),
+            company_id=ids.company_id,
+            parent_event_id=scope2_source_event_id,
+            child_event_id=scope2_calculation_event_id,
+            relationship_type="activity_input",
+            edge_metadata={"synthetic": True, "pre_created_test_artifact": True},
+        ),
+        LineageEdge(
+            id=_id(111),
+            company_id=ids.company_id,
+            parent_event_id=scope2_grid_event_id,
+            child_event_id=scope2_calculation_event_id,
+            relationship_type="factor_input",
+            edge_metadata={"synthetic": True, "pre_created_test_artifact": True},
+        ),
+        LineageEdge(
+            id=_id(112),
+            company_id=ids.company_id,
+            parent_event_id=scope2_calculation_event_id,
+            child_event_id=ids.assurance_measurement_ledger_event_id,
+            relationship_type="produces",
+            edge_metadata={"synthetic": True, "pre_created_test_artifact": True},
+        ),
         LedgerEventEvidence(
             company_id=ids.company_id,
             ledger_event_id=factor_event_id,
             evidence_item_id=current_evidence_id,
             relevance="Product-specific PCF evidence",
+        ),
+        LedgerEventEvidence(
+            company_id=ids.company_id,
+            ledger_event_id=scope2_grid_event_id,
+            evidence_item_id=scope2_grid_evidence_id,
+            relevance="Exact-timestamp synthetic grid-intensity evidence",
         ),
         AuditLog(
             id=_id(70),
@@ -810,6 +1120,20 @@ async def seed_api_e2e_data(session: AsyncSession) -> ApiE2ESeedIds:
             details={
                 "synthetic": True,
                 "ledger_event_id": str(ids.measurement_ledger_event_id),
+            },
+        ),
+        AuditLog(
+            id=_id(113),
+            company_id=ids.company_id,
+            actor_id=ids.analyst_id,
+            action="measurement.verified",
+            entity_type="carbon_measurement",
+            entity_id=ids.assurance_measurement_id,
+            trace_id="synthetic-scope2-measurement-trace",
+            details={
+                "synthetic": True,
+                "pre_created_test_artifact": True,
+                "ledger_event_id": str(ids.assurance_measurement_ledger_event_id),
             },
         ),
     ]
@@ -830,7 +1154,7 @@ async def seed_api_e2e_data(session: AsyncSession) -> ApiE2ESeedIds:
         (SupplierProduct,),
         (RawActivityRecord,),
         (ActivityRecord,),
-        (EmissionFactor,),
+        (EmissionFactor, GridIntensityPoint),
         (CalculationRun,),
         (EmissionCalculation,),
         (LedgerEvent,),

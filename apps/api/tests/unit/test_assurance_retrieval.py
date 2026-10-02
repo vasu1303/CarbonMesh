@@ -7,7 +7,12 @@ from decimal import Decimal
 from uuid import UUID
 
 import pytest
+from pgvector.sqlalchemy import VECTOR
+from sqlalchemy import ARRAY, Float
+from sqlalchemy.dialects import postgresql
 
+from app.db.models.core import EvidenceItem
+from app.modules.assurance.repository import AssuranceRepository
 from app.modules.assurance.retrieval import (
     EvidenceCandidate,
     EvidenceRetrievalContext,
@@ -20,6 +25,20 @@ SITE_ID = UUID(int=2)
 PERIOD_ID = UUID(int=3)
 MODEL_ID = "carbonmesh-hash-768-v1"
 NOW = datetime(2026, 10, 1, 12, tzinfo=UTC)
+
+
+class _EmptyRows:
+    def all(self) -> list[object]:
+        return []
+
+
+class _StatementRecordingSession:
+    def __init__(self) -> None:
+        self.statements: list[object] = []
+
+    async def execute(self, statement: object) -> _EmptyRows:
+        self.statements.append(statement)
+        return _EmptyRows()
 
 
 def _checksum(value: str) -> str:
@@ -79,6 +98,48 @@ def test_candidate_with_exact_tenant_context_requirement_and_checksum_is_eligibl
     assert validation.eligible is True
     assert validation.reasons == ()
     assert validation.similarity == Decimal("0.800000")
+
+
+@pytest.mark.asyncio
+async def test_repository_uses_vector_distance_only_for_pgvector_storage(monkeypatch) -> None:
+    embedding_column = EvidenceItem.__table__.c.embedding
+    assert isinstance(embedding_column.type, VECTOR)
+
+    vector_session = _StatementRecordingSession()
+    await AssuranceRepository(vector_session).list_evidence_candidates(  # type: ignore[arg-type]
+        company_id=COMPANY_ID,
+        evidence_types=("disclosure_support",),
+        embedding_model=MODEL_ID,
+        limit=10,
+        query_embedding=[0.0] * 768,
+        evidence_item_ids=(UUID(int=70),),
+    )
+    vector_sql = str(
+        vector_session.statements[0].compile(dialect=postgresql.dialect())  # type: ignore[attr-defined]
+    )
+    assert "<=>" in vector_sql
+    assert "core.evidence_items.id IN" in vector_sql
+
+    # Portable E2E storage replaces pgvector with a PostgreSQL array. The ORM
+    # comparator may already be cached from the real VECTOR type, so checking
+    # for a comparator method alone can emit an invalid ARRAY <=> query.
+    monkeypatch.setattr(embedding_column, "type", ARRAY(Float))
+    array_session = _StatementRecordingSession()
+    await AssuranceRepository(array_session).list_evidence_candidates(  # type: ignore[arg-type]
+        company_id=COMPANY_ID,
+        evidence_types=("disclosure_support",),
+        embedding_model=MODEL_ID,
+        limit=10,
+        query_embedding=[0.0] * 768,
+    )
+    array_sql = str(
+        array_session.statements[0].compile(dialect=postgresql.dialect())  # type: ignore[attr-defined]
+    )
+    assert "<=>" not in array_sql
+    assert (
+        "ORDER BY core.source_documents.checksum, core.evidence_items.locator, "
+        "core.evidence_items.id" in array_sql
+    )
 
 
 @pytest.mark.parametrize(

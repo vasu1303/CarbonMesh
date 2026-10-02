@@ -8,6 +8,7 @@ from typing import Any
 from uuid import UUID
 
 from pydantic import ValidationError
+from sqlalchemy import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.carbon import GridIntensityPoint
@@ -34,6 +35,13 @@ MAX_HOURLY_RANGE = timedelta(hours=240)
 MAX_HOURLY_POINTS = 240
 KG_PER_GRAM = Decimal("0.001")
 KG_INTENSITY_QUANTUM = Decimal("0.000000000001")
+
+
+def _trim_decimal_scale(value: Decimal) -> Decimal:
+    normalized = value.normalize()
+    if normalized == normalized.to_integral_value():
+        return normalized.quantize(Decimal(1))
+    return normalized
 
 
 class IntegrationServiceError(RuntimeError):
@@ -420,18 +428,29 @@ async def sync_grid_intensity(
     inserted_points = 0
     existing_points = 0
     estimated_points = 0
+    prepared = []
     for point in sorted(payload.data, key=lambda item: item.datetime):
-        estimated_points += int(point.is_estimated)
         point_json = point.model_dump(mode="json", by_alias=True)
         point_bytes = _json_bytes(point_json)
         point_checksum = hashlib.sha256(point_bytes).hexdigest()
         locator = f"carbon-intensity:{point.datetime.isoformat()}"
-        evidence = await repository.get_evidence_item(
-            session,
-            company_id=site.company_id,
-            source_document_id=source_document.id,
-            locator=locator,
-        )
+        point_version = _provider_version(point.datetime, point.updated_at)
+        method_version = f"{repository.GRID_POINT_METHOD_PREFIX}:{point_version}"
+        prepared.append((point, point_bytes, point_checksum, locator, method_version))
+    # The response is bounded before persistence. Read existing dependencies in
+    # two batches, then append evidence with server-generated IDs correlated by
+    # locator. Ordered ORM RETURNING would otherwise insert one hour at a time.
+    evidence_by_locator = await repository.get_evidence_items(
+        session, company_id=site.company_id, source_document_id=source_document.id,
+        locators=[item[3] for item in prepared],
+    )
+    existing_by_version = await repository.get_grid_intensity_points(
+        session, company_id=site.company_id, site_id=site.id, zone=zone,
+        versions=[(item[0].datetime, item[0].temporal_granularity, item[4]) for item in prepared],
+    )
+    new_evidence = []
+    for point, point_bytes, point_checksum, locator, _method_version in prepared:
+        evidence = evidence_by_locator.get(locator)
         if evidence is None:
             evidence = EvidenceItem(
                 company_id=site.company_id,
@@ -457,19 +476,25 @@ async def sync_grid_intensity(
                     "temporal_granularity": point.temporal_granularity,
                 },
             )
-            session.add(evidence)
-            await session.flush()
+            new_evidence.append(evidence)
+            evidence_by_locator[locator] = evidence
+    if new_evidence:
+        added = await session.execute(
+            insert(EvidenceItem).returning(EvidenceItem.id, EvidenceItem.locator),
+            [{name: getattr(item, name) for name in (
+                "company_id", "source_document_id", "evidence_type", "locator",
+                "content_text", "checksum", "evidence_metadata",
+            )} for item in new_evidence],
+        )
+        for row in added:
+            evidence_by_locator[row.locator].id = row.id
 
-        point_version = _provider_version(point.datetime, point.updated_at)
-        method_version = f"{repository.GRID_POINT_METHOD_PREFIX}:{point_version}"
-        existing = await repository.get_grid_intensity_point(
-            session,
-            company_id=site.company_id,
-            site_id=site.id,
-            zone=zone,
-            observed_at=point.datetime,
-            temporal_granularity=point.temporal_granularity,
-            method_version=method_version,
+    new_points = []
+    for point, _point_bytes, point_checksum, locator, method_version in prepared:
+        estimated_points += int(point.is_estimated)
+        evidence = evidence_by_locator[locator]
+        existing = existing_by_version.get(
+            (point.datetime, point.temporal_granularity, method_version)
         )
         canonical_kg_intensity = (point.carbon_intensity * KG_PER_GRAM).quantize(
             KG_INTENSITY_QUANTUM,
@@ -482,7 +507,7 @@ async def sync_grid_intensity(
                 )
             existing_points += 1
             continue
-        session.add(
+        new_points.append(
             GridIntensityPoint(
                 company_id=site.company_id,
                 site_id=site.id,
@@ -515,6 +540,15 @@ async def sync_grid_intensity(
         )
         inserted_points += 1
 
+    if new_points:
+        await session.execute(insert(GridIntensityPoint), [
+            {name: getattr(point, name) for name in (
+                "company_id", "site_id", "source_document_id", "evidence_item_id",
+                "metric_definition_id", "provider", "zone", "observed_at", "provider_updated_at",
+                "temporal_granularity", "emission_factor_type", "flow_traced", "is_estimated",
+                "intensity_gco2e_per_kwh", "method_version", "point_hash", "provider_metadata",
+            )} for point in new_points
+        ])
     await session.commit()
     return GridIntensitySyncResult(
         site_id=site.id,
@@ -582,7 +616,9 @@ async def get_latest_grid_intensity(
             rounding=ROUND_HALF_UP,
         ),
         unit="kgCO2e/kWh",
-        provider_value_gco2eq_per_kwh=point.intensity_gco2e_per_kwh,
+        provider_value_gco2eq_per_kwh=_trim_decimal_scale(
+            point.intensity_gco2e_per_kwh
+        ),
         provider_timestamp=point.observed_at,
         provider_updated_at=point.provider_updated_at,
         is_estimated=point.is_estimated,

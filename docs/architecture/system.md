@@ -1,23 +1,21 @@
 # CarbonMesh System Architecture
 
-Last updated: 2026-10-01
+Last updated: 2026-10-02
 
-## Status
+## Scope and implementation
 
-This is the approved target architecture for the four-module hackathon build.
-It distinguishes the target from the repository's transition state. A component
-is not considered implemented merely because it appears in this document.
+CarbonMesh connects Measurement, Assurance, Procurement, and advisory Dispatch
+through one ledger, generic human approvals, and a bounded agent runtime.
+Deterministic domain services, hourly Scope 2, generic approval decisions,
+non-agent fact bindings, database readiness, and production approval resume
+are implemented. The frontend's 16-screen experience remains work for its
+separate owner; the diagram shows that intended experience.
 
-- Target: Measurement, Assurance, Procurement, and Dispatch joined by one
-  append-only ledger, one bounded agent runtime, and one generic
-  Preview-Approve-Commit flow.
-- Implemented foundation: the repository has Measurement, Assurance,
-  Procurement, and advisory Dispatch domain services plus the
-  46-table/eight-schema SQLAlchemy contract, historical grid-intensity sync,
-  exact approval previews, audit/lineage, bounded ledger queries, and persisted
-  SSE run events.
-- Missing feature depth: hourly Scope 2, cross-target approval decisions, five
-  LangGraph graphs, durable resume, and agent-sustainability reporting.
+The model plans; application services calculate and validate. Live history,
+forecast, and agent grid modes are the default. Explicit synthetic fixture mode
+never substitutes for a failed live provider. A typed stop such as
+`provider_unavailable` or `budget_exhausted` is not successful completion.
+Product rules and team ownership remain in [AGENTS.md](../../AGENTS.md).
 
 ## Logical architecture
 
@@ -31,7 +29,7 @@ flowchart TB
   end
 
   subgraph Experience[Experience]
-    Web[React 19 and TypeScript<br/>16 role-oriented screens]
+    Web[React 19 and TypeScript<br/>16 target screens]
     HTTP[REST commands and queries<br/>SSE progress]
     Web <--> HTTP
   end
@@ -57,7 +55,7 @@ flowchart TB
   subgraph Data[Shared data and observability]
     PG[PostgreSQL and pgvector<br/>46 tables, eight schemas]
     Ledger[Ledger, lineage, evidence<br/>source of numerical truth]
-    Telemetry[OpenTelemetry and audit<br/>tokens, calls, retries, cache, latency, CO2e proxy]
+    Telemetry[Persisted run steps and audit<br/>tokens, calls, retries, cache, latency, CO2e proxy]
     PG <--> Ledger
   end
 
@@ -92,55 +90,18 @@ flowchart TB
 7. SSE is a projection of persisted run/step state. Reconnect must not depend
    on an in-memory event buffer.
 
-## Database connection and lifecycle
+## Persistence and lifecycle
 
-The API supports two explicit PostgreSQL deployment modes through one
-secret-safe `DATABASE_URL` parser:
+SQLAlchemy 2 async/asyncpg stores the shared contract in PostgreSQL: 46 tables
+across eight schemas, including pgvector evidence embeddings. The
+[database architecture](database.md) owns the table catalog, TLS/pooling rules,
+bootstrap commands, and integrity constraints.
 
-| Mode | Example host | TLS and pooling |
-| --- | --- | --- |
-| Shared/hosted | Neon pooled endpoint | `sslmode=require`, verified TLS context, SQLAlchemy `NullPool`, asyncpg statement caches disabled. |
-| Local Docker/test | `db`, `localhost`, or loopback | `sslmode=disable` is allowed only for approved local hosts; SQLAlchemy uses its bounded pool with pre-ping. |
-
-Remote non-TLS URLs are rejected. Credentials remain Pydantic `SecretStr`
-values and must never be returned, logged, or exposed to the frontend.
-
+Services own explicit commits. A bounded background agent execution segment
+retains one connection across checkpoint commits, then closes it; request and
+SSE sessions keep their ordinary lifecycle. Cancellation drains child work and
+rolls back interrupted transactions before a typed terminal result is saved.
 FastAPI startup never creates, migrates, resets, or seeds database objects.
-Provisioning and migration are explicit operator commands. No migration or
-bootstrap command may be run against the shared Neon branch until its target is
-confirmed and a backup/branch rollback exists.
-
-## Implemented database contract
-
-The SQLAlchemy registry and clean bootstrap contain exactly 46 relational
-tables across eight schemas:
-
-| Schema | Count | Tables |
-| --- | ---: | --- |
-| `core` | 9 | `companies`, `sites`, `reporting_periods`, `actors`, `data_sources`, `source_documents`, `evidence_items`, `approvals`, `audit_log` |
-| `semantic` | 5 | `semantic_entities`, `semantic_aliases`, `metric_definitions`, `method_definitions`, `policy_definitions` |
-| `ai` | 2 | `agent_runs`, `agent_run_steps` |
-| `carbon` | 10 | `raw_activity_records`, `activity_records`, `emission_factors`, `grid_intensity_points`, `calculation_runs`, `emission_calculations`, `carbon_measurements`, `data_quality_issues`, `carbon_baselines`, `variance_alerts` |
-| `ledger` | 4 | `ledger_events`, `lineage_edges`, `ledger_event_evidence`, `fact_bindings` |
-| `assurance` | 6 | `standards`, `disclosure_requirements`, `disclosure_drafts`, `disclosure_claims`, `claim_citations`, `evidence_gaps` |
-| `procurement` | 5 | `suppliers`, `supplier_products`, `procurement_scenarios`, `supplier_scores`, `procurement_recommendations` |
-| `dispatch` | 5 | `flexible_loads`, `operating_constraints`, `grid_forecasts`, `dispatch_scenarios`, `dispatch_recommendations` |
-
-Four existing identities move or change:
-
-- `carbon.agent_runs` becomes `ai.agent_runs` and gains
-  `ai.agent_run_steps`.
-- `procurement.approvals` becomes generic `core.approvals`.
-- `procurement.fact_bindings` becomes generic `ledger.fact_bindings`.
-- `procurement.recommendations` becomes
-  `procurement.procurement_recommendations`.
-
-`carbon.grid_intensity_points` is the timestamped truth for hourly Scope 2.
-Historical grid observations must no longer be represented only as date-ranged
-material emission factors.
-
-See [database.md](database.md) for the transition contract, current detailed
-dictionary, integrity rules, and migration safety requirements.
 
 ## Module data flow
 
@@ -169,37 +130,44 @@ enumerated feasible windows -> deterministic minimum-emissions choice -> impact
 facts -> advisory recommendation -> approval preview -> immutable decision.
 There is no actuation tool, equipment endpoint, or control credential.
 
-## API routing strategy
+## API and agent boundaries
 
-Product operations use stable `/api/...` resource paths with exactly one route
-per implemented operation. There is no duplicate legacy mount. Missing features
-return no fake successful response and are implemented through their real domain
-service.
+Each product operation has one canonical `/api/...` route backed by a real
+application service. The [API contract](../api/contract.md) documents client
+behavior; the running OpenAPI defines exact request/response schemas.
 
-Canonical routes cover activity import, quality listing, agent run
-start/read/SSE, Measurement calculation, grid history/latest, and Procurement
-scoring. Tenant-scoped ledger search/detail is implemented as new behavior.
-Generic source upload, Assurance, and Dispatch now have real domain services.
-Run resume, generic approval detail/decision handling across every target, and
-agent-sustainability metrics remain contract gaps.
+One orchestrator and four specialist graphs share frozen context, signed
+constraints, durable tool journals, execution leases, and restart recovery.
+Clarification can fill only missing context. The production approval observer
+revalidates a decision committed through the generic approval service before
+continuation; the agent cannot decide approvals itself.
 
-See [contract.md](../api/contract.md) for the full 38-operation catalog and
-implementation status.
+All 24 frozen tool IDs have typed production handlers. Fresh-input plans can
+synchronize an explicit bounded history interval, calculate Scope 2 and material
+emissions, and create the downstream drafts and scenarios. Domain transactions
+own authoritative ledger writes; `write_ledger_event` validates and replays their
+persisted event without allowing a model to append arbitrary ledger content.
+Budgets bound model/tool calls, one repair per stage, and active latency; see
+AGENTS.md for the approved single-module, four-module, and resume limits.
 
 ## Observability
 
-Every run uses one trace/correlation ID and persists:
+Runs and ordered steps persist trace/context identities, graph/node/tool and
+provider outcomes, token/call/retry/cache counters, elapsed time, typed errors,
+approval interrupts, and bounded result snapshots. SSE projects committed state
+and supports replay. Tool results preserve fact and lineage identifiers instead
+of deriving numbers from generated prose.
 
-- graph/node/tool/provider names and versions;
-- model calls, input/output/context tokens, and one-repair counters;
-- rows processed, evidence chunks, API/cache behavior, and retries;
-- stage and total latency;
-- method, code, prompt, policy, and scoring versions;
-- source, payload, preview, analysis, and output hashes;
-- projected and approved business impact;
-- documented compute-energy/CO2e assumptions when a footprint proxy is shown.
+Energy and CO2e telemetry uses a versioned token proxy with assumptions frozen
+across run continuations. Approved projected procurement/dispatch benefits expose
+their ledger identities; unknown/mixed assumptions or zero footprint suppress the
+benefit ratio. These estimates do not measure realized savings or hardware energy.
 
-Token usage is telemetry, not a direct carbon-footprint measurement.
+OpenTelemetry records correlated HTTP, graph/tool, model, grid, embedding, and
+SQL-operation spans. An optional OTLP HTTP exporter sends them to a configured
+collector. Structured request logs and spans exclude source bodies, query strings,
+SQL text/parameters, credentials, and raw exception messages. Persisted run traces
+remain available without an external collector.
 
 ## Security and failure behavior
 
@@ -207,6 +175,10 @@ Token usage is telemetry, not a direct carbon-footprint measurement.
 - Retrieved documents are untrusted evidence; their text cannot change policy or
   tool access.
 - Tenant filters and actor/role checks apply before data leaves a repository.
+- Operator-provisioned demo access keys bind a company and actor to a short-lived
+  signed session. Every protected request checks active identity and current role;
+  payload/query identities must agree. Bearer and HttpOnly-cookie transport support
+  REST and SSE. Explicit origin rules protect cookie mutations.
 - Source bodies, prompts, credentials, and provider responses are redacted from
   normal logs.
 - Unknown placeholders, invented citations, stale previews, missing forecast

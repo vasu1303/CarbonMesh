@@ -190,7 +190,7 @@ async def _create_evidence_context(
         content_type="text/plain",
         checksum=_sha256(f"document-{token}"),
         size_bytes=128,
-        document_metadata={"test": True},
+        metadata={"test": True},
     )
     return EvidenceContext(resolved_company_id, source_id, document_id)
 
@@ -318,7 +318,7 @@ PRESERVATION_COMPANY_ID = UUID("f976c3a6-9706-5abc-9537-f9bb2a167421")
 PRESERVATION_SOURCE_ID = UUID("12ec22c6-119e-56f8-ab04-7961e357b8d5")
 PRESERVATION_DOCUMENT_ID = UUID("d9074294-eae1-5b46-907a-68a2cd8e5d27")
 PRESERVATION_EVIDENCE_ID = UUID("1b3cde20-474c-59a6-b346-b07dc13bfb4a")
-PRESERVATION_COMPANY_CODE = "__carbonmesh_neon_integration_preservation_initial__"
+PRESERVATION_COMPANY_CODE = "__cm_neon_preservation__"
 
 
 async def _remove_preservation_rows(connection: AsyncConnection) -> None:
@@ -379,7 +379,7 @@ async def _install_preservation_row(connection: AsyncConnection) -> None:
             content_type="text/plain",
             checksum=_sha256("neon-bootstrap-preservation-document-initial"),
             size_bytes=1,
-            document_metadata={"integration_test": True},
+            metadata={"integration_test": True},
         )
     )
     await connection.execute(

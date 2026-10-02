@@ -107,7 +107,7 @@ class ForecastSyncRequest(DispatchSchema):
     site_id: UUID
     zone: str | None = Field(default=None, min_length=2, max_length=100)
     horizon_hours: Literal[24] = 24
-    source_mode: Literal["fixture", "live"] = "fixture"
+    source_mode: Literal["fixture", "live"] = "live"
     force_refresh: bool = False
 
     @field_validator("zone")
@@ -311,9 +311,14 @@ class DispatchRecommendationView(DispatchSchema):
     created_at: datetime
 
 
+DispatchTerminalState = Literal[
+    "approval_required", "approved", "rejected", "stale", "no_feasible_option"
+]
+
+
 class DispatchOptimizationResult(DispatchSchema):
     scenario_id: UUID
-    terminal_state: Literal["approval_required", "no_feasible_option"]
+    terminal_state: DispatchTerminalState
     evaluated_windows: int = Field(ge=0)
     feasible_windows: int = Field(ge=0)
     rejected_windows: list[RejectedWindowView]
@@ -322,5 +327,5 @@ class DispatchOptimizationResult(DispatchSchema):
 
 class DispatchRecommendationResult(DispatchSchema):
     scenario_id: UUID
-    terminal_state: Literal["approval_required", "no_feasible_option"]
+    terminal_state: DispatchTerminalState
     recommendation: DispatchRecommendationView | None

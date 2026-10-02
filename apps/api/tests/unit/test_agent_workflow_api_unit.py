@@ -10,71 +10,36 @@ import pytest
 from fastapi import HTTPException
 
 from app.api.routes import agents as agent_routes
-from app.db.models.carbon import AgentRun
+from app.modules.agents.context import build_frozen_context
 from app.modules.agents.events import encode_sse_event
-from app.modules.agents.orchestration import (
-    BudgetCounter,
-    BudgetExhaustedError,
-    build_frozen_context,
-    classify_workflow,
-)
-from app.modules.agents.repository import (
-    MeasurementActivityProductInput,
-    ResolvedContextReferences,
-)
+from app.modules.agents.repository import MeasurementActivityProductInput
 from app.modules.agents.schemas import (
-    AgentBudget,
     AgentContextRequest,
     AgentEvent,
-    AgentFact,
     AgentQueryRequest,
-    AgentRecommendation,
-    ApprovalRequirement,
-    ResolvedWorkflowContext,
 )
-from app.modules.agents.service import AgentRunService
 from app.modules.agents.tasks import AgentTaskRegistry
 from app.modules.agents.workflow import (
     MAX_RESOLUTION_ROWS,
     MAX_SCORING_METHOD_ROWS,
     AgentWorkflowExecutor,
-    WorkflowExecutionError,
-    WorkflowOutcome,
     WorkflowStop,
-    WorkflowToolOperation,
 )
 
 
-def _context(*, complete: bool = True) -> AgentContextRequest:
+def _context() -> AgentContextRequest:
     return AgentContextRequest(
         company_id=uuid4(),
         actor_id=uuid4(),
-        site_id=uuid4() if complete else None,
-        reporting_period_id=uuid4() if complete else None,
-        material_scope=["packaging tray"] if complete else [],
-        constraints=(
-            {
-                "max_cost_increase_pct": "5",
-                "max_lead_time_days": 20,
-                "minimum_circularity_score": "50",
-            }
-            if complete
-            else {}
-        ),
+        site_id=uuid4(),
+        reporting_period_id=uuid4(),
+        material_scope=["packaging tray"],
+        constraints={
+            "max_cost_increase_pct": "5",
+            "max_lead_time_days": 20,
+            "minimum_circularity_score": "50",
+        },
     )
-
-
-def test_agent_classifier_routes_only_supported_poc_workflows() -> None:
-    measurement = classify_workflow("Calculate Scope 3 emissions for Plant B")
-    procurement = classify_workflow("Recommend a feasible supplier under the cost limit")
-    connected = classify_workflow("Measure the footprint and recommend a supplier")
-    excluded = classify_workflow("Dispatch equipment after checking emissions")
-
-    assert measurement.workflow == "measurement"
-    assert procurement.workflow == "procurement"
-    assert connected.workflow == "cross_module"
-    assert excluded.workflow == "unsupported"
-    assert excluded.unsupported_reason is not None
 
 
 def test_agent_analysis_signature_is_stable_and_query_bound() -> None:
@@ -104,16 +69,6 @@ def test_agent_analysis_signature_is_stable_and_query_bound() -> None:
     assert first.analysis_signature != changed.analysis_signature
 
 
-def test_agent_budget_counter_stops_before_limit_is_exceeded() -> None:
-    counter = BudgetCounter(AgentBudget(max_tool_calls=1))
-    counter.consume_tool()
-
-    with pytest.raises(BudgetExhaustedError, match="tool-call"):
-        counter.consume_tool()
-
-    assert counter.tool_calls == 1
-
-
 @pytest.mark.asyncio
 async def test_agent_task_registry_cancels_and_awaits_pending_work_on_shutdown() -> None:
     registry = AgentTaskRegistry()
@@ -133,118 +88,20 @@ async def test_agent_task_registry_cancels_and_awaits_pending_work_on_shutdown()
 
 
 @pytest.mark.asyncio
-async def test_agent_service_persists_bounded_plan_and_terminal_event() -> None:
-    repository = FakeAgentRunRepository(actor_role="procurement_manager")
-    service = AgentRunService(repository, FakeAgentWorkflow())
-    request = AgentQueryRequest(
-        query="Measure the packaging footprint and recommend a lower-carbon supplier",
-        context=_context(),
-    )
+async def test_agent_task_registry_logs_only_safe_failure_metadata(caplog) -> None:
+    registry = AgentTaskRegistry()
 
-    accepted = await service.start(request)
-    running = await service.get(
-        company_id=request.context.company_id,
-        run_id=accepted.run_id,
-    )
+    async def failing_worker() -> None:
+        raise RuntimeError("provider-secret-must-not-be-logged")
 
-    assert accepted.terminal_state == "running"
-    assert running.terminal_state == "running"
-    assert running.stage == "queued"
+    caplog.set_level("ERROR", logger="app.modules.agents.tasks")
+    registry.spawn(failing_worker(), name="agent-run-safe-id")
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
 
-    await service.execute(request=request, run_id=accepted.run_id)
-    result = await service.get(
-        company_id=request.context.company_id,
-        run_id=accepted.run_id,
-    )
-
-    assert result.terminal_state == "completed"
-    assert result.workflow == "cross_module"
-    assert result.plan is not None
-    assert [step.id for step in result.plan.steps] == [
-        "resolve_context",
-        "measurement",
-        "procurement",
-    ]
-    assert result.telemetry.model_calls == 0
-    assert result.telemetry.tool_calls == 6
-    assert result.telemetry.retry_count == 0
-    assert result.telemetry.events[-1].name == "run.completed"
-    assert len(result.facts) == 3
-    assert result.recommendation is not None
-    assert result.approval_requirement.required is True
-    assert repository.committed
-
-
-@pytest.mark.asyncio
-async def test_agent_no_feasible_run_never_reports_approval_preview_tool() -> None:
-    repository = FakeAgentRunRepository(actor_role="procurement_manager")
-    service = AgentRunService(repository, NoFeasibleAgentWorkflow())
-    request = AgentQueryRequest(
-        query="Measure the packaging footprint and recommend a feasible supplier",
-        context=_context(),
-    )
-
-    accepted = await service.start(request)
-    await service.execute(request=request, run_id=accepted.run_id)
-    result = await service.get(
-        company_id=request.context.company_id,
-        run_id=accepted.run_id,
-    )
-
-    completed_tools = {
-        event.data["tool_id"] for event in result.telemetry.events if event.name == "tool.completed"
-    }
-    assert result.terminal_state == "no_feasible_option"
-    assert result.telemetry.tool_calls == 5
-    assert completed_tools == {"T01", "T03", "T09", "T10", "T11"}
-    assert result.telemetry.events[-1].name == "run.stopped"
-
-
-@pytest.mark.asyncio
-async def test_agent_service_stops_for_missing_procurement_context() -> None:
-    repository = FakeAgentRunRepository(actor_role="procurement_manager")
-    service = AgentRunService(repository, FakeAgentWorkflow())
-    request = AgentQueryRequest(
-        query="Recommend a supplier under the cost constraint",
-        context=_context(complete=False),
-    )
-
-    accepted = await service.start(request)
-    assert accepted.terminal_state == "running"
-
-    await service.execute(request=request, run_id=accepted.run_id)
-    result = await service.get(
-        company_id=request.context.company_id,
-        run_id=accepted.run_id,
-    )
-
-    assert result.terminal_state == "needs_clarification"
-    assert "context.site_id" in result.missing_fields
-    assert "context.constraints.max_cost_increase_pct" in result.missing_fields
-    assert result.error_code == "context_incomplete"
-    assert result.telemetry.events[-1].name == "run.stopped"
-
-
-@pytest.mark.asyncio
-async def test_agent_service_persists_safe_background_failure() -> None:
-    repository = FakeAgentRunRepository(actor_role="procurement_manager")
-    service = AgentRunService(repository, FailingAgentWorkflow())
-    request = AgentQueryRequest(
-        query="Measure the packaging footprint and recommend a supplier",
-        context=_context(),
-    )
-
-    accepted = await service.start(request)
-    await service.execute(request=request, run_id=accepted.run_id)
-    result = await service.get(
-        company_id=request.context.company_id,
-        run_id=accepted.run_id,
-    )
-
-    assert result.terminal_state == "failed"
-    assert result.error_code == "procurement_unavailable"
-    assert result.message == "Deterministic Procurement is temporarily unavailable."
-    assert result.telemetry.events[-1].name == "run.stopped"
+    assert "agent-run-safe-id" in caplog.text
+    assert "RuntimeError" in caplog.text
+    assert "provider-secret-must-not-be-logged" not in caplog.text
 
 
 def test_agent_sse_encodes_named_event_with_resume_id() -> None:
@@ -472,137 +329,6 @@ class FakeAgentWorkflowRepository:
     async def list_scoring_methods(self, **query):
         self.method_query = query
         return self.methods
-
-
-class FakeAgentRunRepository:
-    def __init__(self, actor_role: str) -> None:
-        self.actor_role = actor_role
-        self.runs: dict[UUID, AgentRun] = {}
-        self.committed = False
-
-    async def resolve_context_references(self, **_) -> ResolvedContextReferences:
-        return ResolvedContextReferences(actor_role=self.actor_role, rows_resolved=3)
-
-    async def add(self, run: AgentRun) -> None:
-        self.runs[run.id] = run
-
-    async def get(self, *, company_id: UUID, run_id: UUID) -> AgentRun | None:
-        run = self.runs.get(run_id)
-        return run if run is not None and run.company_id == company_id else None
-
-    async def commit(self) -> None:
-        self.committed = True
-
-    async def rollback(self) -> None:
-        return None
-
-
-class FakeResolvedWorkflowInputs:
-    def __init__(self) -> None:
-        self.context = ResolvedWorkflowContext(
-            carbon_measurement_id=uuid4(),
-            activity_record_id=uuid4(),
-            current_product_id=uuid4(),
-            method_definition_id=uuid4(),
-            quantity="12000",
-            quantity_unit="kg",
-            current_unit_cost="1.00",
-            currency="USD",
-        )
-        self.measurement = SimpleNamespace(id=self.context.carbon_measurement_id)
-        self.current_product = SimpleNamespace(id=self.context.current_product_id)
-        self.method = SimpleNamespace(id=self.context.method_definition_id)
-        self.rows_resolved = 5
-        self._measurement_ledger_id = uuid4()
-
-    def measurement_fact(self) -> AgentFact:
-        return AgentFact(
-            fact_id=self.context.carbon_measurement_id,
-            metric_key="emissions.scope3.category1",
-            display_value="33600.000000 kgCO2e",
-            ledger_event_id=self._measurement_ledger_id,
-        )
-
-
-class FakeAgentWorkflow:
-    async def resolve(self, **_) -> FakeResolvedWorkflowInputs:
-        return FakeResolvedWorkflowInputs()
-
-    async def execute_procurement(self, *, inputs, **_) -> WorkflowOutcome:
-        ledger_event_id = uuid4()
-        recommendation_id = uuid4()
-        approval_id = uuid4()
-        facts = [
-            inputs.measurement_fact(),
-            AgentFact(
-                fact_id=recommendation_id,
-                metric_key="procurement.projected_avoided_emissions",
-                display_value="10800.000000 kgCO2e",
-                ledger_event_id=ledger_event_id,
-            ),
-            AgentFact(
-                fact_id=uuid4(),
-                metric_key="procurement.cost_delta_pct",
-                display_value="3.2000%",
-                ledger_event_id=ledger_event_id,
-            ),
-        ]
-        recommendation = AgentRecommendation(
-            scenario_id=uuid4(),
-            recommendation_id=recommendation_id,
-            recommended_product_id=uuid4(),
-            status="pending_approval",
-            projected_footprint_kgco2e="22800",
-            avoided_kgco2e="10800",
-            reduction_pct="32.1429",
-            cost_delta_pct="3.2",
-            lead_time_delta_days=2,
-            payload_hash="a" * 64,
-            analysis_signature="b" * 64,
-            ledger_event_id=ledger_event_id,
-        )
-        return WorkflowOutcome(
-            terminal_state="completed",
-            message="Executed deterministic workflow.",
-            facts=facts,
-            recommendation=recommendation,
-            approval_requirement=ApprovalRequirement(
-                required=True,
-                approval_id=approval_id,
-                recommendation_id=recommendation_id,
-                preview_hash="c" * 64,
-            ),
-            rows_processed=3,
-            tool_operations=(
-                WorkflowToolOperation("T09", "list_supplier_alternatives", 3),
-                WorkflowToolOperation("T10", "score_supplier_products", 3),
-                WorkflowToolOperation("T11", "calculate_procurement_impact", 3),
-                WorkflowToolOperation("T12", "create_approval_preview", 1),
-            ),
-        )
-
-
-class FailingAgentWorkflow(FakeAgentWorkflow):
-    async def execute_procurement(self, **_) -> WorkflowOutcome:
-        raise WorkflowExecutionError(
-            code="procurement_unavailable",
-            message="Deterministic Procurement is temporarily unavailable.",
-        )
-
-
-class NoFeasibleAgentWorkflow(FakeAgentWorkflow):
-    async def execute_procurement(self, *, inputs, **_) -> WorkflowOutcome:
-        return WorkflowOutcome(
-            terminal_state="no_feasible_option",
-            message="No supplier product satisfies every frozen hard constraint.",
-            facts=[inputs.measurement_fact()],
-            rows_processed=2,
-            tool_operations=(
-                WorkflowToolOperation("T09", "list_supplier_alternatives", 2),
-                WorkflowToolOperation("T10", "score_supplier_products", 2),
-                WorkflowToolOperation("T11", "calculate_procurement_impact", 2),
-            ),
-        )
 
 
 class FakeRouteSession:

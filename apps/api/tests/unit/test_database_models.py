@@ -102,6 +102,7 @@ def test_shared_approval_and_fact_binding_models_support_generic_artifacts() -> 
 
     assert {"target_type", "target_id", "preview_payload"}.issubset(approval.c.keys())
     assert {"artifact_type", "artifact_id", "binding_hash"}.issubset(binding.c.keys())
+    assert binding.c.agent_run_id.nullable is True
 
 
 def test_agent_run_storage_accepts_the_largest_approved_workflow_budget() -> None:

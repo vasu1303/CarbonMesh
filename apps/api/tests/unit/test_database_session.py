@@ -27,7 +27,7 @@ def test_settings_redact_database_url() -> None:
 
 def test_normalize_neon_url_for_asyncpg_and_tls() -> None:
     secret = (
-        "postgresql://owner:do-not-print@ep-example-pooler.aws.neon.tech/neondb"
+        "postgresql://owner:do-not-print@ep-example-pooler.aws.neon.tech/carbonmesh"
         "?sslmode=require&channel_binding=require&application_name=carbonmesh"
     )
 
@@ -63,13 +63,14 @@ def test_normalize_remote_url_rejects_insecure_tls_without_disclosing_secret() -
         raise AssertionError("An insecure database URL must be rejected.")
 
 
-def test_normalize_local_url_allows_explicit_non_tls_connection() -> None:
+@pytest.mark.parametrize("authority, host", [("db", "db"), ("[::1]", "::1")])
+def test_normalize_local_url_allows_explicit_non_tls_connection(authority, host) -> None:
     configuration = normalize_database_url(
-        "postgresql://carbonmesh:local-only@db:5432/carbonmesh?sslmode=disable"
+        f"postgresql://carbonmesh:local-only@{authority}:5432/carbonmesh?sslmode=disable"
     )
 
     assert configuration.url.drivername == "postgresql+asyncpg"
-    assert configuration.url.host == "db"
+    assert configuration.url.host == host
     assert "sslmode" not in configuration.url.query
     assert "prepared_statement_cache_size" not in configuration.url.query
     assert "ssl" not in configuration.connect_args
@@ -91,7 +92,7 @@ def test_normalize_url_rejects_markdown_wrapping_without_disclosing_secret() -> 
 
 def test_database_target_exposes_identity_without_credentials(monkeypatch) -> None:
     secret = (
-        "postgresql://owner:do-not-print@ep-example-pooler.aws.neon.tech/neondb"
+        "postgresql://owner:do-not-print@ep-example-pooler.aws.neon.tech/carbonmesh"
         "?sslmode=require"
     )
     monkeypatch.setattr(database_session, "get_database_url", lambda: SecretStr(secret))
@@ -99,7 +100,7 @@ def test_database_target_exposes_identity_without_credentials(monkeypatch) -> No
     target = get_database_target()
 
     assert target.endpoint_id == "ep-example"
-    assert target.database == "neondb"
+    assert target.database == "carbonmesh"
     assert "owner" not in repr(target)
     assert "do-not-print" not in repr(target)
 
@@ -111,7 +112,7 @@ async def test_engine_is_lazy_and_uses_null_pool(monkeypatch) -> None:
         database_session,
         "get_database_url",
         lambda: SecretStr(
-            "postgresql://owner:do-not-print@ep-example-pooler.aws.neon.tech/neondb"
+            "postgresql://owner:do-not-print@ep-example-pooler.aws.neon.tech/carbonmesh"
             "?sslmode=require"
         ),
     )
@@ -149,3 +150,30 @@ class FakeAsyncSession:
 
     async def close(self) -> None:
         self.closed = True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fail", [False, True])
+async def test_execution_scope_preserves_injected_factory_lifecycle(fail: bool) -> None:
+    class InjectedSession(FakeAsyncSession):
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            await self.close()
+
+    fake_session = InjectedSession()
+
+    async def execute():
+        async with database_session.execution_session_scope(lambda: fake_session) as session:
+            assert session is fake_session
+            if fail:
+                raise ValueError("synthetic interrupted execution")
+
+    if fail:
+        with pytest.raises(ValueError, match="synthetic interrupted"):
+            await execute()
+    else:
+        await execute()
+    assert fake_session.rolled_back is fail
+    assert fake_session.closed

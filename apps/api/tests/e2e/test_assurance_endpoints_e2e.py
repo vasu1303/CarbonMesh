@@ -5,16 +5,24 @@ from uuid import UUID
 import pytest
 from sqlalchemy import func, select
 
-from app.db.models.assurance import DisclosureClaim, DisclosureDraft, EvidenceGap
+from app.db.models.assurance import (
+    DisclosureClaim,
+    DisclosureDraft,
+    DisclosureRequirement,
+    EvidenceGap,
+)
+from app.db.models.carbon import CarbonMeasurement
 from app.db.models.core import Approval
-from app.db.models.ledger import FactBinding
+from app.db.models.ledger import FactBinding, LedgerEvent, LedgerEventEvidence, LineageEdge
 from tests.e2e.conftest import E2EContext
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("with_agent", [False, True])
 async def test_assurance_http_journey_blocks_unsupported_prior_period_claim(
     api_client,
     e2e_context: E2EContext,
+    with_agent: bool,
 ) -> None:
     ids = e2e_context.ids
     company_query = {"company_id": str(ids.company_id)}
@@ -48,8 +56,8 @@ async def test_assurance_http_journey_blocks_unsupported_prior_period_claim(
         "standard_id": str(ids.assurance_standard_id),
         "site_id": str(ids.site_id),
         "reporting_period_id": str(ids.reporting_period_id),
-        "measurement_id": str(ids.measurement_id),
-        "agent_run_id": str(ids.assurance_agent_run_id),
+        "measurement_id": str(ids.assurance_measurement_id),
+        "agent_run_id": str(ids.assurance_agent_run_id) if with_agent else None,
         "requested_by": str(ids.analyst_id),
         "idempotency_key": "assurance-e2e-create-q3-2026",
         "title": "Q3 2026 synthetic emissions disclosure",
@@ -63,8 +71,8 @@ async def test_assurance_http_journey_blocks_unsupported_prior_period_claim(
     draft_id = created["id"]
     assert created["status"] == "draft"
     assert created["version"] == 1
-    assert created["measurement_id"] == str(ids.measurement_id)
-    assert created["agent_run_id"] == str(ids.assurance_agent_run_id)
+    assert created["measurement_id"] == str(ids.assurance_measurement_id)
+    assert created["agent_run_id"] == create_payload["agent_run_id"]
     assert created["claims"] == []
     assert created["gaps"] == []
     assert created["approval"] is None
@@ -122,7 +130,7 @@ async def test_assurance_http_journey_blocks_unsupported_prior_period_claim(
     assert claims_by_code["S2-TOTAL"]["claim_type"] == "numeric"
     assert claims_by_code["S2-TOTAL"]["support_status"] == "supported"
     assert claims_by_code["S2-TOTAL"]["fact_binding_id"] is not None
-    assert "86000" in claims_by_code["S2-TOTAL"]["rendered_text"]
+    assert "475" in claims_by_code["S2-TOTAL"]["rendered_text"]
     assert claims_by_code["S2-PRIOR-PERIOD"]["support_status"] == "unsupported"
     assert claims_by_code["S2-PRIOR-PERIOD"]["rendered_text"] is None
     assert validated_draft["gaps"][0]["code"].endswith("COMPARABLE_PRIOR_PERIOD_MISSING")
@@ -152,7 +160,7 @@ async def test_assurance_http_journey_blocks_unsupported_prior_period_claim(
     assert len(evidence_pack["fact_bindings"]) == 1
     assert evidence_pack["fact_bindings"][0]["placeholder"] == "fact_scope2_total"
     assert evidence_pack["fact_bindings"][0]["ledger_event_id"] == str(
-        ids.measurement_ledger_event_id
+        ids.assurance_measurement_ledger_event_id
     )
     assert [item["id"] for item in evidence_pack["evidence"]] == [str(ids.assurance_evidence_id)]
     assert evidence_pack["disclaimer"] == ("POC draft; not an assurance opinion or filing.")
@@ -166,6 +174,82 @@ async def test_assurance_http_journey_blocks_unsupported_prior_period_claim(
     assert wrong_tenant_pack.json()["detail"]["code"] == "assurance_not_found"
 
     async with e2e_context.session_factory() as session:
+        scope2_measurement = await session.scalar(
+            select(CarbonMeasurement).where(
+                CarbonMeasurement.id == ids.assurance_measurement_id
+            )
+        )
+        procurement_measurement = await session.scalar(
+            select(CarbonMeasurement).where(CarbonMeasurement.id == ids.measurement_id)
+        )
+        total_requirement = await session.scalar(
+            select(DisclosureRequirement).where(
+                DisclosureRequirement.company_id == ids.company_id,
+                DisclosureRequirement.requirement_code == "S2-TOTAL",
+            )
+        )
+        assert scope2_measurement is not None
+        assert procurement_measurement is not None
+        assert total_requirement is not None
+        assert (
+            total_requirement.metric_definition_id
+            == scope2_measurement.metric_definition_id
+            == ids.assurance_metric_id
+        )
+        assert scope2_measurement.metric_definition_id != (
+            procurement_measurement.metric_definition_id
+        )
+        assert scope2_measurement.ledger_event_id != procurement_measurement.ledger_event_id
+        measurement_edges = list(
+            await session.scalars(
+                select(LineageEdge).where(
+                    LineageEdge.company_id == ids.company_id,
+                    LineageEdge.child_event_id
+                    == ids.assurance_measurement_ledger_event_id,
+                )
+            )
+        )
+        assert len(measurement_edges) == 1
+        calculation_event_id = measurement_edges[0].parent_event_id
+        calculation_inputs = list(
+            await session.scalars(
+                select(LineageEdge).where(
+                    LineageEdge.company_id == ids.company_id,
+                    LineageEdge.child_event_id == calculation_event_id,
+                )
+            )
+        )
+        assert {item.relationship_type for item in calculation_inputs} == {
+            "activity_input",
+            "factor_input",
+        }
+        input_events = list(
+            await session.scalars(
+                select(LedgerEvent).where(
+                    LedgerEvent.company_id == ids.company_id,
+                    LedgerEvent.id.in_(
+                        [item.parent_event_id for item in calculation_inputs]
+                    ),
+                )
+            )
+        )
+        assert {item.entity_type for item in input_events} == {
+            "activity_record",
+            "grid_intensity_point",
+        }
+        assert (
+            await session.scalar(
+                select(func.count())
+                .select_from(LedgerEventEvidence)
+                .where(
+                    LedgerEventEvidence.company_id == ids.company_id,
+                    LedgerEventEvidence.ledger_event_id.in_(
+                        [item.id for item in input_events]
+                    ),
+                )
+            )
+            == 1
+        )
         assert await session.scalar(select(func.count()).select_from(DisclosureDraft)) == 1
         assert await session.scalar(select(func.count()).select_from(DisclosureClaim)) == 3
         assert await session.scalar(select(func.count()).select_from(EvidenceGap)) == 1

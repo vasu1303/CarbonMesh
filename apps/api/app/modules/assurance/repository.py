@@ -8,8 +8,10 @@ from decimal import Decimal
 from typing import Any, Literal
 from uuid import UUID
 
-from sqlalchemy import func, select
+from pgvector.sqlalchemy import VECTOR
+from sqlalchemy import String, and_, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.db.models.ai import AgentRun
 from app.db.models.assurance import (
@@ -20,7 +22,7 @@ from app.db.models.assurance import (
     EvidenceGap,
     Standard,
 )
-from app.db.models.carbon import CarbonMeasurement
+from app.db.models.carbon import CalculationRun, CarbonMeasurement
 from app.db.models.core import (
     Actor,
     Approval,
@@ -32,6 +34,8 @@ from app.db.models.core import (
     SourceDocument,
 )
 from app.db.models.ledger import FactBinding, LedgerEvent
+from app.db.models.semantic import MethodDefinition, MetricDefinition
+from app.modules.assurance.retrieval import EvidenceRetrievalContext
 
 ApprovalStatus = Literal["pending", "approved", "rejected", "invalidated", "expired"]
 
@@ -43,8 +47,11 @@ class DraftDependencies:
     site: Site
     reporting_period: ReportingPeriod
     measurement: CarbonMeasurement
+    measurement_metric: MetricDefinition
     requested_by: Actor
     agent_run: AgentRun | None
+    measurement_coverage: dict[str, Any] | None = None
+    measurement_calculation: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,17 +75,6 @@ class DraftAggregate:
     evidence: tuple[EvidenceRecord, ...]
     ledger_events: tuple[LedgerEvent, ...]
     approval: Approval | None
-
-
-@dataclass(frozen=True, slots=True)
-class StaleInputs:
-    draft: DisclosureDraft
-    standard: Standard
-    requirements: tuple[DisclosureRequirement, ...]
-    measurement: CarbonMeasurement | None
-    fact_bindings: tuple[FactBinding, ...]
-    evidence: tuple[EvidenceRecord, ...]
-    ledger_events: tuple[LedgerEvent, ...]
 
 
 class AssuranceRepository:
@@ -139,19 +135,6 @@ class AssuranceRepository:
             )
         )
 
-    async def get_requirement(
-        self,
-        *,
-        company_id: UUID,
-        requirement_id: UUID,
-    ) -> DisclosureRequirement | None:
-        return await self.session.scalar(
-            select(DisclosureRequirement).where(
-                DisclosureRequirement.company_id == company_id,
-                DisclosureRequirement.id == requirement_id,
-            )
-        )
-
     async def get_measurement(
         self,
         *,
@@ -209,6 +192,16 @@ class AssuranceRepository:
             company_id=company_id,
             measurement_id=measurement_id,
         )
+        measurement_metric = (
+            await self.session.scalar(
+                select(MetricDefinition).where(
+                    MetricDefinition.company_id == company_id,
+                    MetricDefinition.id == measurement.metric_definition_id,
+                )
+            )
+            if measurement is not None
+            else None
+        )
         actor = await self.get_actor(company_id=company_id, actor_id=requested_by)
         agent_run = (
             await self.get_agent_run(company_id=company_id, agent_run_id=agent_run_id)
@@ -221,18 +214,79 @@ class AssuranceRepository:
             or site is None
             or period is None
             or measurement is None
+            or measurement_metric is None
             or actor is None
             or (agent_run_id is not None and agent_run is None)
         ):
             return None
+        calculation = (
+            await self.session.execute(
+                select(CalculationRun, MethodDefinition)
+                .join(MethodDefinition, MethodDefinition.id == CalculationRun.method_definition_id)
+                .where(
+                    CalculationRun.company_id == company_id,
+                    MethodDefinition.company_id == company_id,
+                    CalculationRun.id == measurement.calculation_run_id,
+                )
+            )
+        ).one_or_none()
+        if calculation is None:
+            return None
+        coverage = None
+        run, method = calculation
+        snapshot = run.summary.get("input_snapshot")
+        if not isinstance(snapshot, dict):
+            snapshot = {}
+        is_scope2 = "measurement.scope2.location_based.hourly" in (
+            method.key,
+            snapshot.get("method_key"),
+        )
+        if is_scope2:
+            coverage = snapshot.get("coverage", {})
+            if not isinstance(coverage, dict):
+                coverage = {}
+        calculation_identity = {
+            "id": run.id,
+            "input_hash": run.input_hash,
+            "output_hash": run.output_hash,
+            "status": run.status,
+            "reporting_period_id": run.reporting_period_id,
+            "run_method_version": run.method_version,
+            "run_code_version": run.code_version,
+            "rounding_policy": run.rounding_policy,
+            "recorded_method_hash": run.summary.get("method_hash"),
+            "method_id": method.id,
+            "method_key": method.key,
+            "method_version": method.version,
+            "code_version": method.code_version,
+            "configuration": method.configuration,
+            "effective_from": method.effective_from,
+            "effective_to": method.effective_to,
+            "is_active": method.is_active,
+            "frozen_method": {
+                field: snapshot.get(field)
+                for field in (
+                    "method_definition_id",
+                    "method_key",
+                    "method_version",
+                    "code_version",
+                    "method_configuration",
+                )
+            }
+            if is_scope2 or snapshot.get("method_key") is not None
+            else None,
+        }
         return DraftDependencies(
             company=company,
             standard=standard,
             site=site,
             reporting_period=period,
             measurement=measurement,
+            measurement_metric=measurement_metric,
             requested_by=actor,
             agent_run=agent_run,
+            measurement_coverage=coverage,
+            measurement_calculation=calculation_identity,
         )
 
     async def allocate_draft_version(
@@ -389,21 +443,6 @@ class AssuranceRepository:
             )
         )
 
-    async def get_claim_by_sequence(
-        self,
-        *,
-        company_id: UUID,
-        draft_id: UUID,
-        sequence: int,
-    ) -> DisclosureClaim | None:
-        return await self.session.scalar(
-            select(DisclosureClaim).where(
-                DisclosureClaim.company_id == company_id,
-                DisclosureClaim.disclosure_draft_id == draft_id,
-                DisclosureClaim.sequence == sequence,
-            )
-        )
-
     async def get_citation_by_sources(
         self,
         *,
@@ -429,28 +468,6 @@ class AssuranceRepository:
                 ledger_predicate,
                 evidence_predicate,
             )
-        )
-
-    async def get_gap_by_code(
-        self,
-        *,
-        company_id: UUID,
-        draft_id: UUID,
-        code: str,
-        claim_id: UUID | None = None,
-    ) -> EvidenceGap | None:
-        predicates = [
-            EvidenceGap.company_id == company_id,
-            EvidenceGap.disclosure_draft_id == draft_id,
-            EvidenceGap.code == code,
-        ]
-        if claim_id is not None:
-            predicates.append(EvidenceGap.disclosure_claim_id == claim_id)
-        return await self.session.scalar(
-            select(EvidenceGap)
-            .where(*predicates)
-            .order_by(EvidenceGap.created_at.desc(), EvidenceGap.id.desc())
-            .limit(1)
         )
 
     async def create_claim(self, **values: Any) -> DisclosureClaim:
@@ -479,8 +496,10 @@ class AssuranceRepository:
         embedding_model: str,
         limit: int,
         query_embedding: Sequence[float] | None = None,
+        evidence_item_ids: Collection[UUID] | None = None,
+        context: EvidenceRetrievalContext | None = None,
     ) -> list[EvidenceRecord]:
-        if not evidence_types:
+        if not evidence_types or evidence_item_ids is not None and not evidence_item_ids:
             return []
         predicates = [
             EvidenceItem.company_id == company_id,
@@ -490,6 +509,80 @@ class AssuranceRepository:
             EvidenceItem.embedded_at.is_not(None),
             DataSource.status == "ready",
         ]
+        if evidence_item_ids is not None:
+            predicates.append(EvidenceItem.id.in_(evidence_item_ids))
+        metadata = EvidenceItem.evidence_metadata
+        newer_document = aliased(SourceDocument)
+        predicates.extend(
+            [
+                # Exclude revoked/untrusted and superseded source versions before top-k.
+                or_(
+                    metadata["trust_status"].astext.in_(("accepted", "verified", "synthetic")),
+                    and_(
+                        metadata["trust_status"].astext.is_(None), DataSource.is_synthetic.is_(True)
+                    ),
+                ),
+                or_(
+                    metadata["source_version"].astext.is_(None),
+                    metadata["source_version"].astext == cast(SourceDocument.version, String),
+                ),
+                or_(
+                    metadata["source_checksum"].astext.is_(None),
+                    metadata["source_checksum"].astext == SourceDocument.checksum,
+                ),
+                ~select(newer_document.id)
+                .where(
+                    newer_document.company_id == SourceDocument.company_id,
+                    newer_document.data_source_id == SourceDocument.data_source_id,
+                    newer_document.version > SourceDocument.version,
+                )
+                .exists(),
+            ]
+        )
+        if context is not None:
+            predicates.extend(
+                [
+                    metadata["requirement_codes"].contains([context.requirement_code]),
+                    or_(
+                        metadata["company_id"].astext.is_(None),
+                        metadata["company_id"].astext == str(context.company_id),
+                    ),
+                    or_(
+                        metadata["site_id"].astext.is_(None),
+                        metadata["site_id"].astext == str(context.site_id),
+                    ),
+                    or_(
+                        metadata["reporting_period_id"].astext.is_(None),
+                        metadata["reporting_period_id"].astext == str(context.reporting_period_id),
+                    ),
+                    or_(
+                        DataSource.site_id == context.site_id,
+                        metadata["site_id"].astext == str(context.site_id),
+                        func.btrim(metadata["site"].astext) == context.site_name.strip()
+                        if context.site_name
+                        else False,
+                    ),
+                    or_(
+                        metadata["reporting_period_id"].astext == str(context.reporting_period_id),
+                        func.btrim(metadata["reporting_period"].astext)
+                        == context.reporting_period_name.strip()
+                        if context.reporting_period_name
+                        else False,
+                    ),
+                ]
+            )
+            for key, expected in (
+                ("company", context.company_name),
+                ("site", context.site_name),
+                ("reporting_period", context.reporting_period_name),
+            ):
+                if expected is not None:
+                    predicates.append(
+                        or_(
+                            metadata[key].astext.is_(None),
+                            func.btrim(metadata[key].astext) == expected.strip(),
+                        )
+                    )
         base = (
             select(EvidenceItem, SourceDocument, DataSource)
             .join(
@@ -507,8 +600,8 @@ class AssuranceRepository:
         if query_embedding is not None and len(query_embedding) != 768:
             raise ValueError("query_embedding must contain exactly 768 values")
 
-        cosine_distance = getattr(EvidenceItem.embedding, "cosine_distance", None)
-        if query_embedding is None or cosine_distance is None:
+        embedding_type = EvidenceItem.__table__.c.embedding.type
+        if query_embedding is None or not isinstance(embedding_type, VECTOR):
             rows = (
                 await self.session.execute(
                     base.order_by(
@@ -520,7 +613,7 @@ class AssuranceRepository:
             ).all()
             return [EvidenceRecord(row[0], row[1], row[2]) for row in rows]
 
-        distance = cosine_distance(list(query_embedding))
+        distance = EvidenceItem.embedding.cosine_distance(list(query_embedding))
         ranked_rows = (
             await self.session.execute(
                 base.add_columns((1 - distance).label("similarity"))
@@ -542,35 +635,6 @@ class AssuranceRepository:
             )
             for row in ranked_rows
         ]
-
-    async def get_evidence_record(
-        self,
-        *,
-        company_id: UUID,
-        evidence_id: UUID,
-    ) -> EvidenceRecord | None:
-        row = (
-            await self.session.execute(
-                select(EvidenceItem, SourceDocument, DataSource)
-                .join(
-                    SourceDocument,
-                    (SourceDocument.company_id == EvidenceItem.company_id)
-                    & (SourceDocument.id == EvidenceItem.source_document_id),
-                )
-                .join(
-                    DataSource,
-                    (DataSource.company_id == SourceDocument.company_id)
-                    & (DataSource.id == SourceDocument.data_source_id),
-                )
-                .where(
-                    EvidenceItem.company_id == company_id,
-                    EvidenceItem.id == evidence_id,
-                )
-            )
-        ).one_or_none()
-        if row is None:
-            return None
-        return EvidenceRecord(row[0], row[1], row[2])
 
     async def get_ledger_event(
         self,
@@ -601,19 +665,6 @@ class AssuranceRepository:
                     LedgerEvent.id.in_(event_ids),
                 )
                 .order_by(LedgerEvent.created_at, LedgerEvent.id)
-            )
-        )
-
-    async def get_fact_binding(
-        self,
-        *,
-        company_id: UUID,
-        binding_id: UUID,
-    ) -> FactBinding | None:
-        return await self.session.scalar(
-            select(FactBinding).where(
-                FactBinding.company_id == company_id,
-                FactBinding.id == binding_id,
             )
         )
 
@@ -718,25 +769,6 @@ class AssuranceRepository:
             evidence=tuple(evidence),
             ledger_events=tuple(events),
             approval=approval,
-        )
-
-    async def load_stale_inputs(
-        self,
-        *,
-        company_id: UUID,
-        draft_id: UUID,
-    ) -> StaleInputs | None:
-        aggregate = await self.load_draft_aggregate(company_id=company_id, draft_id=draft_id)
-        if aggregate is None:
-            return None
-        return StaleInputs(
-            draft=aggregate.draft,
-            standard=aggregate.standard,
-            requirements=aggregate.requirements,
-            measurement=aggregate.measurement,
-            fact_bindings=aggregate.fact_bindings,
-            evidence=aggregate.evidence,
-            ledger_events=aggregate.ledger_events,
         )
 
     async def flush(self) -> None:

@@ -37,6 +37,7 @@ from app.modules.procurement.review import (
     build_recommendation_payload,
     build_review_source_state,
     canonicalize_scenario_context,
+    recommendation_preview_is_current,
     review_source_hash,
     scenario_context_signature,
     stored_recommendation_payload,
@@ -463,6 +464,27 @@ class ProcurementService:
         except SQLAlchemyError as error:
             raise self._database_unavailable() from error
 
+    async def is_recommendation_preview_current(
+        self,
+        *,
+        company_id: UUID,
+        recommendation_id: UUID,
+    ) -> bool:
+        """Revalidate every upstream input before exposing an approval preview."""
+
+        try:
+            recommendation = await self.repository.get_recommendation(
+                company_id=company_id,
+                recommendation_id=recommendation_id,
+            )
+            if recommendation is None:
+                raise not_found("recommendation", recommendation_id)
+            return await recommendation_preview_is_current(self.session, recommendation)
+        except ProcurementError:
+            raise
+        except SQLAlchemyError as error:
+            raise self._database_unavailable() from error
+
     async def _assess_scenario(
         self,
         scenario: ProcurementScenario,
@@ -763,24 +785,36 @@ class ProcurementService:
             )
             attached.add(evidence_item_id)
 
-        if scenario.agent_run_id is not None:
-            self.session.add_all(
-                [
-                    FactBinding(
-                        company_id=scenario.company_id,
-                        recommendation_id=recommendation.id,
-                        agent_run_id=scenario.agent_run_id,
-                        ledger_event_id=ledger_event.id,
-                        evidence_item_id=binding.evidence_item_id,
-                        placeholder=binding.placeholder,
-                        value_snapshot=binding.value,
-                        display_value=binding.display_value,
-                        unit=binding.unit,
-                    )
-                    for binding in fact_bindings
-                ]
+        for binding in fact_bindings:
+            binding_payload = {
+                "artifact_type": "procurement_recommendation",
+                "artifact_id": recommendation.id,
+                "placeholder": binding.placeholder,
+                "ledger_event_id": ledger_event.id,
+                "evidence_item_id": binding.evidence_item_id,
+                "value_snapshot": binding.value,
+                "display_value": binding.display_value,
+                "unit": binding.unit,
+                "context_hash": scenario.analysis_signature,
+            }
+            self.session.add(
+                FactBinding(
+                    company_id=scenario.company_id,
+                    artifact_type="procurement_recommendation",
+                    artifact_id=recommendation.id,
+                    recommendation_id=recommendation.id,
+                    agent_run_id=scenario.agent_run_id,
+                    ledger_event_id=ledger_event.id,
+                    evidence_item_id=binding.evidence_item_id,
+                    placeholder=binding.placeholder,
+                    value_snapshot=binding.value,
+                    display_value=binding.display_value,
+                    unit=binding.unit,
+                    context_hash=scenario.analysis_signature,
+                    binding_hash=payload_sha256(binding_payload)[1],
+                )
             )
-            await self.session.flush()
+        await self.session.flush()
 
         if requested_by is not None:
             try:

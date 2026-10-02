@@ -4,7 +4,7 @@ import hashlib
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.carbon import GridIntensityPoint
@@ -112,42 +112,44 @@ async def get_source_document_by_checksum(
     )
 
 
-async def get_evidence_item(
+async def get_evidence_items(
     session: AsyncSession,
     *,
     company_id: UUID,
     source_document_id: UUID,
-    locator: str,
-) -> EvidenceItem | None:
-    return await session.scalar(
+    locators: list[str],
+) -> dict[str, EvidenceItem]:
+    rows = await session.scalars(
         select(EvidenceItem).where(
             EvidenceItem.company_id == company_id,
             EvidenceItem.source_document_id == source_document_id,
-            EvidenceItem.locator == locator,
+            EvidenceItem.locator.in_(locators),
         )
     )
+    return {row.locator: row for row in rows}
 
 
-async def get_grid_intensity_point(
+async def get_grid_intensity_points(
     session: AsyncSession,
     *,
     company_id: UUID,
     site_id: UUID,
     zone: str,
-    observed_at: datetime,
-    temporal_granularity: str,
-    method_version: str,
-) -> GridIntensityPoint | None:
-    return await session.scalar(
+    versions: list[tuple[datetime, str, str]],
+) -> dict[tuple[datetime, str, str], GridIntensityPoint]:
+    rows = await session.scalars(
         select(GridIntensityPoint).where(
             GridIntensityPoint.company_id == company_id,
             GridIntensityPoint.site_id == site_id,
             GridIntensityPoint.zone == zone,
-            GridIntensityPoint.observed_at == observed_at,
-            GridIntensityPoint.temporal_granularity == temporal_granularity,
-            GridIntensityPoint.method_version == method_version,
+            tuple_(
+                GridIntensityPoint.observed_at,
+                GridIntensityPoint.temporal_granularity,
+                GridIntensityPoint.method_version,
+            ).in_(versions),
         )
     )
+    return {(row.observed_at, row.temporal_granularity, row.method_version): row for row in rows}
 
 
 async def get_latest_grid_intensity_point(

@@ -31,6 +31,20 @@ def _id(value: int) -> UUID:
     return UUID(int=value)
 
 
+def test_draft_requirement_scope_rejects_duplicate_ids() -> None:
+    with pytest.raises(ValidationError, match="must not contain duplicates"):
+        DisclosureDraftCreateRequest(
+            company_id=_id(1),
+            standard_id=_id(2),
+            site_id=_id(3),
+            reporting_period_id=_id(4),
+            measurement_id=_id(5),
+            requirement_ids=(_id(6), _id(6)),
+            requested_by=_id(7),
+            idempotency_key="assurance-duplicate-requirements",
+        )
+
+
 def _standard() -> AssuranceStandardSummary:
     return AssuranceStandardSummary(
         id=_id(1),

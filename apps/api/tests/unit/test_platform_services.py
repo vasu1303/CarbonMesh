@@ -135,7 +135,7 @@ async def test_approval_decision_locks_only_the_requested_company(monkeypatch) -
 
     with pytest.raises(ApprovalNotFoundError, match="not found"):
         await decide_approval(
-            object(),  # type: ignore[arg-type]
+            FakeSession(),  # type: ignore[arg-type]
             approval_id=approval_id,
             request=request,
         )
@@ -307,6 +307,11 @@ async def test_approval_list_bulk_loads_preview_integrity_once(monkeypatch) -> N
         load_bulk_inputs,
     )
     monkeypatch.setattr(approval_service, "recommendation_previews_are_current", bulk_statuses)
+    async def load_bindings(*_args, **_kwargs):
+        return {}
+
+    monkeypatch.setattr(approval_repository, "list_fact_bindings", load_bindings)
+    monkeypatch.setattr(approval_service, "procurement_bindings_are_current", lambda *_args: True)
     monkeypatch.setattr(
         approval_service,
         "recommendation_preview_is_current",
@@ -335,3 +340,6 @@ class FakeSession:
 
     async def flush(self) -> None:
         self.flush_count += 1
+
+    async def rollback(self) -> None:
+        pass

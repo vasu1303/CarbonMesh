@@ -7,14 +7,16 @@ from sqlalchemy import func, select
 
 from app.db.models.core import Approval, DataSource, SourceDocument
 from app.db.models.dispatch import DispatchRecommendation, DispatchScenario, GridForecast
-from app.db.models.ledger import LedgerEvent, LedgerEventEvidence, LineageEdge
+from app.db.models.ledger import FactBinding, LedgerEvent, LedgerEventEvidence, LineageEdge
 from tests.e2e.conftest import E2EContext
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("decision", ["approve", "reject"])
 async def test_dispatch_api_vertical_slice_is_deterministic_and_advisory(
     api_client,
     e2e_context: E2EContext,
+    decision: str,
 ) -> None:
     ids = e2e_context.ids
     company_query = {"company_id": str(ids.company_id)}
@@ -32,6 +34,7 @@ async def test_dispatch_api_vertical_slice_is_deterministic_and_advisory(
         json={
             "company_id": str(ids.company_id),
             "site_id": str(ids.site_id),
+            "source_mode": "fixture",
         },
     )
     assert sync_response.status_code == 200, sync_response.text
@@ -47,6 +50,7 @@ async def test_dispatch_api_vertical_slice_is_deterministic_and_advisory(
         json={
             "company_id": str(ids.company_id),
             "site_id": str(ids.site_id),
+            "source_mode": "fixture",
         },
     )
     assert repeated_sync.status_code == 200, repeated_sync.text
@@ -141,6 +145,10 @@ async def test_dispatch_api_vertical_slice_is_deterministic_and_advisory(
     assert replayed_infeasible.json() == infeasible_optimization.json()
 
     async with e2e_context.session_factory() as session:
+        bindings = list((await session.scalars(select(FactBinding))).all())
+        assert len(bindings) == 4
+        assert all(binding.agent_run_id is None for binding in bindings)
+        assert all(binding.binding_hash and binding.context_hash for binding in bindings)
         assert await session.scalar(select(func.count()).select_from(GridForecast)) == 24
         assert await session.scalar(select(func.count()).select_from(SourceDocument)) == 2
         assert await session.scalar(select(func.count()).select_from(DataSource)) == 2
@@ -176,3 +184,29 @@ async def test_dispatch_api_vertical_slice_is_deterministic_and_advisory(
             "end": "2026-10-01T10:00:00+00:00",
             "emissions_kgco2e": "470.000000",
         }
+
+    decided = await api_client.post(
+        f"/api/approvals/{recommendation['approval']['id']}/decision",
+        json={
+            **company_query,
+            "actor_id": str(ids.approver_id),
+            "decision": decision,
+            "preview_hash": recommendation["approval"]["preview_hash"],
+            "decision_note": "Synthetic human-reviewed advisory decision.",
+        },
+    )
+    assert decided.status_code == 200, decided.text
+    terminal = "approved" if decision == "approve" else "rejected"
+    for result in (
+        await api_client.get(
+            f"/api/dispatch/scenarios/{scenario['id']}/recommendation", params=company_query
+        ),
+        await api_client.post(
+            f"/api/dispatch/scenarios/{scenario['id']}/optimize", json=company_query
+        ),
+    ):
+        assert result.status_code == 200, result.text
+        assert result.json()["terminal_state"] == terminal
+        assert result.json()["recommendation"]["id"] == recommendation["id"]
+        assert result.json()["recommendation"]["approval"]["status"] == terminal
+        assert result.json()["recommendation"]["actuation_authorized"] is False

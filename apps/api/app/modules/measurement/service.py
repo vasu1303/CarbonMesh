@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models.carbon import EmissionFactor
 from app.db.models.semantic import MetricDefinition
 from app.modules.measurement.domain import (
+    CONFIDENCE_V2_WEIGHTS,
     DEFAULT_CONFIDENCE_WEIGHTS,
     AmbiguousFactorError,
     FactorCandidate,
@@ -20,8 +21,10 @@ from app.modules.measurement.domain import (
     NoMatchingFactorError,
     UnsupportedMassUnitError,
     calculate_confidence,
+    calculate_confidence_v2,
     calculate_emissions,
     calculate_variance,
+    measurement_code_hash,
     normalize_mass_to_kg,
     resolve_factor,
     sha256_payload,
@@ -41,9 +44,13 @@ from app.modules.measurement.schemas import (
     BaselineComparison,
     CalculationRunReference,
     ConfidenceBreakdownResponse,
+    ConfidenceV2Response,
     EmissionCalculationDetail,
     EmissionFactorReference,
     EvidenceReference,
+    GridPointReference,
+    MeasurementBreakdown,
+    MeasurementBreakdownItem,
     MeasurementCalculateRequest,
     MeasurementDetail,
     MeasurementFactReference,
@@ -84,6 +91,10 @@ class MeasurementService:
         self.repository = repository or MeasurementRepository(session)
 
     async def calculate(self, request: MeasurementCalculateRequest) -> MeasurementResult:
+        if request.output_metric_key == "emissions.scope2.location_based":
+            from app.modules.measurement.scope2 import calculate_scope2
+
+            return await calculate_scope2(self, request)
         trace_id = request.trace_id or f"measurement-{uuid4()}"
         context = await self._resolve_context(request, trace_id=trace_id)
         if request.actor_id is not None and not await self.repository.actor_exists(
@@ -349,14 +360,22 @@ class MeasurementService:
             rounding=rounding_policy,
         )
         try:
-            confidence = calculate_confidence(
-                source_quality=source_quality,
-                factor_specificity=factor_specificity,
-                factor_recency=factor_recency,
-                record_completeness=record_completeness,
-                weights=confidence_weights,
-                rounding=rounding_policy,
-            )
+            if set(confidence_weights) == set(CONFIDENCE_V2_WEIGHTS):
+                confidence = calculate_confidence_v2(
+                    source_quality=source_quality,
+                    method_fit=factor_specificity,
+                    temporal_match=factor_recency,
+                    completeness=record_completeness,
+                )
+            else:
+                confidence = calculate_confidence(
+                    source_quality=source_quality,
+                    factor_specificity=factor_specificity,
+                    factor_recency=factor_recency,
+                    record_completeness=record_completeness,
+                    weights=confidence_weights,
+                    rounding=rounding_policy,
+                )
         except InvalidConfidenceConfigurationError as error:
             raise self._error(
                 status_code=500,
@@ -388,6 +407,7 @@ class MeasurementService:
             "method_key": context.method.key,
             "method_version": context.method.version,
             "method_code_version": context.method.code_version,
+            "code_hash": measurement_code_hash(),
             "method_configuration": context.method.configuration,
             "rounding_policy": "ROUND_HALF_EVEN",
             "output_quantum": output_quantum,
@@ -621,6 +641,45 @@ class MeasurementService:
             )
         return self._detail_from_bundle(bundle)
 
+    async def get_breakdown(
+        self, *, company_id: UUID, measurement_id: UUID
+    ) -> MeasurementBreakdown:
+        detail = await self.get_measurement(company_id=company_id, measurement_id=measurement_id)
+        inputs = {item.activity_record_id: item for item in detail.inputs}
+        items = []
+        for calculation in detail.calculations:
+            source = inputs[calculation.activity_record_id]
+            is_grid = calculation.grid_intensity_point_id is not None
+            items.append(
+                MeasurementBreakdownItem(
+                    calculation_id=calculation.id,
+                    activity_record_id=source.activity_record_id,
+                    raw_activity_record_id=source.raw_activity_record_id,
+                    source_document_id=source.source_document_id,
+                    interval_start=calculation.interval_start,
+                    activity_date=source.activity_date,
+                    material_code=source.material_code,
+                    quantity=(
+                        calculation.normalized_quantity_kwh
+                        if is_grid
+                        else calculation.normalized_quantity_kg
+                    ),
+                    quantity_unit="kWh" if is_grid else "kg",
+                    emissions_kgco2e=calculation.emissions_kgco2e,
+                    emission_factor_id=calculation.emission_factor_id,
+                    grid_intensity_point_id=calculation.grid_intensity_point_id,
+                    output_hash=calculation.output_hash,
+                )
+            )
+        return MeasurementBreakdown(
+            measurement_id=detail.id,
+            metric_key=detail.metric_key,
+            status=detail.status,
+            total_kgco2e=detail.value_kgco2e,
+            facts=detail.facts,
+            items=items,
+        )
+
     async def _resolve_context(
         self,
         request: MeasurementCalculateRequest,
@@ -665,15 +724,20 @@ class MeasurementService:
             key=request.output_metric_key,
             trace_id=trace_id,
         )
-        if activity_metric.canonical_unit.strip().casefold() not in {
-            "kg",
-            "kilogram",
-            "kilograms",
-        }:
+        allowed_activity_units = (
+            {"kwh"}
+            if request.output_metric_key == "emissions.scope2.location_based"
+            else {
+                "kg",
+                "kilogram",
+                "kilograms",
+            }
+        )
+        if activity_metric.canonical_unit.strip().casefold() not in allowed_activity_units:
             raise self._error(
                 status_code=422,
                 code="unsupported_activity_metric_unit",
-                message="The selected activity metric does not use canonical kg mass.",
+                message="The activity metric unit is incompatible with the selected calculation.",
                 terminal_state="unsupported",
                 trace_id=trace_id,
                 field_details={"canonical_unit": activity_metric.canonical_unit},
@@ -786,16 +850,21 @@ class MeasurementService:
             configured_weights = configuration.get("confidence_weights", {})
             if not isinstance(configured_weights, Mapping):
                 raise TypeError
+            uses_v2 = configuration.get("confidence_method") == "measurement-confidence-v2"
+            if uses_v2 and context.method.version != "2.0.0":
+                raise ValueError
+            defaults = CONFIDENCE_V2_WEIGHTS if uses_v2 else DEFAULT_CONFIDENCE_WEIGHTS
             if any(
-                not isinstance(name, str) or name not in DEFAULT_CONFIDENCE_WEIGHTS
-                for name in configured_weights
+                not isinstance(name, str) or name not in defaults for name in configured_weights
             ):
                 raise ValueError
             weights = {
                 name: Decimal(str(configured_weights.get(name, default)))
-                for name, default in DEFAULT_CONFIDENCE_WEIGHTS.items()
+                for name, default in defaults.items()
             }
             if any(not weight.is_finite() for weight in weights.values()):
+                raise ValueError
+            if uses_v2 and weights != CONFIDENCE_V2_WEIGHTS:
                 raise ValueError
         except (InvalidOperation, TypeError, ValueError) as error:
             raise self._error(
@@ -874,6 +943,8 @@ class MeasurementService:
             record_completeness_weight=weights["record_completeness"],
             overall=overall,
         )
+        if confidence_data.get("version") == "2.0.0":
+            confidence = ConfidenceV2Response.model_validate(confidence_data)
 
         inputs: list[MeasurementInput] = []
         calculations: list[EmissionCalculationDetail] = []
@@ -954,6 +1025,73 @@ class MeasurementService:
                 ),
             )
 
+        grid_points = []
+        for (
+            calculation,
+            activity,
+            raw_activity,
+            point,
+            evidence,
+            document,
+        ) in bundle.grid_calculations:
+            inputs.append(
+                MeasurementInput(
+                    activity_record_id=activity.id,
+                    raw_activity_record_id=raw_activity.id,
+                    data_source_id=raw_activity.data_source_id,
+                    source_document_id=raw_activity.source_document_id,
+                    source_row_key=raw_activity.row_key,
+                    source_row_number=raw_activity.row_number,
+                    raw_checksum=raw_activity.checksum,
+                    supplier_product_id=None,
+                    product_code=None,
+                    material_code=activity.material_code,
+                    activity_date=activity.activity_date,
+                    source_quantity=activity.quantity,
+                    source_unit=activity.unit,
+                    normalized_quantity_kwh=calculation.normalized_quantity,
+                    interval_start=point.observed_at,
+                    record_completeness=Decimal(1),
+                )
+            )
+            calculations.append(
+                EmissionCalculationDetail(
+                    id=calculation.id,
+                    activity_record_id=activity.id,
+                    emission_factor_id=None,
+                    grid_intensity_point_id=point.id,
+                    normalized_quantity_kwh=calculation.normalized_quantity,
+                    intensity_gco2e_per_kwh=calculation.factor_value,
+                    interval_start=point.observed_at,
+                    emissions_kgco2e=calculation.emissions_kgco2e,
+                    formula=calculation.formula,
+                    output_hash=calculation.output_hash,
+                )
+            )
+            grid_points.append(
+                GridPointReference(
+                    id=point.id,
+                    provider=point.provider,
+                    zone=point.zone,
+                    observed_at=point.observed_at,
+                    temporal_granularity=point.temporal_granularity,
+                    intensity_gco2e_per_kwh=calculation.factor_value,
+                    is_estimated=point.is_estimated,
+                    method_version=point.method_version,
+                    point_hash=point.point_hash,
+                    evidence=EvidenceReference(
+                        id=evidence.id,
+                        source_document_id=evidence.source_document_id,
+                        data_source_id=document.data_source_id,
+                        source_document_filename=document.filename,
+                        source_document_checksum=document.checksum,
+                        evidence_type=evidence.evidence_type,
+                        locator=evidence.locator,
+                        checksum=evidence.checksum,
+                    ),
+                )
+            )
+
         baseline_response = None
         summary = run.summary if isinstance(run.summary, Mapping) else {}
         baseline_was_frozen = "baseline" in summary
@@ -1024,6 +1162,8 @@ class MeasurementService:
                 method_key=bundle.method.key,
                 method_version=run.method_version,
                 code_version=run.code_version,
+                method_hash=run.summary.get("method_hash"),
+                code_hash=run.summary.get("code_hash"),
                 rounding_policy=run.rounding_policy,
                 input_hash=run.input_hash,
                 output_hash=run.output_hash or measurement.output_hash,
@@ -1033,6 +1173,8 @@ class MeasurementService:
             ),
             inputs=inputs,
             factors=list(factors.values()),
+            grid_points=grid_points,
+            coverage=(run.summary.get("input_snapshot") or {}).get("coverage"),
             calculations=calculations,
             baseline=baseline_response,
             facts=MeasurementFactReference(
