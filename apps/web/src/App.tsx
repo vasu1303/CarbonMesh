@@ -15,6 +15,7 @@ import {
   Zap,
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
+import { NavLink, Outlet, useLocation } from 'react-router-dom'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -24,16 +25,16 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { DashboardPage } from '@/features/dashboard/dashboard-page'
-import { dashboardScope } from '@/features/dashboard/queries'
+import { workspaceScope } from '@/lib/workspace'
+import { SessionBoundary } from '@/features/auth/session-boundary'
 import { retryApiQuery } from '@/services/api'
 import { getHealth } from '@/services/health'
 
 const navigation = [
-  { label: 'Overview', icon: LayoutDashboard },
+  { label: 'Overview', icon: LayoutDashboard, path: '/dashboard' },
   { label: 'Agent workspace', icon: MessageSquareText },
   { label: 'Data', icon: Database },
-  { label: 'Measurements', icon: Ruler },
+  { label: 'Measurements', icon: Ruler, path: '/measurement' },
   { label: 'Assurance', icon: ShieldCheck },
   { label: 'Procurement', icon: ShoppingCart },
   { label: 'Dispatch', icon: Zap },
@@ -54,6 +55,12 @@ function initialTheme() {
 
 export default function App() {
   const [dark, setDark] = useState(initialTheme)
+  const location = useLocation()
+  const pageName =
+    location.pathname === '/measurement' ? 'Measurements' : 'Dashboard'
+  useEffect(() => {
+    window.scrollTo({ top: 0 })
+  }, [location.pathname])
   const health = useQuery({
     queryKey: ['health'],
     queryFn: getHealth,
@@ -75,7 +82,7 @@ export default function App() {
         href="#main-content"
         className="sr-only z-50 rounded-md bg-background p-3 focus:not-sr-only focus:fixed focus:top-2 focus:left-2"
       >
-        Skip to dashboard
+        Skip to content
       </a>
       <div className="min-h-svh bg-neutral-50 text-foreground dark:bg-neutral-950 lg:grid lg:grid-cols-[14rem_minmax(0,1fr)]">
         <aside className="sticky top-0 hidden h-svh flex-col border-r bg-background lg:flex">
@@ -92,39 +99,47 @@ export default function App() {
             className="flex-1 space-y-1 overflow-y-auto p-3"
             aria-label="Primary navigation"
           >
-            {navigation.map(({ label, icon: Icon }, index) => (
-              <Tooltip key={label}>
-                <TooltipTrigger asChild>
-                  <span
-                    className="block"
-                    tabIndex={index ? 0 : undefined}
-                    aria-label={
-                      index ? `${label}, not connected yet` : undefined
-                    }
-                  >
-                    <Button
-                      variant="ghost"
-                      disabled={index !== 0}
-                      aria-current={index === 0 ? 'page' : undefined}
-                      onClick={() => window.scrollTo({ top: 0 })}
-                      className={
-                        index === 0
-                          ? 'w-full justify-start bg-muted'
-                          : 'w-full justify-start text-muted-foreground disabled:opacity-60'
-                      }
+            {navigation.map(({ label, icon: Icon, path }) =>
+              path ? (
+                <Button
+                  key={label}
+                  asChild
+                  variant="ghost"
+                  className={
+                    location.pathname === path
+                      ? 'w-full justify-start bg-muted'
+                      : 'w-full justify-start text-muted-foreground'
+                  }
+                >
+                  <NavLink to={path}>
+                    <Icon className="size-4" />
+                    {label}
+                  </NavLink>
+                </Button>
+              ) : (
+                <Tooltip key={label}>
+                  <TooltipTrigger asChild>
+                    <span
+                      className="block"
+                      tabIndex={0}
+                      aria-label={`${label}, not connected yet`}
                     >
-                      <Icon className="size-4" />
-                      {label}
-                    </Button>
-                  </span>
-                </TooltipTrigger>
-                {index !== 0 && (
+                      <Button
+                        variant="ghost"
+                        disabled
+                        className="w-full justify-start text-muted-foreground disabled:opacity-60"
+                      >
+                        <Icon className="size-4" />
+                        {label}
+                      </Button>
+                    </span>
+                  </TooltipTrigger>
                   <TooltipContent side="right">
                     Not connected yet
                   </TooltipContent>
-                )}
-              </Tooltip>
-            ))}
+                </Tooltip>
+              ),
+            )}
           </nav>
           <div className="border-t p-5 text-xs text-muted-foreground">
             <p className="font-medium text-foreground">
@@ -142,7 +157,7 @@ export default function App() {
                 Workspace
               </span>
               <span className="text-muted-foreground">/</span>
-              <span>Dashboard</span>
+              <span>{pageName}</span>
             </div>
             <div className="flex items-center gap-3">
               <Badge variant="outline" className="text-xs">
@@ -175,13 +190,40 @@ export default function App() {
               </Tooltip>
             </div>
           </header>
+          <nav
+            aria-label="Mobile navigation"
+            className="flex gap-1 border-b bg-background px-3 py-2 lg:hidden"
+          >
+            {navigation
+              .filter((item) => item.path)
+              .map(({ label, path, icon: Icon }) => (
+                <Button
+                  key={path}
+                  asChild
+                  variant="ghost"
+                  size="sm"
+                  className={
+                    location.pathname === path
+                      ? 'bg-muted'
+                      : 'text-muted-foreground'
+                  }
+                >
+                  <NavLink to={path!}>
+                    <Icon className="size-4" />
+                    {label}
+                  </NavLink>
+                </Button>
+              ))}
+          </nav>
           <main id="main-content" className="mx-auto max-w-[1600px]">
-            {dashboardScope.success ? (
-              <DashboardPage scope={dashboardScope.data} />
+            {workspaceScope.success ? (
+              <SessionBoundary>
+                <Outlet context={workspaceScope.data} />
+              </SessionBoundary>
             ) : (
               <section role="alert" className="p-8">
                 <h1 className="text-lg font-semibold">
-                  Dashboard context is not configured
+                  Workspace context is not configured
                 </h1>
                 <p className="mt-2 text-sm text-muted-foreground">
                   Set valid company, site, reporting period and metric UUIDs in

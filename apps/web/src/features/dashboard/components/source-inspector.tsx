@@ -331,7 +331,7 @@ export function SourceInspector({
         <DialogHeader className="pr-8">
           <DialogTitle>
             {selection?.kind === 'approval'
-              ? 'Procurement queue preview'
+              ? 'Approval queue preview'
               : 'Source inspector'}
           </DialogTitle>
           <DialogDescription>
@@ -360,33 +360,47 @@ export function SourceInspector({
           <dl className="divide-y">
             <Fact label="Approval ID" value={selection.item.id} />
             <Fact
-              label="Recommendation ID"
-              value={selection.item.recommendation_id}
+              label="Target type"
+              value={humanize(selection.item.target_type)}
             />
-            <Fact
-              label="Product / supplier"
-              value={`${selection.item.recommended_product_name} / ${selection.item.supplier_name}`}
-            />
-            <Fact
-              label="Projected footprint (kgCO2e)"
-              value={formatDecimal(selection.item.projected_footprint_kgco2e)}
-            />
-            <Fact
-              label="Projected avoided (kgCO2e)"
-              value={formatDecimal(selection.item.avoided_kgco2e)}
-            />
-            <Fact
-              label="Reduction"
-              value={`${formatDecimal(selection.item.reduction_pct)}%`}
-            />
-            <Fact
-              label="Cost change"
-              value={`${formatDecimal(selection.item.cost_delta_pct)}%`}
-            />
-            <Fact
-              label="Lead time change (days)"
-              value={String(selection.item.lead_time_delta_days)}
-            />
+            <Fact label="Target ID" value={selection.item.target_id} />
+            <Fact label="Requester" value={selection.item.requester_name} />
+            {selection.item.recommended_product_name && (
+              <Fact
+                label="Product / supplier"
+                value={`${selection.item.recommended_product_name} / ${selection.item.supplier_name ?? 'Not provided'}`}
+              />
+            )}
+            {selection.item.projected_footprint_kgco2e != null && (
+              <Fact
+                label="Projected footprint (kgCO2e)"
+                value={formatDecimal(selection.item.projected_footprint_kgco2e)}
+              />
+            )}
+            {selection.item.avoided_kgco2e != null && (
+              <Fact
+                label="Projected avoided (kgCO2e)"
+                value={formatDecimal(selection.item.avoided_kgco2e)}
+              />
+            )}
+            {selection.item.reduction_pct != null && (
+              <Fact
+                label="Reduction"
+                value={`${formatDecimal(selection.item.reduction_pct)}%`}
+              />
+            )}
+            {selection.item.cost_delta_pct != null && (
+              <Fact
+                label="Cost change"
+                value={`${formatDecimal(selection.item.cost_delta_pct)}%`}
+              />
+            )}
+            {selection.item.lead_time_delta_days != null && (
+              <Fact
+                label="Lead time change (days)"
+                value={String(selection.item.lead_time_delta_days)}
+              />
+            )}
             <Fact
               label="Expires"
               value={formatDate(selection.item.expires_at)}

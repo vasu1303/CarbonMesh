@@ -66,7 +66,7 @@ test('canonical reads, source inspection, chart, paging and responsive themes', 
       exact: true,
     }),
   ).toBeFocused()
-  const queue = page.getByRole('region', { name: 'Procurement review queue' })
+  const queue = page.getByRole('region', { name: 'Approval review queue' })
   await queue.getByRole('button', { name: 'Next page' }).click()
   await expect(queue.getByText('Expired preview')).toBeVisible()
   await page.getByRole('button', { name: /Switch to .* mode/ }).click()
@@ -93,7 +93,10 @@ test('canonical reads, source inspection, chart, paging and responsive themes', 
     expect(request.method).toBe(
       request.url.pathname === '/api/context/resolve' ? 'POST' : 'GET',
     )
-    if (request.method === 'GET' && request.url.pathname !== '/api/health')
+    if (
+      request.method === 'GET' &&
+      !['/api/health', '/api/auth/session'].includes(request.url.pathname)
+    )
       expect(request.url.searchParams.get('company_id')).toBe(id(1))
   }
   const measurementRequest = requests.find(
@@ -151,7 +154,7 @@ test('empty results are not fabricated values', async ({ page }) => {
     page.getByText('No cached grid data', { exact: true }),
   ).toBeVisible()
   await expect(
-    page.getByText('No pending procurement previews', { exact: true }),
+    page.getByText('No pending approval previews', { exact: true }),
   ).toBeVisible()
   await expect(
     page.getByText('No ledger events', { exact: true }),
@@ -300,4 +303,51 @@ test('narrow viewport and source dialog remain usable with long labels', async (
   ).toBe(true)
   await page.keyboard.press('Escape')
   await expect(dialog).not.toBeVisible()
+})
+
+test('generic dispatch approvals render without invented procurement values', async ({
+  page,
+}) => {
+  await mockDashboard(page, async (route, url) => {
+    if (url.pathname !== '/api/approvals') return
+    await route.fulfill({
+      json: {
+        items: [
+          {
+            id: id(9001),
+            company_id: id(1),
+            target_type: 'dispatch_recommendation',
+            target_id: id(9002),
+            requester_name: 'Synthetic planner',
+            status: 'pending',
+            preview_hash: 'a'.repeat(64),
+            analysis_signature: 'b'.repeat(64),
+            expires_at: '2099-01-01T00:00:00Z',
+            created_at: '2026-10-01T00:00:00Z',
+            expired: false,
+            preview_current: true,
+            recommended_product_name: null,
+            supplier_name: null,
+            avoided_kgco2e: null,
+            cost_delta_pct: null,
+          },
+        ],
+        total: 1,
+        limit: 2,
+        offset: 0,
+      },
+    })
+    return true
+  })
+  await page.goto('/dashboard')
+  const queue = page.getByRole('region', { name: 'Approval review queue' })
+  await expect(queue.getByText('Requested by Synthetic planner')).toBeVisible()
+  await expect(queue.getByText('Cost change', { exact: true })).toHaveCount(0)
+  await queue.getByRole('button', { name: 'Inspect preview' }).click()
+  await expect(
+    page.getByRole('dialog').getByText(id(9002), { exact: true }),
+  ).toBeVisible()
+  await expect(
+    page.getByRole('dialog').getByText('Product / supplier', { exact: true }),
+  ).toHaveCount(0)
 })

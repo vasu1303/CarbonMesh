@@ -4,7 +4,7 @@ const errorSchema = z.object({
   detail: z.object({
     code: z.string(),
     message: z.string(),
-    trace_id: z.string().optional(),
+    trace_id: z.string().nullable().optional(),
     retryable: z.boolean().optional(),
   }),
 })
@@ -13,18 +13,21 @@ export class ApiError extends Error {
   readonly code: string
   readonly retryable: boolean
   readonly traceId?: string
+  readonly status?: number
 
   constructor(
     message: string,
     code: string,
     retryable = false,
     traceId?: string,
+    status?: number,
   ) {
     super(message)
     this.name = 'ApiError'
     this.code = code
     this.retryable = retryable
     this.traceId = traceId
+    this.status = status
   }
 }
 
@@ -32,6 +35,7 @@ type RequestOptions = {
   signal: AbortSignal
   params?: Record<string, string | number | boolean | undefined>
   body?: unknown
+  method?: 'GET' | 'POST' | 'DELETE'
 }
 
 export async function apiRequest<T>(
@@ -47,7 +51,9 @@ export async function apiRequest<T>(
   const timeout = AbortSignal.timeout(20_000)
   try {
     const response = await fetch(url, {
-      method: options.body === undefined ? 'GET' : 'POST',
+      method: options.method ?? (options.body === undefined ? 'GET' : 'POST'),
+      credentials: 'include',
+      cache: 'no-store',
       headers:
         options.body === undefined
           ? { Accept: 'application/json' }
@@ -68,13 +74,16 @@ export async function apiRequest<T>(
           detail.message,
           detail.code,
           detail.retryable,
-          detail.trace_id,
+          detail.trace_id ?? undefined,
+          response.status,
         )
       }
       throw new ApiError(
         'The API could not complete this request.',
         `http_${response.status}`,
         response.status >= 500,
+        undefined,
+        response.status,
       )
     }
     const parsed = schema.safeParse(body)

@@ -43,9 +43,27 @@ npm run dev
 
 Open:
 
-- frontend: `http://localhost:3000`;
-- API health: `http://localhost:8000/api/health`;
-- OpenAPI: `http://localhost:8000/docs`.
+Dashboard and Measurements use authenticated API data only, including during
+development. Sign in using an operator-provisioned key from `AUTH_ACCESS_KEYS`
+in the ignored `apps/api/.env` (use the analyst grant for these screens).
+In the seeded local setup, the analyst actor UUID ends with `000004`.
+The company must match `VITE_COMPANY_ID`; site/period IDs must already exist.
+The browser uses the API's HttpOnly session cookie, not a token in localStorage.
+Never place access keys in `VITE_*` variables or commit them. Session expiry
+returns to sign-in and clears cached workspace data. Seeded database records
+remain labeled synthetic; no frontend preview or fallback dataset exists.
+
+Dashboard and Measurements use authenticated API data only, including during
+development. Sign in using an operator-provisioned key from `AUTH_ACCESS_KEYS`
+in the ignored `apps/api/.env` (use the analyst grant for these screens).
+In the seeded local setup, the analyst actor UUID ends with `000004`.
+The company must match `VITE_COMPANY_ID`; site/period IDs must already exist.
+The browser uses the API's HttpOnly session cookie, not a token in localStorage.
+Never place access keys in `VITE_*` variables or commit them. Session expiry
+returns to sign-in and clears cached workspace data. Seeded database records
+remain labeled synthetic; no frontend preview or fallback dataset exists.
+
+## Demo data and provider modes
 
 The optional Make targets wrap the same operations:
 
@@ -62,7 +80,76 @@ clean-machine rehearsal.
 
 ## Run without Docker
 
-Install the backend on Windows:
+For a small additive API test dataset on an existing synthetic Maverick tenant,
+run the following from `apps/api` after configuring its database connection:
+
+```bash
+python -m app.modules.demo.populate --endpoint YOUR_EXACT_ENDPOINT --database carbonmesh
+python -m app.modules.demo.populate --endpoint YOUR_EXACT_ENDPOINT --database carbonmesh --apply
+```
+
+The first command only verifies the schema, tenant, and row counts. `--apply`
+imports `data/demo/api-smoke-material-v1.csv`: three synthetic material receipts
+and one deliberately invalid quantity. The existing import and Measurement
+services create quality issues, calculated values, confidence, hashes, and ledger
+lineage. No carbon result is hard-coded in the script. Repeating the same command
+reuses the import and calculation results. Each service owns its transaction, so
+an interrupted run can be resumed; the whole script is not one atomic transaction.
+Changing the fixture requires a new filename and idempotency key.
+
+This command refuses a different target or a missing/inactive/non-synthetic
+Maverick tenant. It never bootstraps, resets, deletes, overwrites reference data,
+approves recommendations, or calls an external model/grid provider. Existing
+suppliers, standards, loads, recommendations, and approvals remain untouched.
+Scope 2 and Assurance results still require suitable timestamp-aligned grid and
+activity data; empty tables are not filled with fabricated artifacts.
+
+To verify the API, exchange a locally provisioned access key at
+`POST /api/auth/session`, then use the returned session for `GET /api/measurements`
+with the company/site/period selectors. Inspect each result at
+`GET /api/measurements/{id}` and `GET /api/measurements/{id}/lineage`.
+The response IDs, exact values, output hashes, and ledger IDs should match Neon.
+API-backed synthetic test data is still synthetic; its labels must remain even
+after frontend-only preview data is removed. Local HTTP development uses
+`AUTH_COOKIE_SECURE=false`; deployed HTTPS environments must keep it true.
+
+For a small additive API test dataset on an existing synthetic Maverick tenant,
+run the following from `apps/api` after configuring its database connection:
+
+```bash
+python -m app.modules.demo.populate --endpoint YOUR_EXACT_ENDPOINT --database carbonmesh
+python -m app.modules.demo.populate --endpoint YOUR_EXACT_ENDPOINT --database carbonmesh --apply
+```
+
+The first command only verifies the schema, tenant, and row counts. `--apply`
+imports `data/demo/api-smoke-material-v1.csv`: three synthetic material receipts
+and one deliberately invalid quantity. The existing import and Measurement
+services create quality issues, calculated values, confidence, hashes, and ledger
+lineage. No carbon result is hard-coded in the script. Repeating the same command
+reuses the import and calculation results. Each service owns its transaction, so
+an interrupted run can be resumed; the whole script is not one atomic transaction.
+Changing the fixture requires a new filename and idempotency key.
+
+This command refuses a different target or a missing/inactive/non-synthetic
+Maverick tenant. It never bootstraps, resets, deletes, overwrites reference data,
+approves recommendations, or calls an external model/grid provider. Existing
+suppliers, standards, loads, recommendations, and approvals remain untouched.
+Scope 2 and Assurance results still require suitable timestamp-aligned grid and
+activity data; empty tables are not filled with fabricated artifacts.
+
+To verify the API, exchange a locally provisioned access key at
+`POST /api/auth/session`, then use the returned session for `GET /api/measurements`
+with the company/site/period selectors. Inspect each result at
+`GET /api/measurements/{id}` and `GET /api/measurements/{id}/lineage`.
+The response IDs, exact values, output hashes, and ledger IDs should match Neon.
+API-backed synthetic test data is still synthetic; its labels must remain even
+after frontend-only preview data is removed. Local HTTP development uses
+`AUTH_COOKIE_SECURE=false`; deployed HTTPS environments must keep it true.
+
+Grid calls default to **live** data. Offline demos must explicitly choose
+`mode: "fixture"` for history, `source_mode: "fixture"` for forecast sync, and
+`context.grid_source_mode: "fixture"` for an agent request. Agent source mode is
+bound into the run signature. Live failures never silently switch to fixtures.
 
 ```powershell
 cd apps/api

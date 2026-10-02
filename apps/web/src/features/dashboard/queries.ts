@@ -4,26 +4,9 @@ import { z } from 'zod'
 import { apiRequest, retryApiQuery } from '@/services/api'
 import * as schemas from './schemas'
 
-const scopeSchema = z.object({
-  company_id: z.uuid(),
-  site_id: z.uuid(),
-  reporting_period_id: z.uuid(),
-  metric_id: z.uuid(),
-})
-// Stable seeded identifiers only. Names, values and provenance always come from the API.
-export const dashboardScope = scopeSchema.safeParse({
-  company_id:
-    import.meta.env.VITE_COMPANY_ID || '00000000-0000-4000-8000-000000000001',
-  site_id:
-    import.meta.env.VITE_SITE_ID || '00000000-0000-4000-8000-000000000002',
-  reporting_period_id:
-    import.meta.env.VITE_REPORTING_PERIOD_ID ||
-    '00000000-0000-4000-8000-000000000003',
-  metric_id:
-    import.meta.env.VITE_METRIC_DEFINITION_ID ||
-    '00000000-0000-4000-8000-000000000102',
-})
-export type DashboardScope = z.infer<typeof scopeSchema>
+import type { WorkspaceScope as DashboardScope } from '@/lib/workspace'
+export { workspaceScope as dashboardScope } from '@/lib/workspace'
+export type { WorkspaceScope as DashboardScope } from '@/lib/workspace'
 export const dashboardKey = ['dashboard'] as const
 
 function matchesScope(
@@ -122,12 +105,21 @@ export const dashboardQueries = {
       offset: 0,
     }),
   approvals: (scope: DashboardScope, offset = 0) =>
-    read('/approvals', schemas.pageSchema(schemas.approvalSchema), {
-      company_id: scope.company_id,
-      status: 'pending',
-      limit: 2,
-      offset,
-    }),
+    read(
+      '/approvals',
+      schemas.pageSchema(
+        schemas.approvalSchema.refine(
+          (item) =>
+            item.company_id === scope.company_id && item.status === 'pending',
+        ),
+      ),
+      {
+        company_id: scope.company_id,
+        status: 'pending',
+        limit: 2,
+        offset,
+      },
+    ),
   ledger: (scope: DashboardScope) =>
     read('/ledger/events', schemas.pageSchema(schemas.ledgerEventSchema), {
       company_id: scope.company_id,

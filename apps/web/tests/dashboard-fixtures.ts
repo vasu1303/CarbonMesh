@@ -28,6 +28,10 @@ const measurements = Array.from({ length: 7 }, (_, index) => ({
 }))
 const approval = {
   id: id(301),
+  company_id: id(1),
+  target_type: 'procurement_recommendation',
+  target_id: id(401),
+  requester_name: 'Synthetic analyst',
   recommendation_id: id(401),
   status: 'pending',
   preview_hash: hash,
@@ -94,6 +98,8 @@ function paginate(items: unknown[], url: URL) {
 export function fixtureFor(url: URL, empty = false): unknown {
   const path = url.pathname.replace('/api', '')
   if (path === '/health') return { status: 'ok', service: 'CarbonMesh API' }
+  if (path === '/auth/session')
+    return { company_id: id(1), actor_id: id(4), role: 'sustainability_analyst' }
   if (path === '/context/resolve')
     return {
       company: {

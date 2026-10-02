@@ -1,5 +1,8 @@
 # Dashboard integration: phase 1
 
+Follow-up: the [Measurements screen](measurements-integration.md) is now wired
+into the shared shell as the second reviewable screen.
+
 The `/dashboard` screen is connected to canonical backend routes. `/` redirects
 there. Other screens are intentionally not implemented in this phase; their
 navigation items remain disabled. No backend code or database content is changed.
@@ -9,6 +12,11 @@ navigation items remain disabled. No backend code or database content is changed
 Run the API using the repository README, then `npm run dev` from the repository
 root. The dashboard is at `http://localhost:3000/dashboard`. The Vite development
 proxy forwards `/api` to port 8000.
+
+Sign in with the backend's operator-provisioned analyst access key. The shared
+session boundary uses an HttpOnly cookie, gates workspace queries, checks the
+company, and clears cached workspace data on expiry/sign-out. Never place access
+keys in Vite environment variables. See README for local authentication setup.
 
 `apps/web/.env.example` documents the existing synthetic seed's company, site,
 reporting-period and metric UUIDs. These are configurable identifiers, not demo
@@ -26,7 +34,7 @@ does not trigger seeding, a reset, or a fallback dataset.
 | Measurement source inspector | `GET /api/measurements/{id}` | On demand, includes method, hashes, raw row and factor evidence references |
 | Measurement lineage tab | `GET /api/measurements/{id}/lineage` | On demand; truncation explicitly shown |
 | Open issue count and severity filter | `GET /api/quality/issues` | Company-wide, open only; bounded preview with server total |
-| Procurement queue and preview inspector | `GET /api/approvals` | Company-wide, pending only; includes expired/stale records |
+| Generic approval queue and inspector | `GET /api/approvals` | Company-wide, pending only; includes expired/stale records |
 | Cached historical grid point | `GET /api/measurement/grid/latest` | Configured site; fixture/live-source provenance and timestamps |
 | Active suppliers | `GET /api/procurement/suppliers` | Company-wide active catalog count |
 | Active supplier products | `GET /api/procurement/products` | Company-wide active catalog count |
@@ -49,10 +57,11 @@ does not trigger seeding, a reset, or a fallback dataset.
 - Individual measurements can overlap. Neither the chart nor the latest-result
   card claims to be a company total or emissions trend.
 - Counts come from API `total`, not the length of a bounded result page.
-- Quality, Procurement approvals and ledger lists do not support site/period
+- Quality, generic approvals and ledger lists do not support site/period
   filters; their company-wide scope is visible.
-- The current approvals API exposes Procurement records, not a generic
-  four-module approval count. Queue inspection does not authorize a decision.
+- Approvals display the API target type and ID for every workflow. Optional
+  procurement fields are shown only when present, never replaced with zero.
+  Queue inspection does not authorize a decision.
 - Refresh errors retain previously fetched data with a visible warning. Empty
   and unavailable states never substitute zero emissions or synthetic values.
 - Missing cached grid data is an empty state. Opening the dashboard never calls
@@ -103,8 +112,7 @@ validation, pagination, source inspection, empty/error/stale states, severity
 filtering, precision and responsive light/dark layouts. Screenshots and traces
 are ignored test output.
 
-Local live verification on 2026-10-02: API health responds successfully, but
-database-backed requests fail. A read-only connection probe returned SQLSTATE
-`3D000`. No reset, bootstrap, migration, seed or database write was attempted.
-A populated live-data verification remains necessary after the team's database
-configuration is corrected.
+The previous database-name mismatch has been corrected to `carbonmesh` and
+additive test records were populated in a separate task. Both screens now use
+authenticated API reads. Missing grid history remains an explicit empty state;
+opening the dashboard never requests provider data or mutates the database.
