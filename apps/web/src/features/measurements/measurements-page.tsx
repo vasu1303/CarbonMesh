@@ -1,6 +1,6 @@
 import { useIsFetching, useQuery, useQueryClient } from '@tanstack/react-query'
-import { BarChart3, List, RefreshCw, RotateCcw } from 'lucide-react'
-import { lazy, Suspense } from 'react'
+import { BarChart3, Calculator, List, RefreshCw, RotateCcw } from 'lucide-react'
+import { lazy, Suspense, useState } from 'react'
 import { useOutletContext, useSearchParams } from 'react-router-dom'
 import { z } from 'zod'
 
@@ -24,6 +24,9 @@ import { measurementFiltersSchema, type MeasurementStatus } from './schemas'
 
 const RecordsChart = lazy(() => import('./components/records-chart'))
 const RecordInspector = lazy(() => import('./components/record-inspector'))
+const CalculateMeasurement = lazy(
+  () => import('./components/calculate-measurement'),
+)
 const statuses: MeasurementStatus[] = [
   'verified',
   'draft',
@@ -88,6 +91,7 @@ function StatusCount({
 }
 
 export default function MeasurementsPage() {
+  const [calculating, setCalculating] = useState(false)
   const scope = useOutletContext<WorkspaceScope>()
   const [params, setParams] = useSearchParams()
   const filters = measurementFiltersSchema.parse({
@@ -140,19 +144,25 @@ export default function MeasurementsPage() {
             Recorded emissions, confidence and source evidence
           </p>
         </div>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={fetching}
-          onClick={() =>
-            void client.invalidateQueries({
-              queryKey: measurementKey,
-            })
-          }
-        >
-          <RefreshCw className={fetching ? 'motion-safe:animate-spin' : ''} />
-          Refresh measurements
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" onClick={() => setCalculating(true)}>
+            <Calculator />
+            Calculate
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={fetching}
+            onClick={() =>
+              void client.invalidateQueries({
+                queryKey: measurementKey,
+              })
+            }
+          >
+            <RefreshCw className={fetching ? 'motion-safe:animate-spin' : ''} />
+            Refresh measurements
+          </Button>
+        </div>
       </div>
       <section
         aria-label="Measurement context"
@@ -384,6 +394,20 @@ export default function MeasurementsPage() {
             id={selected.data}
             initialTab={params.get('tab') === 'lineage' ? 'lineage' : 'facts'}
             onClose={() => update({ record: null }, false)}
+          />
+        </Suspense>
+      )}
+      {calculating && (
+        <Suspense
+          fallback={
+            <p role="status" className="p-5 text-sm">
+              Loading calculation form...
+            </p>
+          }
+        >
+          <CalculateMeasurement
+            scope={scope}
+            onClose={() => setCalculating(false)}
           />
         </Suspense>
       )}

@@ -5,6 +5,7 @@ import { contextSchema } from '@/schemas/context'
 import { apiRequest, retryApiQuery } from '@/services/api'
 import {
   measurementDetailSchema,
+  measurementBreakdownSchema,
   measurementLineageSchema,
   measurementListSchema,
   metricsSchema,
@@ -29,6 +30,23 @@ function inScope(
 }
 
 export const measurementQueries = {
+  breakdown: (scope: WorkspaceScope, id: string) =>
+    queryOptions({
+      queryKey: [...measurementKey, scope, 'breakdown', id],
+      queryFn: ({ signal }) =>
+        apiRequest(
+          `/measurements/${id}/breakdown`,
+          measurementBreakdownSchema.refine(
+            (data) => data.measurement_id === id,
+          ),
+          {
+            signal,
+            params: { company_id: scope.company_id },
+          },
+        ),
+      staleTime: 30_000,
+      retry: retryApiQuery,
+    }),
   list: (scope: WorkspaceScope, filters: ListFilters) => {
     const schema = measurementListSchema.refine((page) =>
       page.items.every(

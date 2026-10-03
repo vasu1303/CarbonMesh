@@ -35,7 +35,7 @@ function Fact({ label, value }: { label: string; value: string }) {
   )
 }
 
-function RecordedFacts({ item }: { item: MeasurementDetail }) {
+export function RecordedFacts({ item }: { item: MeasurementDetail }) {
   const breakdown = item.confidence_breakdown
   const components =
     breakdown.version === '2.0.0'

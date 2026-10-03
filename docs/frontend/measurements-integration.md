@@ -1,7 +1,8 @@
 # Measurements: API-only integration
 
-`/measurement` is a read-only view of persisted results. Dashboard and
-Measurements are connected; other workflow screens remain separate phases.
+`/measurement` lists persisted results and opens an explicit calculation form.
+`/measurement/:id` provides facts, calculation breakdown, evidence and lineage.
+All workspace screens use the same API-only navigation and session boundary.
 
 ## Setup
 
@@ -11,6 +12,11 @@ access key. The shared session boundary uses `/api/auth/session` (GET, POST,
 DELETE) and the backend HttpOnly cookie. Keys and tokens are not persisted in
 browser storage or frontend configuration. Protected queries start only after
 authentication and a company match. Expiry and sign-out clear workspace queries.
+
+Local development may explicitly disable sign-in with `VITE_AUTH_REQUIRED=false`
+and backend `AUTH_REQUIRED=false`. Production frontend builds always require
+sign-in. When local commands require an actor, supply an existing actor UUID;
+no actor is invented by the UI.
 
 Configure existing company, site, period and metric UUIDs in `apps/web/.env` as
 documented in `.env.example`. Names and provenance come from the backend.
@@ -24,6 +30,8 @@ Old `source=preview` URLs still use the API. Seeded synthetic data keeps its lab
 | `GET /api/measurements` | Records, filtered counts and server pagination |
 | `GET /api/measurements/{id}` | Persisted facts, method, confidence and evidence |
 | `GET /api/measurements/{id}/lineage` | Persisted source-to-result relationships |
+| `GET /api/measurements/{id}/breakdown` | Exact calculation values and source identities |
+| `POST /api/measurement/calculate` | Explicit material or hourly Scope 2 calculation |
 | `GET /api/semantic/metrics` | Category names and exact metric keys |
 | `POST /api/context/resolve` | Read-only reporting context resolution |
 
@@ -46,7 +54,11 @@ strings except chart geometry. No emissions or confidence formula runs in React.
 - Loading, empty, unsupported, superseded, invalid ID, contract mismatch, partial
   lineage, error and failed-refresh states are explicit. Retry and refresh are
   independent; cached data is marked when refresh fails.
-- No uploads, calculations, grid syncs, approvals, seed or reset are triggered.
+- Visiting a page never starts a calculation or any other mutation. The Calculate
+  dialog submits only after explicit confirmation, keeps Decimal business values
+  on the backend, and opens the returned persisted measurement.
+- Calculation charts display at most 20 recorded calculations per page; source
+  documents and ledger events link to their corresponding API-backed screens.
 
 ## Verification
 
@@ -60,7 +72,7 @@ Live acceptance uses the already-populated Neon `carbonmesh` database through
 FastAPI, without additional data writes. Missing grid history remains an empty
 state until a separate explicit sync populates it.
 
-Verified on 2026-10-03: all 60 browser tests passed, as did typecheck, lint and
+Earlier baseline verified on 2026-10-03: all 60 browser tests passed, as did typecheck, lint and
 the production build (Vite reports a non-blocking main-chunk size advisory).
 An authenticated browser loaded four actual API records: one verified and three
 superseded. The latest record displayed 34,400 kgCO2e with confidence 0.9325,

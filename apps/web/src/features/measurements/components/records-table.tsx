@@ -1,4 +1,5 @@
 import { ArrowUpRight, GitBranch } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import {
   Table,
@@ -40,12 +41,16 @@ export function RecordsTable({
           <TableRow key={item.id}>
             <TableCell className="py-4">
               <Button
+                asChild
                 variant="link"
                 className="h-auto p-0 font-mono text-xs"
-                onClick={() => onInspect(item.id)}
-                aria-label={`Inspect measurement ${item.id}`}
               >
-                {item.id.slice(-12)}
+                <Link
+                  to={`/measurement/${item.id}`}
+                  aria-label={`Open measurement ${item.id}`}
+                >
+                  {item.id.slice(-12)}
+                </Link>
               </Button>
               <p className="mt-1 text-xs text-muted-foreground">
                 {formatDate(item.created_at)}

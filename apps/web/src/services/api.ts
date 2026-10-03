@@ -6,6 +6,8 @@ const errorSchema = z.object({
     message: z.string(),
     trace_id: z.string().nullable().optional(),
     retryable: z.boolean().optional(),
+    field_details: z.record(z.string(), z.unknown()).optional(),
+    terminal_state: z.string().optional(),
   }),
 })
 
@@ -14,6 +16,8 @@ export class ApiError extends Error {
   readonly retryable: boolean
   readonly traceId?: string
   readonly status?: number
+  readonly fieldDetails?: Record<string, unknown>
+  readonly terminalState?: string
 
   constructor(
     message: string,
@@ -21,6 +25,8 @@ export class ApiError extends Error {
     retryable = false,
     traceId?: string,
     status?: number,
+    fieldDetails?: Record<string, unknown>,
+    terminalState?: string,
   ) {
     super(message)
     this.name = 'ApiError'
@@ -28,6 +34,8 @@ export class ApiError extends Error {
     this.retryable = retryable
     this.traceId = traceId
     this.status = status
+    this.fieldDetails = fieldDetails
+    this.terminalState = terminalState
   }
 }
 
@@ -35,7 +43,18 @@ type RequestOptions = {
   signal: AbortSignal
   params?: Record<string, string | number | boolean | undefined>
   body?: unknown
-  method?: 'GET' | 'POST' | 'DELETE'
+  method?: 'GET' | 'POST' | 'PATCH' | 'DELETE'
+  headers?: Record<string, string>
+  timeoutMs?: number
+}
+
+export function apiUrl(path: string, params: RequestOptions['params'] = {}) {
+  const base = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '')
+  const url = new URL(`${base}${path}`, window.location.origin)
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined) url.searchParams.set(key, String(value))
+  })
+  return url
 }
 
 export async function apiRequest<T>(
@@ -43,24 +62,20 @@ export async function apiRequest<T>(
   schema: z.ZodType<T>,
   options: RequestOptions,
 ): Promise<T> {
-  const base = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '')
-  const url = new URL(`${base}${path}`, window.location.origin)
-  Object.entries(options.params ?? {}).forEach(([key, value]) => {
-    if (value !== undefined) url.searchParams.set(key, String(value))
-  })
-  const timeout = AbortSignal.timeout(20_000)
+  const url = apiUrl(path, options.params)
+  const timeout = AbortSignal.timeout(options.timeoutMs ?? 20_000)
   try {
     const response = await fetch(url, {
       method: options.method ?? (options.body === undefined ? 'GET' : 'POST'),
       credentials: 'include',
       cache: 'no-store',
-      headers:
-        options.body === undefined
-          ? { Accept: 'application/json' }
-          : {
-              Accept: 'application/json',
-              'Content-Type': 'application/json',
-            },
+      headers: {
+        Accept: 'application/json',
+        ...(options.body === undefined
+          ? {}
+          : { 'Content-Type': 'application/json' }),
+        ...options.headers,
+      },
       body:
         options.body === undefined ? undefined : JSON.stringify(options.body),
       signal: AbortSignal.any([options.signal, timeout]),
@@ -76,6 +91,8 @@ export async function apiRequest<T>(
           detail.retryable,
           detail.trace_id ?? undefined,
           response.status,
+          detail.field_details,
+          detail.terminal_state,
         )
       }
       throw new ApiError(

@@ -3,8 +3,11 @@ import {
   Activity,
   ClipboardCheck,
   Database,
+  FlaskConical,
   LayoutDashboard,
   Leaf,
+  ListChecks,
+  Menu,
   MessageSquareText,
   Moon,
   Ruler,
@@ -15,10 +18,17 @@ import {
   Zap,
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { NavLink, Outlet, useLocation } from 'react-router-dom'
+import { Link, Outlet, useLocation } from 'react-router-dom'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import {
   Tooltip,
   TooltipContent,
@@ -31,16 +41,53 @@ import { retryApiQuery } from '@/services/api'
 import { getHealth } from '@/services/health'
 
 const navigation = [
-  { label: 'Overview', icon: LayoutDashboard, path: '/dashboard' },
-  { label: 'Agent workspace', icon: MessageSquareText },
-  { label: 'Data', icon: Database },
-  { label: 'Measurements', icon: Ruler, path: '/measurement' },
-  { label: 'Assurance', icon: ShieldCheck },
-  { label: 'Procurement', icon: ShoppingCart },
-  { label: 'Dispatch', icon: Zap },
-  { label: 'Approvals', icon: ClipboardCheck },
-  { label: 'Run trace', icon: Activity },
-  { label: 'Ledger', icon: ScrollText },
+  {
+    label: 'Overview',
+    icon: LayoutDashboard,
+    path: '/dashboard',
+    root: '/dashboard',
+  },
+  {
+    label: 'Agent workspace',
+    icon: MessageSquareText,
+    path: '/ask',
+    root: '/ask',
+  },
+  { label: 'Data intake', icon: Database, path: '/data', root: '/data' },
+  {
+    label: 'Data quality',
+    icon: ListChecks,
+    path: '/quality',
+    root: '/quality',
+  },
+  {
+    label: 'Measurements',
+    icon: Ruler,
+    path: '/measurement',
+    root: '/measurement',
+  },
+  {
+    label: 'Assurance',
+    icon: ShieldCheck,
+    path: '/assurance',
+    root: '/assurance',
+  },
+  {
+    label: 'Procurement',
+    icon: ShoppingCart,
+    path: '/procurement/suppliers',
+    root: '/procurement',
+  },
+  { label: 'Dispatch', icon: Zap, path: '/dispatch', root: '/dispatch' },
+  {
+    label: 'Approvals',
+    icon: ClipboardCheck,
+    path: '/approvals',
+    root: '/approvals',
+  },
+  { label: 'Run trace', icon: Activity, path: '/runs', root: '/runs' },
+  { label: 'Ledger', icon: ScrollText, path: '/ledger', root: '/ledger' },
+  { label: 'System', icon: FlaskConical, path: '/demo', root: '/demo' },
 ]
 
 function initialTheme() {
@@ -55,9 +102,13 @@ function initialTheme() {
 
 export default function App() {
   const [dark, setDark] = useState(initialTheme)
+  const [menuOpen, setMenuOpen] = useState(false)
   const location = useLocation()
-  const pageName =
-    location.pathname === '/measurement' ? 'Measurements' : 'Dashboard'
+  const activeItem = navigation.find(
+    (item) =>
+      location.pathname === item.root ||
+      location.pathname.startsWith(item.root + '/'),
+  )
   useEffect(() => {
     window.scrollTo({ top: 0 })
   }, [location.pathname])
@@ -75,6 +126,32 @@ export default function App() {
       /* Theme still works for this session. */
     }
   }, [dark])
+
+  function navigationLinks(closeOnSelect = false) {
+    return navigation.map(({ label, icon: Icon, path, root }) => (
+      <Button
+        key={path}
+        asChild
+        variant="ghost"
+        className={
+          activeItem?.root === root
+            ? 'w-full justify-start bg-muted'
+            : 'w-full justify-start text-muted-foreground'
+        }
+      >
+        <Link
+          to={path}
+          aria-current={activeItem?.root === root ? 'page' : undefined}
+          onClick={() => {
+            if (closeOnSelect) setMenuOpen(false)
+          }}
+        >
+          <Icon className="size-4" />
+          {label}
+        </Link>
+      </Button>
+    ))
+  }
 
   return (
     <TooltipProvider delayDuration={200}>
@@ -99,47 +176,7 @@ export default function App() {
             className="flex-1 space-y-1 overflow-y-auto p-3"
             aria-label="Primary navigation"
           >
-            {navigation.map(({ label, icon: Icon, path }) =>
-              path ? (
-                <Button
-                  key={label}
-                  asChild
-                  variant="ghost"
-                  className={
-                    location.pathname === path
-                      ? 'w-full justify-start bg-muted'
-                      : 'w-full justify-start text-muted-foreground'
-                  }
-                >
-                  <NavLink to={path}>
-                    <Icon className="size-4" />
-                    {label}
-                  </NavLink>
-                </Button>
-              ) : (
-                <Tooltip key={label}>
-                  <TooltipTrigger asChild>
-                    <span
-                      className="block"
-                      tabIndex={0}
-                      aria-label={`${label}, not connected yet`}
-                    >
-                      <Button
-                        variant="ghost"
-                        disabled
-                        className="w-full justify-start text-muted-foreground disabled:opacity-60"
-                      >
-                        <Icon className="size-4" />
-                        {label}
-                      </Button>
-                    </span>
-                  </TooltipTrigger>
-                  <TooltipContent side="right">
-                    Not connected yet
-                  </TooltipContent>
-                </Tooltip>
-              ),
-            )}
+            {navigationLinks()}
           </nav>
           <div className="border-t p-5 text-xs text-muted-foreground">
             <p className="font-medium text-foreground">
@@ -150,14 +187,14 @@ export default function App() {
         </aside>
         <div className="min-w-0">
           <header className="flex min-h-16 flex-wrap items-center justify-between gap-3 border-b bg-background px-5 py-3 sm:px-8">
-            <div className="flex items-center gap-2 text-sm">
+            <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm">
               <Leaf className="size-4 text-emerald-600 lg:hidden" />
               <span className="font-semibold lg:hidden">CarbonMesh</span>
               <span className="hidden text-muted-foreground lg:inline">
                 Workspace
               </span>
               <span className="text-muted-foreground">/</span>
-              <span>{pageName}</span>
+              <span>{activeItem?.label ?? 'Workspace'}</span>
             </div>
             <div className="flex items-center gap-3">
               <Badge variant="outline" className="text-xs">
@@ -192,29 +229,37 @@ export default function App() {
           </header>
           <nav
             aria-label="Mobile navigation"
-            className="flex gap-1 border-b bg-background px-3 py-2 lg:hidden"
+            className="flex items-center justify-between gap-2 border-b bg-background px-3 py-2 lg:hidden"
           >
-            {navigation
-              .filter((item) => item.path)
-              .map(({ label, path, icon: Icon }) => (
-                <Button
-                  key={path}
-                  asChild
-                  variant="ghost"
-                  size="sm"
-                  className={
-                    location.pathname === path
-                      ? 'bg-muted'
-                      : 'text-muted-foreground'
-                  }
-                >
-                  <NavLink to={path!}>
-                    <Icon className="size-4" />
-                    {label}
-                  </NavLink>
-                </Button>
-              ))}
+            {activeItem && (
+              <Button asChild variant="ghost" size="sm" className="bg-muted">
+                <Link to={activeItem.path} aria-current="page">
+                  <activeItem.icon className="size-4" />
+                  {activeItem.label}
+                </Link>
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="Open navigation"
+              title="Open navigation"
+              onClick={() => setMenuOpen(true)}
+            >
+              <Menu />
+            </Button>
           </nav>
+          <Dialog open={menuOpen} onOpenChange={setMenuOpen}>
+            <DialogContent className="max-h-[90svh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>CarbonMesh</DialogTitle>
+                <DialogDescription>Carbon operations</DialogDescription>
+              </DialogHeader>
+              <nav aria-label="Workspace navigation" className="space-y-1">
+                {navigationLinks(true)}
+              </nav>
+            </DialogContent>
+          </Dialog>
           <main id="main-content" className="mx-auto max-w-[1600px]">
             {workspaceScope.success ? (
               <SessionBoundary>
