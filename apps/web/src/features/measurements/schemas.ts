@@ -228,6 +228,38 @@ export const measurementLineageSchema = z.object({
   ),
 })
 
+export const measurementResultSchema = measurementDetailSchema.extend({
+  terminal_state: z.literal('completed'),
+  trace_id: z.string(),
+  idempotent: z.boolean(),
+})
+
+export const measurementBreakdownSchema = z.object({
+  measurement_id: uuid,
+  metric_key: z.string(),
+  status: measurementStatusSchema,
+  unit: z.literal('kgCO2e'),
+  total_kgco2e: nonnegative,
+  facts: measurementDetailSchema.shape.facts,
+  items: z.array(
+    z.object({
+      calculation_id: uuid,
+      activity_record_id: uuid,
+      raw_activity_record_id: uuid,
+      source_document_id: uuid,
+      interval_start: timestamp.nullable(),
+      activity_date: z.iso.date().nullable(),
+      material_code: z.string(),
+      quantity: nonnegative,
+      quantity_unit: z.enum(['kg', 'kWh']),
+      emissions_kgco2e: nonnegative,
+      emission_factor_id: uuid.nullable(),
+      grid_intensity_point_id: uuid.nullable(),
+      output_hash: hash,
+    }),
+  ),
+})
+
 export const metricsSchema = z.object({
   company_id: uuid,
   count: z.number().int().nonnegative(),
@@ -258,3 +290,4 @@ export type MeasurementDetail = z.infer<typeof measurementDetailSchema>
 export type MeasurementLineage = z.infer<typeof measurementLineageSchema>
 export type MeasurementStatus = z.infer<typeof measurementStatusSchema>
 export type MeasurementFilters = z.infer<typeof measurementFiltersSchema>
+export type MeasurementBreakdown = z.infer<typeof measurementBreakdownSchema>

@@ -4,6 +4,10 @@ import { z } from 'zod'
 import { ApiError, apiRequest } from '@/services/api'
 
 export const sessionKey = ['session'] as const
+// Only explicit local development opt-out bypasses the sign-in screen.
+export const authenticationRequired =
+  !import.meta.env.DEV || import.meta.env.VITE_AUTH_REQUIRED !== 'false'
+
 export const principalSchema = z.object({
   company_id: z.uuid(),
   actor_id: z.uuid(),
@@ -33,7 +37,9 @@ export const sessionOptions = queryOptions({
         signal,
       })
       const previous = client.getQueryData(sessionKey) as
-        z.infer<typeof principalSchema> | null | undefined
+        | z.infer<typeof principalSchema>
+        | null
+        | undefined
       if (
         previous &&
         (previous.company_id !== principal.company_id ||

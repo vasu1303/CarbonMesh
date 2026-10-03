@@ -12,6 +12,7 @@ import { humanize } from '@/lib/format'
 import { workspaceScope } from '@/lib/workspace'
 import { apiRequest } from '@/services/api'
 import {
+  authenticationRequired,
   clearWorkspaceQueries,
   principalSchema,
   sessionKey,
@@ -101,6 +102,11 @@ function SignIn() {
 }
 
 export function SessionBoundary({ children }: PropsWithChildren) {
+  if (!authenticationRequired) return <>{children}</>
+  return <AuthenticatedSessionBoundary>{children}</AuthenticatedSessionBoundary>
+}
+
+function AuthenticatedSessionBoundary({ children }: PropsWithChildren) {
   const session = useQuery(sessionOptions)
   const client = useQueryClient()
   const [signingOut, setSigningOut] = useState(false)

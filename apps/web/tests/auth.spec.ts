@@ -15,6 +15,40 @@ const unauthorized = {
   },
 }
 
+test('local development bypass opens the workspace without a session', async ({
+  page,
+}) => {
+  test.skip(
+    process.env.VITE_AUTH_REQUIRED !== 'false',
+    'Run with VITE_AUTH_REQUIRED=false.',
+  )
+  let rejectReads = false
+  const calls = await mockDashboard(page, async (route, url) => {
+    if (!rejectReads || url.pathname === '/api/health') return
+    await route.fulfill({ status: 401, json: unauthorized })
+    return true
+  })
+  await page.goto('/dashboard')
+  await expect(
+    page.getByRole('button', { name: '12,500.125', exact: true }),
+  ).toBeVisible()
+  await expect(page.getByLabel('Access key', { exact: true })).toHaveCount(0)
+  await expect(
+    page.getByRole('button', { name: 'Sign out', exact: true }),
+  ).toHaveCount(0)
+  expect(calls.some(({ url }) => url.pathname === '/api/auth/session')).toBe(
+    false,
+  )
+  rejectReads = true
+  await page.getByRole('button', { name: 'Refresh data', exact: true }).click()
+  await expect(
+    page.getByText('Refresh failed. Showing previously fetched data.').first(),
+  ).toBeVisible()
+  await expect(
+    page.getByRole('heading', { name: 'Sign in to CarbonMesh' }),
+  ).toHaveCount(0)
+})
+
 test('sign-in gates data, rejects invalid keys, signs out and clears account data', async ({
   page,
 }) => {

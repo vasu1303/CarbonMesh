@@ -3,6 +3,129 @@ import fixture from './fixtures/measurements.synthetic.json' with { type: 'json'
 
 const first = fixture.records[0].summary
 
+test('dedicated measurement detail links facts, calculations and source documents', async ({
+  page,
+}, testInfo) => {
+  const errors: string[] = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  await mockApi(page)
+  await page.goto('/measurement')
+  await page
+    .getByRole('link', { name: `Open measurement ${first.id}`, exact: true })
+    .click()
+  await expect(
+    page.getByRole('heading', { name: 'Measurement record', exact: true }),
+  ).toBeVisible()
+  await expect(
+    page.getByText('Confidence breakdown', { exact: true }),
+  ).toBeVisible()
+  await page.getByRole('tab', { name: 'Calculations', exact: true }).click()
+  await expect(page.getByText('18,000 kgCO2e', { exact: true })).toBeVisible()
+  await expect(page.locator('.recharts-line')).toHaveCount(1)
+  await expect(
+    page.getByRole('link', { name: 'Document', exact: true }),
+  ).toHaveAttribute(
+    'href',
+    `/data?document=${fixture.records[0].detail.inputs[0].source_document_id}`,
+  )
+  await page.screenshot({
+    path: testInfo.outputPath('measurement-detail.png'),
+    fullPage: true,
+  })
+  await page.getByRole('tab', { name: 'Evidence', exact: true }).click()
+  await page
+    .getByLabel('Source records', { exact: true })
+    .selectOption('factors')
+  await expect(
+    page.getByText('Synthetic recycled-aluminium factor', { exact: true }),
+  ).toBeVisible()
+  await page.getByRole('tab', { name: 'Lineage', exact: true }).click()
+  await expect(
+    page.getByRole('link', { name: 'Inspect ledger event' }).first(),
+  ).toHaveAttribute('href', /\/ledger\?event=/)
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true)
+  expect(errors).toEqual([])
+})
+
+test('measurement calculation submits the explicit API contract and opens its persisted result', async ({
+  page,
+}) => {
+  let payload: Record<string, unknown> | undefined
+  await mockApi(page, async (route, url) => {
+    if (url.pathname !== '/api/measurement/calculate') return
+    expect(route.request().method()).toBe('POST')
+    payload = route.request().postDataJSON()
+    await route.fulfill({
+      json: {
+        ...fixture.records[0].detail,
+        terminal_state: 'completed',
+        trace_id: 'test-measurement',
+        idempotent: false,
+      },
+    })
+    return true
+  })
+  await page.goto('/measurement')
+  await page.getByRole('button', { name: 'Calculate', exact: true }).click()
+  const dialog = page.getByRole('dialog')
+  await dialog
+    .getByLabel('Material code', { exact: true })
+    .fill('RECYCLED_ALUMINIUM')
+  await dialog.getByRole('button', { name: 'Calculate', exact: true }).click()
+  await expect(
+    page.getByRole('heading', { name: 'Measurement record', exact: true }),
+  ).toBeVisible()
+  expect(payload).toEqual({
+    company_id: fixture.scope.company_id,
+    site_id: fixture.scope.site_id,
+    reporting_period_id: fixture.scope.reporting_period_id,
+    actor_id: '00000000-0000-4000-8000-000000000004',
+    material_code: 'RECYCLED_ALUMINIUM',
+  })
+})
+
+test('a rejected Scope 2 calculation stays explicit without a fallback result', async ({
+  page,
+}) => {
+  await mockApi(page, async (route, url) => {
+    if (url.pathname !== '/api/measurement/calculate') return
+    expect(route.request().postDataJSON().output_metric_key).toBe(
+      'emissions.scope2.location_based',
+    )
+    expect(route.request().postDataJSON().material_code).toBeUndefined()
+    await route.fulfill({
+      status: 422,
+      json: {
+        detail: {
+          code: 'missing_grid_intervals',
+          message: 'Grid intervals are missing.',
+          retryable: false,
+          trace_id: 'test-grid-missing',
+        },
+      },
+    })
+    return true
+  })
+  await page.goto('/measurement')
+  await page.getByRole('button', { name: 'Calculate', exact: true }).click()
+  const dialog = page.getByRole('dialog')
+  await dialog
+    .getByLabel('Measurement path', { exact: true })
+    .selectOption('electricity')
+  await dialog.getByRole('button', { name: 'Calculate', exact: true }).click()
+  await expect(
+    dialog.getByText('Grid intervals are missing.', { exact: true }),
+  ).toBeVisible()
+  await expect(
+    dialog.getByText('Trace: test-grid-missing', { exact: true }),
+  ).toBeVisible()
+  await expect(page).toHaveURL(/\/measurement$/)
+})
+
 function responseFor(url: URL) {
   if (url.pathname === '/api/auth/session')
     return {
@@ -14,6 +137,32 @@ function responseFor(url: URL) {
     return { status: 'ok', service: 'CarbonMesh API' }
   if (url.pathname === '/api/context/resolve') return fixture.context
   if (url.pathname === '/api/semantic/metrics') return fixture.metrics
+  if (url.pathname === `/api/measurements/${first.id}/breakdown`) {
+    const detail = fixture.records[0].detail
+    return {
+      measurement_id: first.id,
+      metric_key: first.metric_key,
+      status: first.status,
+      unit: 'kgCO2e',
+      total_kgco2e: detail.value_kgco2e,
+      facts: detail.facts,
+      items: detail.calculations.map((item) => ({
+        calculation_id: item.id,
+        activity_record_id: item.activity_record_id,
+        raw_activity_record_id: detail.inputs[0].raw_activity_record_id,
+        source_document_id: detail.inputs[0].source_document_id,
+        interval_start: null,
+        activity_date: detail.inputs[0].activity_date,
+        material_code: detail.inputs[0].material_code,
+        quantity: item.normalized_quantity_kg,
+        quantity_unit: 'kg',
+        emissions_kgco2e: item.emissions_kgco2e,
+        emission_factor_id: item.emission_factor_id,
+        grid_intensity_point_id: null,
+        output_hash: item.output_hash,
+      })),
+    }
+  }
   if (url.pathname === '/api/measurements') {
     const status = url.searchParams.get('status')
     const category = url.searchParams.get('category')
