@@ -68,7 +68,7 @@ export function ResetPanel({ onReset }: { onReset: () => void }) {
         <Button type="submit" variant="destructive" disabled={!canSubmit || command.pending}><Trash2 />{command.pending ? 'Resetting...' : 'Reset synthetic demo'}</Button>
       </fieldset>
       <CommandError error={command.error} />
-      {command.error && <p className="text-xs text-muted-foreground">Reset requests are not retried automatically. Verify the database state before submitting again.</p>}
+      {Boolean(command.error) && <p className="text-xs text-muted-foreground">Reset requests are not retried automatically. Verify the database state before submitting again.</p>}
     </form>
     {command.data && <section aria-label="Demo reset result" className="space-y-3 text-sm">
       <p role="status">Synthetic demo reset completed. Cached workspace data was cleared.</p>
