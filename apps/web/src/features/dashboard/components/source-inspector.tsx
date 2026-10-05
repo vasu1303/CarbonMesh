@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
-
+import { Link } from 'react-router-dom'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -11,10 +11,17 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { formatDate, formatDecimal, humanize } from '../format'
+import { QueryRefresh, QueryState } from '@/components/query-state'
+import { LedgerEventContents } from '@/features/ledger/ledger-detail'
+import { ledgerQueries } from '@/features/ledger/queries'
+import { EvidenceRecords } from '@/features/measurements/components/evidence-records'
+import { MeasurementLineageView } from '@/features/measurements/components/measurement-lineage'
+import { RecordedFacts } from '@/features/measurements/components/record-inspector'
+import { measurementQueries } from '@/features/measurements/queries'
+import { formatDate, formatDecimal } from '@/lib/format'
+import { displayText, humanize } from '@/lib/presentation'
 import { dashboardQueries, type DashboardScope } from '../queries'
 import type { Approval, GridIntensity } from '../schemas'
-import { QueryRefresh, QueryState } from './query-state'
 
 export type Inspection =
   | { kind: 'measurement' | 'event'; id: string }
@@ -23,10 +30,10 @@ export type Inspection =
 
 function Fact({ label, value }: { label: string; value: string }) {
   return (
-    <div className="py-2">
+    <div className="min-w-0 py-2">
       <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className="mt-1 break-all font-mono text-xs leading-relaxed">
-        {value}
+      <dd className="mt-1 text-sm leading-relaxed wrap-anywhere">
+        {displayText(value)}
       </dd>
     </div>
   )
@@ -41,115 +48,29 @@ function MeasurementSource({
   id: string
   onEvent: (id: string) => void
 }) {
-  const query = useQuery(dashboardQueries.measurement(scope, id))
-  const lineage = useQuery(dashboardQueries.lineage(scope, id))
+  const query = useQuery(measurementQueries.detail(scope, id))
+  const lineage = useQuery(measurementQueries.lineage(scope, id))
   return (
-    <Tabs defaultValue="facts">
+    <Tabs defaultValue="facts" className="min-w-0">
       <TabsList>
-        <TabsTrigger value="facts">Verified facts</TabsTrigger>
+        <TabsTrigger value="facts">Facts</TabsTrigger>
+        <TabsTrigger value="evidence">Evidence</TabsTrigger>
         <TabsTrigger value="lineage">Lineage</TabsTrigger>
       </TabsList>
       <TabsContent value="facts" className="mt-4">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-medium">Measurement source</h3>
+        <div className="flex justify-end">
           <QueryRefresh query={query} label="measurement source" />
         </div>
         <QueryState query={query}>
-          {(item) => (
-            <>
-              <Badge
-                variant={item.status === 'verified' ? 'secondary' : 'outline'}
-              >
-                {item.status}
-              </Badge>
-              <dl className="divide-y">
-                <Fact label="Measurement ID" value={item.id} />
-                <Fact
-                  label="Emissions (kgCO2e)"
-                  value={formatDecimal(item.value_kgco2e)}
-                />
-                <Fact
-                  label="Confidence (0-1)"
-                  value={formatDecimal(item.confidence)}
-                />
-                <Fact label="Formula" value={item.formula} />
-                <Fact
-                  label="Method / version"
-                  value={`${item.calculation_run.method_key} / ${item.calculation_run.method_version}`}
-                />
-                <Fact
-                  label="Code version"
-                  value={item.calculation_run.code_version}
-                />
-                <Fact
-                  label="Input hash"
-                  value={item.calculation_run.input_hash}
-                />
-                <Fact label="Output hash" value={item.output_hash} />
-                <Fact
-                  label="Rounding policy"
-                  value={item.calculation_run.rounding_policy}
-                />
-              </dl>
-              {item.facts.ledger_event_id && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="my-3"
-                  onClick={() => onEvent(item.facts.ledger_event_id!)}
-                >
-                  Open ledger fact
-                </Button>
-              )}
-              <h3 className="mt-4 text-sm font-semibold">Source rows</h3>
-              {item.inputs.map((input) => (
-                <dl
-                  key={input.activity_record_id}
-                  className="mt-2 border-t py-2"
-                >
-                  <Fact
-                    label="Raw row ID"
-                    value={input.raw_activity_record_id}
-                  />
-                  <Fact label="Source row key" value={input.source_row_key} />
-                  <Fact
-                    label="Quantity"
-                    value={`${formatDecimal(input.source_quantity)} ${input.source_unit}`}
-                  />
-                  <Fact
-                    label="Source document ID"
-                    value={input.source_document_id}
-                  />
-                  <Fact label="Raw checksum" value={input.raw_checksum} />
-                </dl>
-              ))}
-              <h3 className="mt-4 text-sm font-semibold">Factor evidence</h3>
-              {item.factors.map((factor) => (
-                <dl key={factor.id} className="mt-2 border-t py-2">
-                  <Fact
-                    label="Factor / version"
-                    value={`${factor.name} / ${factor.version}`}
-                  />
-                  <Fact
-                    label="Value"
-                    value={`${formatDecimal(factor.factor_value)} ${factor.numerator_unit}/${factor.denominator_unit}`}
-                  />
-                  <Fact
-                    label="Document / locator"
-                    value={`${factor.evidence.source_document_filename} / ${factor.evidence.locator}`}
-                  />
-                  <Fact label="Evidence ID" value={factor.evidence.id} />
-                  <Fact
-                    label="Evidence checksum"
-                    value={factor.evidence.checksum}
-                  />
-                </dl>
-              ))}
-            </>
-          )}
+          {(item) => <RecordedFacts item={item} />}
         </QueryState>
       </TabsContent>
-      <TabsContent value="lineage" className="mt-4">
+      <TabsContent value="evidence" className="mt-4">
+        <QueryState query={query}>
+          {(item) => <EvidenceRecords item={item} />}
+        </QueryState>
+      </TabsContent>
+      <TabsContent value="lineage" className="mt-4 space-y-4">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-medium">
             Source-to-result relationships
@@ -158,53 +79,13 @@ function MeasurementSource({
         </div>
         <QueryState query={lineage}>
           {(graph) => (
-            <>
-              {graph.truncated && (
-                <p
-                  role="status"
-                  className="my-3 text-sm text-amber-700 dark:text-amber-400"
-                >
-                  Partial lineage: the API traversal limit was reached.
-                </p>
-              )}
-              {graph.nodes.length === 0 && (
-                <p className="py-4 text-sm text-muted-foreground">
-                  No lineage is available for this measurement.
-                </p>
-              )}
-              <ul className="divide-y">
-                {graph.nodes.map((node) => (
-                  <li key={node.id} className="py-3">
-                    <p className="text-sm font-medium">{node.label}</p>
-                    <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
-                      {node.id}
-                    </p>
-                    <Badge variant="outline" className="mt-2">
-                      {humanize(node.node_type)}
-                    </Badge>
-                  </li>
-                ))}
-              </ul>
-              <ul className="mt-4 divide-y">
-                {graph.edges.map((edge) => (
-                  <li key={edge.id} className="py-3 text-xs">
-                    <p className="font-medium capitalize">
-                      {humanize(edge.relationship_type)}
-                    </p>
-                    <p className="mt-1 break-all text-muted-foreground">
-                      {graph.nodes.find((node) => node.id === edge.source)
-                        ?.label ?? edge.source}{' '}
-                      to{' '}
-                      {graph.nodes.find((node) => node.id === edge.target)
-                        ?.label ?? edge.target}
-                    </p>
-                  </li>
-                ))}
-              </ul>
-            </>
+            <MeasurementLineageView graph={graph} onEvent={onEvent} />
           )}
         </QueryState>
       </TabsContent>
+      <Button asChild variant="link" className="justify-start px-0">
+        <Link to={'/measurement/' + id}>Open measurement details</Link>
+      </Button>
     </Tabs>
   )
 }
@@ -218,82 +99,14 @@ function LedgerSource({
   id: string
   onEvent: (id: string) => void
 }) {
-  const query = useQuery(dashboardQueries.event(scope, id))
+  const query = useQuery(ledgerQueries.detail(scope.company_id, id))
   return (
     <>
       <div className="flex justify-end">
         <QueryRefresh query={query} label="ledger event" />
       </div>
       <QueryState query={query}>
-        {(item) => (
-          <>
-            <dl>
-              <Fact label="Event ID" value={item.id} />
-              <Fact label="Event type" value={item.event_type} />
-              <Fact label="Entity ID" value={item.entity_id} />
-              <Fact label="Recorded" value={formatDate(item.created_at)} />
-              <Fact label="Payload hash" value={item.payload_hash} />
-            </dl>
-            <h3 className="my-3 text-sm font-semibold">Persisted payload</h3>
-            <pre className="max-h-64 overflow-auto rounded-md border bg-muted/30 p-3 text-xs whitespace-pre-wrap break-all">
-              {JSON.stringify(item.payload, null, 2)}
-            </pre>
-            <h3 className="my-3 text-sm font-semibold">Evidence</h3>
-            {item.evidence.length === 0 && (
-              <p className="text-sm text-muted-foreground">
-                No evidence attached to this event.
-              </p>
-            )}
-            {item.evidence.map((evidence) => (
-              <dl key={evidence.id} className="border-t py-2">
-                <Fact
-                  label="Source document"
-                  value={evidence.source_filename}
-                />
-                <Fact label="Locator" value={evidence.locator} />
-                <Fact label="Evidence ID" value={evidence.id} />
-                <Fact label="Checksum" value={evidence.checksum} />
-                <Badge variant="outline">
-                  {evidence.is_synthetic
-                    ? 'Synthetic evidence'
-                    : 'Non-synthetic source'}
-                </Badge>
-              </dl>
-            ))}
-            {(item.evidence_truncated ||
-              item.parents_truncated ||
-              item.children_truncated) && (
-              <p className="my-3 text-sm text-amber-700 dark:text-amber-400">
-                Partial result: one or more API limits were reached.
-              </p>
-            )}
-            {(['parents', 'children'] as const).map((direction) => (
-              <div key={direction} className="mt-4">
-                <h3 className="text-sm font-semibold">
-                  {direction === 'parents'
-                    ? 'Upstream events'
-                    : 'Downstream events'}
-                </h3>
-                {item[direction].length === 0 && (
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    None returned.
-                  </p>
-                )}
-                {item[direction].map((neighbor) => (
-                  <Button
-                    key={neighbor.edge_id}
-                    variant="link"
-                    className="h-auto max-w-full justify-start px-0 py-2 text-left whitespace-normal"
-                    onClick={() => onEvent(neighbor.event.id)}
-                  >
-                    {humanize(neighbor.event.event_type)} /{' '}
-                    {humanize(neighbor.relationship_type)}
-                  </Button>
-                ))}
-              </div>
-            ))}
-          </>
-        )}
+        {(item) => <LedgerEventContents item={item} onOpen={onEvent} />}
       </QueryState>
     </>
   )
@@ -313,6 +126,10 @@ export function SourceInspector({
       ? document.activeElement
       : null,
   )
+  const context = useQuery({
+    ...dashboardQueries.context(scope),
+    enabled: selection !== null,
+  })
   const onEvent = (id: string) => onSelect({ kind: 'event', id })
   return (
     <Dialog
@@ -322,7 +139,7 @@ export function SourceInspector({
       }}
     >
       <DialogContent
-        className="max-h-[85svh] overflow-y-auto rounded-lg p-5 sm:max-w-2xl motion-reduce:animate-none"
+        className="max-h-[85svh] overflow-y-auto rounded-lg p-5 sm:max-w-3xl motion-reduce:animate-none"
         onCloseAutoFocus={(event) => {
           event.preventDefault()
           returnFocusTarget?.focus()
@@ -335,10 +152,21 @@ export function SourceInspector({
               : 'Source inspector'}
           </DialogTitle>
           <DialogDescription>
-            {selection?.kind === 'approval'
-              ? 'Stored recommendation values. No decision is submitted from this dashboard.'
-              : 'API records, provenance and source relationships.'}
+            {context.data
+              ? displayText(context.data.company.name) +
+                ' / ' +
+                displayText(context.data.site.name)
+              : 'Recorded facts and source evidence'}
           </DialogDescription>
+          {context.data && (
+            <div>
+              <Badge variant="outline">
+                {context.data.company.is_synthetic
+                  ? 'Synthetic data'
+                  : 'Non-synthetic data'}
+              </Badge>
+            </div>
+          )}
         </DialogHeader>
         {selection?.kind === 'measurement' && (
           <MeasurementSource
@@ -357,100 +185,125 @@ export function SourceInspector({
           />
         )}
         {selection?.kind === 'approval' && (
-          <dl className="divide-y">
-            <Fact label="Approval ID" value={selection.item.id} />
-            <Fact
-              label="Target type"
-              value={humanize(selection.item.target_type)}
-            />
-            <Fact label="Target ID" value={selection.item.target_id} />
-            <Fact label="Requester" value={selection.item.requester_name} />
-            {selection.item.recommended_product_name && (
+          <>
+            <dl className="grid gap-x-5 sm:grid-cols-2">
               <Fact
-                label="Product / supplier"
-                value={`${selection.item.recommended_product_name} / ${selection.item.supplier_name ?? 'Not provided'}`}
+                label="Pending review"
+                value={humanize(selection.item.target_type)}
               />
-            )}
-            {selection.item.projected_footprint_kgco2e != null && (
+              <Fact label="Requester" value={selection.item.requester_name} />
+              {selection.item.recommended_product_name && (
+                <Fact
+                  label="Product / supplier"
+                  value={
+                    selection.item.recommended_product_name +
+                    ' / ' +
+                    (selection.item.supplier_name ?? 'Not provided')
+                  }
+                />
+              )}
+              {selection.item.projected_footprint_kgco2e != null && (
+                <Fact
+                  label="Projected footprint / kgCO2e"
+                  value={formatDecimal(
+                    selection.item.projected_footprint_kgco2e,
+                  )}
+                />
+              )}
+              {selection.item.avoided_kgco2e != null && (
+                <Fact
+                  label="Projected avoided / kgCO2e"
+                  value={formatDecimal(selection.item.avoided_kgco2e)}
+                />
+              )}
+              {selection.item.reduction_pct != null && (
+                <Fact
+                  label="Reduction"
+                  value={formatDecimal(selection.item.reduction_pct) + '%'}
+                />
+              )}
+              {selection.item.cost_delta_pct != null && (
+                <Fact
+                  label="Cost change"
+                  value={formatDecimal(selection.item.cost_delta_pct) + '%'}
+                />
+              )}
+              {selection.item.lead_time_delta_days != null && (
+                <Fact
+                  label="Lead time change / days"
+                  value={String(selection.item.lead_time_delta_days)}
+                />
+              )}
               <Fact
-                label="Projected footprint (kgCO2e)"
-                value={formatDecimal(selection.item.projected_footprint_kgco2e)}
+                label="Expires"
+                value={formatDate(selection.item.expires_at)}
               />
-            )}
-            {selection.item.avoided_kgco2e != null && (
-              <Fact
-                label="Projected avoided (kgCO2e)"
-                value={formatDecimal(selection.item.avoided_kgco2e)}
-              />
-            )}
-            {selection.item.reduction_pct != null && (
-              <Fact
-                label="Reduction"
-                value={`${formatDecimal(selection.item.reduction_pct)}%`}
-              />
-            )}
-            {selection.item.cost_delta_pct != null && (
-              <Fact
-                label="Cost change"
-                value={`${formatDecimal(selection.item.cost_delta_pct)}%`}
-              />
-            )}
-            {selection.item.lead_time_delta_days != null && (
-              <Fact
-                label="Lead time change (days)"
-                value={String(selection.item.lead_time_delta_days)}
-              />
-            )}
-            <Fact
-              label="Expires"
-              value={formatDate(selection.item.expires_at)}
-            />
-            <Fact label="Preview hash" value={selection.item.preview_hash} />
-            <Fact
-              label="Analysis signature"
-              value={selection.item.analysis_signature}
-            />
-            <p className="py-3 text-xs text-muted-foreground">
-              This queue snapshot is not an authorization to commit. Facts and
-              expiry must be revalidated during approval.
-            </p>
-          </dl>
+            </dl>
+            <Button asChild variant="outline">
+              <Link to={'/approvals?approval=' + selection.item.id}>
+                Review approval
+              </Link>
+            </Button>
+          </>
         )}
         {selection?.kind === 'grid' && (
-          <dl className="divide-y">
-            <Fact
-              label="Grid point ID"
-              value={selection.item.grid_intensity_point_id}
-            />
-            <Fact
-              label="Intensity"
-              value={`${formatDecimal(selection.item.value)} ${selection.item.unit}`}
-            />
-            <Fact
-              label="Provider / mode"
-              value={`${selection.item.provenance.provider} / ${selection.item.provenance.provider_mode}`}
-            />
-            <Fact
-              label="Synthetic source"
-              value={String(selection.item.provenance.synthetic)}
-            />
-            <Fact
-              label="Provider timestamp"
-              value={formatDate(selection.item.provider_timestamp)}
-            />
-            <Fact
-              label="Source document ID"
-              value={selection.item.provenance.source_document_id}
-            />
-            <Fact
-              label="Evidence ID"
-              value={selection.item.provenance.evidence_item_id}
-            />
-            <Fact
-              label="Response checksum"
-              value={selection.item.provenance.response_checksum}
-            />
-          </dl>
+          <>
+            <dl className="grid gap-x-5 sm:grid-cols-2">
+              <Fact label="Grid zone" value={selection.item.zone} />
+              <Fact
+                label="Intensity"
+                value={
+                  formatDecimal(selection.item.value) +
+                  ' ' +
+                  selection.item.unit
+                }
+              />
+              <Fact
+                label="Provider"
+                value={humanize(selection.item.provenance.provider)}
+              />
+              <Fact
+                label="Source"
+                value={
+                  selection.item.provenance.synthetic
+                    ? 'Synthetic source'
+                    : 'Non-synthetic source'
+                }
+              />
+              <Fact
+                label="Observed"
+                value={formatDate(selection.item.provider_timestamp)}
+              />
+              <Fact
+                label="Estimation"
+                value={
+                  selection.item.is_estimated ? 'Estimated' : 'Not estimated'
+                }
+              />
+            </dl>
+            <div className="flex flex-wrap gap-3">
+              <Button asChild variant="outline" size="sm">
+                <Link
+                  to={
+                    '/data?document=' +
+                    selection.item.provenance.source_document_id
+                  }
+                >
+                  Source document
+                </Link>
+              </Button>
+              <Button asChild variant="outline" size="sm">
+                <Link
+                  to={
+                    '/ledger?audit_type=evidence_item&audit_id=' +
+                    selection.item.provenance.evidence_item_id
+                  }
+                >
+                  Evidence history
+                </Link>
+              </Button>
+            </div>
+          </>
         )}
       </DialogContent>
     </Dialog>

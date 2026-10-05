@@ -1,22 +1,20 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowRight, Plus, Scale } from 'lucide-react'
-import { useState } from 'react'
 import { Link, useOutletContext, useParams } from 'react-router-dom'
 import { z } from 'zod'
 import { EmptyState, QueryRefresh, QueryState } from '@/components/query-state'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { useWorkspaceActor } from '@/features/auth/use-workspace-actor'
 import {
-  ActorField,
   AuditLink,
   CommandError,
   DefinitionList,
   EventLink,
   FactTable,
-  RawPayload,
   WorkspaceProvenance,
 } from '@/features/approvals/review-components'
+import { displayText, humanize } from '@/lib/presentation'
+import { HashValue } from '@/features/assurance/workflow-ui'
 import type { WorkspaceScope } from '@/lib/workspace'
 import { apiRequest } from '@/services/api'
 import { ScenarioAssessments } from './components/scenario-assessments'
@@ -25,11 +23,6 @@ import { scoreResultSchema } from './scenario-schemas'
 
 function ScenarioDetail({ id }: { id: string }) {
   const scope = useOutletContext<WorkspaceScope>()
-  const actor = useWorkspaceActor()
-  const [manualActor, setManualActor] = useState('')
-  const actorReady = z
-    .uuid()
-    .safeParse(actor.actorId || manualActor.trim()).success
   const client = useQueryClient()
   const scenario = useQuery(scenarioQueries.detail(scope, id))
   const selected = scenario.data?.selected_recommendation
@@ -59,9 +52,6 @@ function ScenarioDetail({ id }: { id: string }) {
         <div>
           <p className="mb-2 text-xs text-muted-foreground">Procurement</p>
           <h1 className="text-2xl font-semibold">Scenario review</h1>
-          <p className="mt-2 break-all font-mono text-xs text-muted-foreground">
-            {id}
-          </p>
         </div>
         <Button variant="outline" size="sm" asChild>
           <Link to="/procurement/scenarios/new">
@@ -80,8 +70,8 @@ function ScenarioDetail({ id }: { id: string }) {
           {(data) => (
             <>
               <div className="flex flex-wrap gap-2">
-                <Badge variant="outline">{data.status}</Badge>
-                <Badge variant="outline">{data.terminal_state}</Badge>
+                <Badge variant="outline">{humanize(data.status)}</Badge>
+                <Badge variant="outline">{humanize(data.terminal_state)}</Badge>
               </div>
               {(data.status === 'stale' || data.status === 'invalidated') && (
                 <p role="alert" className="text-sm text-amber-700">
@@ -104,7 +94,7 @@ function ScenarioDetail({ id }: { id: string }) {
                       type="supplier_product"
                       id={data.current_product.id}
                     >
-                      {data.current_product.name}
+                      {displayText(data.current_product.name)}
                     </AuditLink>,
                   ],
                   ['Quantity', `${data.quantity} ${data.quantity_unit}`],
@@ -126,14 +116,15 @@ function ScenarioDetail({ id }: { id: string }) {
                   ],
                   [
                     'Allowed materials',
-                    data.constraints.material.allowed_material_codes.join(
-                      ', ',
-                    ) || 'Unrestricted',
+                    data.constraints.material.allowed_material_codes
+                      .map(humanize)
+                      .join(', ') || 'Unrestricted',
                   ],
                   [
                     'Excluded risk levels',
-                    data.constraints.material.excluded_risk_levels.join(', ') ||
-                      'None',
+                    data.constraints.material.excluded_risk_levels
+                      .map(humanize)
+                      .join(', ') || 'None',
                   ],
                   [
                     'Measurement',
@@ -142,15 +133,17 @@ function ScenarioDetail({ id }: { id: string }) {
                       className="text-emerald-700 underline"
                       to={`/measurement/${data.carbon_measurement_id}`}
                     >
-                      {data.carbon_measurement_id}
+                      View source measurement
                     </Link>,
                   ],
                   [
                     'Scoring method',
-                    `${data.method.key} / ${data.method.version}`,
+                    `${humanize(data.method.key)} / ${displayText(data.method.version)}`,
                   ],
-                  ['Code version', data.method.code_version],
-                  ['Analysis signature', data.analysis_signature],
+                  [
+                    'Analysis integrity',
+                    data.analysis_signature ? 'Recorded' : 'Missing',
+                  ],
                 ]}
               />
               <div className="border-t pt-4">
@@ -168,17 +161,9 @@ function ScenarioDetail({ id }: { id: string }) {
                 className="space-y-3 border-t pt-4"
                 onSubmit={(e) => {
                   e.preventDefault()
-                  if (actorReady && !score.isPending && !scenario.isError)
-                    score.mutate()
+                  if (!score.isPending && !scenario.isError) score.mutate()
                 }}
               >
-                <div className="max-w-md">
-                  <ActorField
-                    {...actor}
-                    value={manualActor}
-                    onChange={setManualActor}
-                  />
-                </div>
                 <Button
                   size="sm"
                   variant="outline"
@@ -186,7 +171,6 @@ function ScenarioDetail({ id }: { id: string }) {
                     score.isPending ||
                     scenario.isFetching ||
                     scenario.isError ||
-                    !actorReady ||
                     ['stale', 'invalidated', 'approved', 'rejected'].includes(
                       data.status,
                     )
@@ -197,7 +181,9 @@ function ScenarioDetail({ id }: { id: string }) {
                 </Button>
                 <CommandError error={score.error} />
               </form>
-              <RawPayload value={data.frozen_context} />
+              <p className="text-xs text-muted-foreground">
+                Requirements recorded for this assessment.
+              </p>
             </>
           )}
         </QueryState>
@@ -236,7 +222,7 @@ function ScenarioDetail({ id }: { id: string }) {
               <>
                 <div className="flex flex-wrap items-center gap-3">
                   <h3 className="text-base font-medium wrap-anywhere">
-                    {data.recommended_product.name}
+                    {displayText(data.recommended_product.name)}
                   </h3>
                   <Badge variant="outline">{data.status}</Badge>
                 </div>
@@ -250,7 +236,10 @@ function ScenarioDetail({ id }: { id: string }) {
                 )}
                 <DefinitionList
                   items={[
-                    ['Supplier', data.recommended_product.supplier_name],
+                    [
+                      'Supplier',
+                      displayText(data.recommended_product.supplier_name),
+                    ],
                     [
                       'Projected emissions',
                       `${data.projected_footprint_kgco2e} kgCO2e`,
@@ -259,7 +248,10 @@ function ScenarioDetail({ id }: { id: string }) {
                     ['Reduction', `${data.reduction_pct}%`],
                     ['Cost change', `${data.cost_delta_pct}%`],
                     ['Lead time change', `${data.lead_time_delta_days} days`],
-                    ['Payload hash', data.payload_hash],
+                    [
+                      'Recommendation integrity',
+                      data.payload_hash ? 'Recorded' : 'Missing',
+                    ],
                     ['Analysis signature', data.analysis_signature],
                     [
                       'Ledger source',
@@ -276,17 +268,17 @@ function ScenarioDetail({ id }: { id: string }) {
                 />
                 <div className="space-y-3 border-t pt-4">
                   <h3 className="text-sm font-semibold">
-                    Bound recommendation narrative
+                    Recommendation summary
                   </h3>
                   <p className="whitespace-pre-wrap text-sm">
-                    {data.narrative.resolved_text}
+                    {displayText(data.narrative.resolved_text)}
                   </p>
                   {data.narrative.unsupported_fragments.length > 0 && (
                     <div role="alert" className="text-sm text-amber-700">
                       <p>Unsupported fragments</p>
                       <ul>
                         {data.narrative.unsupported_fragments.map((v, i) => (
-                          <li key={i}>{v}</li>
+                          <li key={i}>{displayText(v)}</li>
                         ))}
                       </ul>
                     </div>
@@ -301,12 +293,17 @@ function ScenarioDetail({ id }: { id: string }) {
                       className="space-y-1 border-b pb-3 text-sm"
                     >
                       <AuditLink type="evidence_item" id={item.id}>
-                        {item.evidence_type}
+                        {humanize(item.evidence_type)}
                       </AuditLink>
-                      <p className="wrap-anywhere">{item.locator}</p>
-                      <p className="break-all font-mono text-xs">
-                        {item.checksum}
+                      <p className="wrap-anywhere">
+                        {displayText(item.locator)}
                       </p>
+                      <dl>
+                        <HashValue
+                          label="Evidence integrity"
+                          value={item.checksum}
+                        />
+                      </dl>
                     </div>
                   ))}
                   {!data.evidence.length && (
@@ -321,7 +318,10 @@ function ScenarioDetail({ id }: { id: string }) {
                       items={[
                         ['Approval status', data.approval.status],
                         ['Expires', data.approval.expires_at],
-                        ['Preview hash', data.approval.preview_hash],
+                        [
+                          'Approval integrity',
+                          data.approval.preview_hash ? 'Recorded' : 'Missing',
+                        ],
                       ]}
                     />
                     <Button asChild variant="outline" size="sm">
@@ -351,8 +351,8 @@ export default function ScenarioPage() {
     return (
       <section className="px-5 py-6 sm:px-8">
         <EmptyState
-          title="Invalid scenario UUID"
-          detail="Open a scenario using its recorded identifier."
+          title="Invalid scenario link"
+          detail="Choose an existing scenario or create a new one."
         />
         <Button asChild variant="outline">
           <Link to="/procurement/scenarios/new">Open or create a scenario</Link>

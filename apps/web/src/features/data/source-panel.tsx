@@ -1,10 +1,13 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { Download, FileUp, Search, ScanText } from 'lucide-react'
 import { useRef } from 'react'
-import { Controller, useForm } from 'react-hook-form'
+import { Controller, useForm, useWatch } from 'react-hook-form'
 import { Link, useOutletContext, useSearchParams } from 'react-router-dom'
 import { z } from 'zod'
 
+import { RecordSelect } from '@/components/record-select'
+import { displayText, humanize } from '@/lib/presentation'
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -56,6 +59,7 @@ function DocumentActions({ id }: { id: string }) {
     resolver: zodResolver(actorSchema),
     defaultValues: { actor_id: actor.actorId },
   })
+  const watched = useWatch({ control: form.control })
   async function downloadContent() {
     await download.run(async () => {
       let response: Response
@@ -89,12 +93,12 @@ function DocumentActions({ id }: { id: string }) {
       }
       const disposition = response.headers.get('Content-Disposition')
       const encodedName = disposition?.match(/filename\*=UTF-8''([^;]+)/i)?.[1]
-      let filename = `source-${id}`
+      let filename = 'source-document'
       if (encodedName) {
         try {
           filename = decodeURIComponent(encodedName)
         } catch {
-          /* Retain the document identifier when the header is malformed. */
+          /* Use the generic filename when the header is malformed. */
         }
       }
       const blobUrl = URL.createObjectURL(await response.blob())
@@ -109,12 +113,6 @@ function DocumentActions({ id }: { id: string }) {
   return (
     <section className={sectionClass} aria-label="Source document">
       <h2 className="text-sm font-semibold">Source document</h2>
-      <p className="break-all font-mono text-xs">{id}</p>
-      <p className="text-xs text-muted-foreground">
-        Document metadata and provenance are available in the upload receipt and
-        linked ledger evidence. Opening a UUID does not establish its
-        provenance.
-      </p>
       <form
         onSubmit={(event) => {
           event.preventDefault()
@@ -129,7 +127,7 @@ function DocumentActions({ id }: { id: string }) {
       <CommandError error={download.error} />
       {download.data && (
         <p role="status" className="text-sm">
-          Downloaded {download.data}
+          Downloaded {displayText(download.data)}
         </p>
       )}
       <form
@@ -155,12 +153,10 @@ function DocumentActions({ id }: { id: string }) {
           <div className="max-w-lg">
             <ActorField
               registration={form.register('actor_id')}
+              value={watched.actor_id ?? ''}
               error={form.formState.errors.actor_id?.message}
             />
           </div>
-          <p className="text-xs text-muted-foreground">
-            Indexing writes evidence embeddings using the configured provider.
-          </p>
           <Button variant="outline" type="submit" disabled={index.pending}>
             <ScanText />
             {index.pending ? 'Indexing...' : 'Index document'}
@@ -173,9 +169,9 @@ function DocumentActions({ id }: { id: string }) {
               {index.data.replayed ? 'Index already current' : 'Index complete'}
               : {index.data.indexed_count} evidence items
             </p>
-            <p className="break-all text-xs text-muted-foreground">
-              Embedding model: {index.data.embedding_model_id}
-            </p>
+            <Link className="text-emerald-700 underline" to="/assurance">
+              Continue to disclosure
+            </Link>
           </div>
         )}
       </form>
@@ -195,15 +191,18 @@ export function SourcePanel() {
       actor_id: actor.actorId,
       source_name: '',
       evidence_type: '',
+      custom_evidence_type: '',
       external_reference: '',
       is_synthetic: false,
     },
   })
+  const watched = useWatch({ control: form.control })
   const id = params.get('document') ?? params.get('document_id')
   const open = useForm<z.infer<typeof openSchema>>({
     resolver: zodResolver(openSchema),
     defaultValues: { document_id: id ?? '' },
   })
+  const openValues = useWatch({ control: open.control })
   function openDocument(documentId: string) {
     const next = new URLSearchParams(params)
     next.set('view', 'documents')
@@ -247,7 +246,13 @@ export function SourcePanel() {
               company_id: scope.company_id,
               site_id: scope.site_id,
               reporting_period_id: scope.reporting_period_id,
-              ...values,
+              actor_id: values.actor_id,
+              source_name: values.source_name,
+              is_synthetic: values.is_synthetic,
+              evidence_type:
+                values.evidence_type === 'custom'
+                  ? values.custom_evidence_type
+                  : values.evidence_type,
               external_reference: values.external_reference || null,
               source_type,
               ...documentFile,
@@ -287,15 +292,45 @@ export function SourcePanel() {
                 label="Evidence type"
                 error={form.formState.errors.evidence_type?.message}
               >
-                <Input
-                  {...form.register('evidence_type')}
-                  required
-                  maxLength={40}
-                  placeholder="e.g. supplier_declaration"
-                />
+                <NativeSelect {...form.register('evidence_type')} required>
+                  <NativeSelectOption value="">
+                    Select evidence type
+                  </NativeSelectOption>
+                  <NativeSelectOption value="supplier_product_declaration">
+                    Supplier declaration
+                  </NativeSelectOption>
+                  <NativeSelectOption value="emission_factor">
+                    Emission factor evidence
+                  </NativeSelectOption>
+                  <NativeSelectOption value="disclosure_support">
+                    Disclosure support
+                  </NativeSelectOption>
+                  <NativeSelectOption value="source_document">
+                    Source document
+                  </NativeSelectOption>
+                  <NativeSelectOption value="standard">
+                    Disclosure standard
+                  </NativeSelectOption>
+                  <NativeSelectOption value="custom">
+                    Other evidence category
+                  </NativeSelectOption>
+                </NativeSelect>
               </Field>
+              {watched.evidence_type === 'custom' && (
+                <Field
+                  label="Evidence category"
+                  error={form.formState.errors.custom_evidence_type?.message}
+                >
+                  <Input
+                    {...form.register('custom_evidence_type')}
+                    maxLength={40}
+                    required
+                  />
+                </Field>
+              )}
               <ActorField
                 registration={form.register('actor_id')}
+                value={watched.actor_id ?? ''}
                 error={form.formState.errors.actor_id?.message}
               />
               <Field label="Source document file">
@@ -306,16 +341,24 @@ export function SourcePanel() {
                   required
                 />
               </Field>
-              <Field
-                label="External reference (optional)"
-                error={form.formState.errors.external_reference?.message}
-              >
-                <Input
-                  {...form.register('external_reference')}
-                  maxLength={255}
-                />
-              </Field>
             </div>
+            <details className="text-sm">
+              <summary className="cursor-pointer font-medium">
+                Additional document details
+              </summary>
+              <div className="mt-3 max-w-lg">
+                {' '}
+                <Field
+                  label="External reference (optional)"
+                  error={form.formState.errors.external_reference?.message}
+                >
+                  <Input
+                    {...form.register('external_reference')}
+                    maxLength={255}
+                  />
+                </Field>
+              </div>
+            </details>
             <div className="flex items-start gap-2">
               <Controller
                 name="is_synthetic"
@@ -343,10 +386,7 @@ export function SourcePanel() {
               </Label>
             </div>
             <p className="text-xs text-muted-foreground">
-              Server limits: TXT, Markdown, CSV, JSON or PDF; maximum 1 MiB
-              decoded, 120,000 extracted characters, 128 evidence chunks.
-              Encrypted or image-only PDFs are unsupported. Upload extracts and
-              indexes evidence through the configured provider.
+              TXT, Markdown, CSV, JSON or text-based PDF, up to 1 MiB.
             </p>
             <Button type="submit" disabled={upload.pending}>
               <FileUp />
@@ -370,7 +410,7 @@ export function SourcePanel() {
               </Badge>
             </div>
             <p className="break-all text-sm font-medium">
-              {upload.data.document.filename}
+              {displayText(upload.data.document.filename)}
             </p>
             <dl className="grid gap-3 text-xs sm:grid-cols-2">
               <div>
@@ -385,18 +425,21 @@ export function SourcePanel() {
                 <dt className="text-muted-foreground">Document version</dt>
                 <dd>{upload.data.document.version}</dd>
               </div>
-              <div>
-                <dt className="text-muted-foreground">Embedding model</dt>
-                <dd className="break-all">{upload.data.embedding_model_id}</dd>
-              </div>
             </dl>
-            <p className="break-all font-mono text-xs">
-              SHA-256: {upload.data.document.checksum}
+            <p className="text-xs text-muted-foreground">
+              {upload.data.document.checksum
+                ? 'Integrity recorded'
+                : 'Integrity missing'}
             </p>
+            <Link
+              className="text-sm text-emerald-700 underline"
+              to="/assurance"
+            >
+              Continue to disclosure
+            </Link>
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Evidence UUID</TableHead>
                   <TableHead>Locator</TableHead>
                   <TableHead>Type</TableHead>
                   <TableHead>Use</TableHead>
@@ -405,11 +448,8 @@ export function SourcePanel() {
               <TableBody>
                 {upload.data.evidence.map((item) => (
                   <TableRow key={item.id}>
-                    <TableCell className="font-mono text-xs">
-                      {item.id}
-                    </TableCell>
-                    <TableCell>{item.locator}</TableCell>
-                    <TableCell>{item.evidence_type}</TableCell>
+                    <TableCell>{displayText(item.locator)}</TableCell>
+                    <TableCell>{humanize(item.evidence_type)}</TableCell>
                     <TableCell>
                       <Link
                         className="text-emerald-700 underline dark:text-emerald-400"
@@ -435,10 +475,15 @@ export function SourcePanel() {
         >
           <div className="min-w-0 basis-80 grow">
             <Field
-              label="Source document UUID"
+              label="Source document"
               error={open.formState.errors.document_id?.message}
             >
-              <Input {...open.register('document_id')} required />
+              <RecordSelect
+                kind="documents"
+                {...open.register('document_id')}
+                value={openValues.document_id ?? ''}
+                required
+              />
             </Field>
           </div>
           <Button type="submit" variant="outline" className="mt-6">
@@ -452,7 +497,11 @@ export function SourcePanel() {
           <DocumentActions key={id} id={id} />
         ) : (
           <CommandError
-            error={new Error('The source document URL requires a valid UUID.')}
+            error={
+              new Error(
+                'This document link is invalid. Select a document above.',
+              )
+            }
           />
         ))}
     </>

@@ -1,11 +1,13 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Calculator, LoaderCircle } from 'lucide-react'
-import { useForm } from 'react-hook-form'
+import { useEffect } from 'react'
+import { useForm, useWatch } from 'react-hook-form'
 import { useNavigate } from 'react-router-dom'
 import { z } from 'zod'
 
 import { Button } from '@/components/ui/button'
+import { RecordSelect } from '@/components/record-select'
 import {
   Dialog,
   DialogContent,
@@ -17,7 +19,8 @@ import { Input } from '@/components/ui/input'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { useWorkspaceActor } from '@/features/auth/use-workspace-actor'
 import type { WorkspaceScope } from '@/lib/workspace'
-import { ApiError, apiRequest } from '@/services/api'
+import { displayText } from '@/lib/presentation'
+import { apiRequest } from '@/services/api'
 import { measurementResultSchema } from '../schemas'
 
 const formSchema = z
@@ -34,7 +37,7 @@ const formSchema = z
       ),
     grid_zone: z.string().trim().max(100),
     grid_method_version: z.string().trim().max(100),
-    actor_id: z.uuid('Enter the existing actor UUID.'),
+    actor_id: z.uuid('Select an acting user.'),
   })
   .refine((values) => values.path !== 'material' || !!values.material_code, {
     path: ['material_code'],
@@ -62,7 +65,19 @@ export default function CalculateMeasurement({
       actor_id: actor.actorId,
     },
   })
-  const path = form.watch('path')
+  const [path, actorId] = useWatch({
+    control: form.control,
+    name: ['path', 'actor_id'],
+  })
+  useEffect(() => {
+    if (
+      actor.actorId &&
+      !form.getValues('actor_id') &&
+      !form.getFieldState('actor_id').isDirty
+    ) {
+      form.setValue('actor_id', actor.actorId, { shouldValidate: true })
+    }
+  }, [actor.actorId, form])
   const calculate = useMutation({
     retry: false,
     mutationFn: (values: z.infer<typeof formSchema>) =>
@@ -193,13 +208,16 @@ export default function CalculateMeasurement({
           {!actor.authenticated && (
             <div className="space-y-2">
               <label htmlFor="calculate-actor" className="text-xs font-medium">
-                Acting user ID
+                Acting user
               </label>
-              <Input
+              <RecordSelect
                 id="calculate-actor"
+                kind="actors"
+                placeholder="Select an acting user"
                 disabled={calculate.isPending}
                 aria-invalid={!!form.formState.errors.actor_id}
                 {...form.register('actor_id')}
+                value={actorId}
               />
               {form.formState.errors.actor_id && (
                 <p role="alert" className="text-xs text-destructive">
@@ -208,19 +226,18 @@ export default function CalculateMeasurement({
               )}
             </div>
           )}
+          {actor.authenticated && (
+            <p className="text-sm">
+              Acting user: {displayText(actor.actorName)}
+            </p>
+          )}
           <p className="border-l-2 border-amber-500 pl-3 text-xs text-muted-foreground">
             Missing factors or grid intervals block calculation. This action
             does not fill missing activity or substitute a fixture.
           </p>
           {calculate.error && (
             <div role="alert" className="space-y-1 text-sm text-destructive">
-              <p>{calculate.error.message}</p>
-              {calculate.error instanceof ApiError &&
-                calculate.error.traceId && (
-                  <p className="break-all font-mono text-xs">
-                    Trace: {calculate.error.traceId}
-                  </p>
-                )}
+              <p>{displayText(calculate.error.message)}</p>
             </div>
           )}
           <div className="flex justify-end gap-2">

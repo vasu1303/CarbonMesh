@@ -6,7 +6,8 @@ import {
 } from '@/components/ui/chart'
 import { EmptyState } from '@/components/query-state'
 import { Button } from '@/components/ui/button'
-import { formatDecimal } from '@/lib/format'
+import { formatDate, formatDecimal } from '@/lib/format'
+import { humanize } from '@/lib/presentation'
 import type { MeasurementSummary } from '../schemas'
 
 export default function RecordsChart({
@@ -24,8 +25,9 @@ export default function RecordsChart({
         detail="Unsupported records are excluded from the chart."
       />
     )
-  const data = records.map((item, index) => ({
-    label: `R${index + 1}`,
+  const data = records.map((item) => ({
+    label: formatDate(item.created_at),
+    metric: humanize(item.metric_key),
     value: Number(item.value_kgco2e),
     exact: item.value_kgco2e,
     status: item.status,
@@ -53,6 +55,9 @@ export default function RecordsChart({
               <ChartTooltipContent
                 formatter={(_value, _name, item) => (
                   <div className="space-y-1">
+                    <p className="max-w-64 text-xs wrap-anywhere">
+                      {item.payload.metric}
+                    </p>
                     <p className="font-mono">
                       {formatDecimal(item.payload.exact)} kgCO2e
                     </p>
@@ -70,27 +75,30 @@ export default function RecordsChart({
             radius={[3, 3, 0, 0]}
             maxBarSize={52}
             isAnimationActive={false}
-            onClick={(data) => {
-              if (typeof data.id === 'string') onInspect(data.id)
+            onClick={(_item, index) => {
+              const selected = data[index]
+              if (selected) onInspect(selected.id)
             }}
             cursor="pointer"
           />
         </BarChart>
       </ChartContainer>
-      <ul className="mt-4 grid gap-x-6 divide-y sm:grid-cols-2">
-        {records.map((item, index) => (
+      <ul className="mt-4 grid min-w-0 grid-cols-1 gap-x-6 divide-y sm:grid-cols-2">
+        {records.map((item) => (
           <li
             key={item.id}
-            className="flex items-center justify-between gap-3 py-2 text-xs"
+            className="flex min-w-0 items-center justify-between gap-3 py-2 text-xs"
           >
             <Button
               variant="link"
-              className="h-auto p-0 text-xs"
+              className="h-auto min-w-0 flex-1 shrink justify-start p-0 text-left text-xs whitespace-normal"
               onClick={() => onInspect(item.id)}
             >
-              R{index + 1} / {item.id.slice(-12)}
+              <span className="min-w-0 wrap-anywhere">
+                {humanize(item.metric_key)} / {formatDate(item.created_at)}
+              </span>
             </Button>
-            <span className="capitalize text-muted-foreground">
+            <span className="shrink-0 capitalize text-muted-foreground">
               {item.status}
             </span>
           </li>

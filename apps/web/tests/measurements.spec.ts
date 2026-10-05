@@ -1,5 +1,6 @@
 import { expect, test, type Page, type Route } from '@playwright/test'
 import fixture from './fixtures/measurements.synthetic.json' with { type: 'json' }
+import { workspaceResponse } from './workspace-fixtures'
 
 const first = fixture.records[0].summary
 
@@ -9,19 +10,20 @@ test('dedicated measurement detail links facts, calculations and source document
   const errors: string[] = []
   page.on('pageerror', (error) => errors.push(error.message))
   await mockApi(page)
-  await page.goto('/measurement')
+  await page.goto('/measurement?view=records')
   await page
-    .getByRole('link', { name: `Open measurement ${first.id}`, exact: true })
+    .getByRole('link', { name: /^Open .* recorded / }).first()
     .click()
   await expect(
-    page.getByRole('heading', { name: 'Measurement record', exact: true }),
+    page.getByRole('heading', { name: 'Emission record', exact: true }),
   ).toBeVisible()
+  await page.getByText('Method and confidence', { exact: true }).click()
   await expect(
     page.getByText('Confidence breakdown', { exact: true }),
   ).toBeVisible()
   await page.getByRole('tab', { name: 'Calculations', exact: true }).click()
   await expect(page.getByText('18,000 kgCO2e', { exact: true })).toBeVisible()
-  await expect(page.locator('.recharts-line')).toHaveCount(1)
+  await expect(page.locator('.recharts-bar-rectangle')).toHaveCount(fixture.records[0].detail.calculations.length)
   await expect(
     page.getByRole('link', { name: 'Document', exact: true }),
   ).toHaveAttribute(
@@ -69,7 +71,7 @@ test('measurement calculation submits the explicit API contract and opens its pe
     })
     return true
   })
-  await page.goto('/measurement')
+  await page.goto('/measurement?view=records')
   await page.getByRole('button', { name: 'Calculate', exact: true }).click()
   const dialog = page.getByRole('dialog')
   await dialog
@@ -77,7 +79,7 @@ test('measurement calculation submits the explicit API contract and opens its pe
     .fill('RECYCLED_ALUMINIUM')
   await dialog.getByRole('button', { name: 'Calculate', exact: true }).click()
   await expect(
-    page.getByRole('heading', { name: 'Measurement record', exact: true }),
+    page.getByRole('heading', { name: 'Emission record', exact: true }),
   ).toBeVisible()
   expect(payload).toEqual({
     company_id: fixture.scope.company_id,
@@ -110,7 +112,7 @@ test('a rejected Scope 2 calculation stays explicit without a fallback result', 
     })
     return true
   })
-  await page.goto('/measurement')
+  await page.goto('/measurement?view=records')
   await page.getByRole('button', { name: 'Calculate', exact: true }).click()
   const dialog = page.getByRole('dialog')
   await dialog
@@ -122,11 +124,13 @@ test('a rejected Scope 2 calculation stays explicit without a fallback result', 
   ).toBeVisible()
   await expect(
     dialog.getByText('Trace: test-grid-missing', { exact: true }),
-  ).toBeVisible()
-  await expect(page).toHaveURL(/\/measurement$/)
+  ).toHaveCount(0)
+  await expect(page).toHaveURL(/\/measurement\?view=records$/)
 })
 
 function responseFor(url: URL) {
+  const options = workspaceResponse(url)
+  if (options) return options
   if (url.pathname === '/api/auth/session')
     return {
       company_id: fixture.scope.company_id,
@@ -208,9 +212,9 @@ test('measurements use canonical reads, filters, paging and source inspection', 
   const errors: string[] = []
   page.on('pageerror', (error) => errors.push(error.message))
   const calls = await mockApi(page)
-  await page.goto('/measurement?limit=5')
+  await page.goto('/measurement?limit=5&view=records')
   await expect(
-    page.getByRole('heading', { name: 'Measurements', exact: true }),
+    page.getByRole('heading', { name: 'Emissions', exact: true }),
   ).toBeVisible()
   const records = page.getByRole('region', { name: 'Measurement records' })
   await expect(records.getByText('1-5 of 6')).toBeVisible()
@@ -237,26 +241,27 @@ test('measurements use canonical reads, filters, paging and source inspection', 
     .getByLabel('Category', { exact: true })
     .selectOption(first.category)
   await records
-    .getByRole('button', { name: `View facts ${first.id}`, exact: true })
+    .getByRole('button', { name: /^View facts for / }).first()
     .click()
   const dialog = page.getByRole('dialog')
+  await dialog.getByText('Method and confidence', { exact: true }).click()
   await expect(
     dialog.getByText('Confidence breakdown', { exact: true }),
   ).toBeVisible()
   await dialog.getByRole('tab', { name: 'Evidence', exact: true }).click()
+  await dialog.getByLabel('Source records', { exact: true }).selectOption('factors')
   await expect(
     dialog.getByText('synthetic-ui-factor.txt', { exact: true }),
   ).toBeVisible()
   await dialog.getByRole('tab', { name: 'Lineage', exact: true }).click()
   await expect(
-    dialog.getByText('Synthetic raw activity', { exact: true }),
+    dialog.getByRole('figure').getByRole('button', { name: /Synthetic raw activity/ }),
   ).toBeVisible()
   await dialog.getByRole('button', { name: 'Close', exact: true }).click()
   await expect(
     records.getByRole('button', {
-      name: `View facts ${first.id}`,
-      exact: true,
-    }),
+      name: /^View facts for /,
+    }).first(),
   ).toBeFocused()
   expect(
     calls.some(
@@ -290,7 +295,7 @@ test('legacy preview URL still uses API data and supports chart inspection', asy
   const calls = await mockApi(page)
   await page.goto('/measurement?source=preview&view=chart')
   await expect(
-    page.getByText('Synthetic data / API', { exact: true }),
+    page.getByText('Synthetic data', { exact: true }).first(),
   ).toBeVisible()
   const records = page.getByRole('region', { name: 'Measurement records' })
   await expect(records.locator('.recharts-bar-rectangle')).toHaveCount(5)
@@ -303,8 +308,9 @@ test('legacy preview URL still uses API data and supports chart inspection', asy
     fullPage: true,
   })
   await records
-    .getByRole('button', { name: `R1 / ${first.id.slice(-12)}`, exact: true })
+    .getByRole('list').getByRole('button').first()
     .click()
+  await page.getByRole('dialog').getByText('Method and confidence', { exact: true }).click()
   await expect(
     page.getByRole('dialog').getByText('Confidence breakdown', { exact: true }),
   ).toBeVisible()
@@ -313,7 +319,7 @@ test('legacy preview URL still uses API data and supports chart inspection', asy
     page.getByRole('tab', { name: 'Synthetic preview', exact: true }),
   ).toHaveCount(0)
   await expect(
-    page.getByText('Synthetic data / API', { exact: true }),
+    page.getByText('Synthetic data', { exact: true }).first(),
   ).toBeVisible()
   expect(calls.some((call) => call.url.pathname === '/api/measurements')).toBe(
     true,
@@ -321,7 +327,7 @@ test('legacy preview URL still uses API data and supports chart inspection', asy
   expect(new URL(page.url()).searchParams.has('record')).toBe(false)
 })
 
-test('record loading is independent of summary counts and context', async ({
+test('record loading is independent of calculation controls and context', async ({
   page,
 }) => {
   let release!: () => void
@@ -338,16 +344,14 @@ test('record loading is independent of summary counts and context', async ({
     await route.fulfill({ json: responseFor(url) })
     return true
   })
-  await page.goto('/measurement')
+  await page.goto('/measurement?view=records')
   try {
     await expect(
       page
         .getByRole('region', { name: 'Measurement records' })
         .getByRole('status', { name: 'Loading data' }),
     ).toBeVisible()
-    await expect(
-      page.getByRole('button', { name: 'Show verified records' }),
-    ).toHaveText('2')
+    await expect(page.getByRole('button', { name: 'Calculate', exact: true })).toBeEnabled()
     await expect(
       page.getByText('Maverick Manufacturing (synthetic)'),
     ).toBeVisible()
@@ -355,7 +359,7 @@ test('record loading is independent of summary counts and context', async ({
     release()
   }
   await expect(
-    page.getByRole('button', { name: `View facts ${first.id}`, exact: true }),
+    page.getByRole('button', { name: /^View facts for / }).first(),
   ).toBeVisible()
 })
 
@@ -377,9 +381,9 @@ test('failed refresh is explicit and a missing record never loads preview data',
     })
     return true
   })
-  await page.goto('/measurement')
+  await page.goto('/measurement?view=records')
   await expect(
-    page.getByRole('button', { name: `View facts ${first.id}`, exact: true }),
+    page.getByRole('button', { name: /^View facts for / }).first(),
   ).toBeVisible()
   failure = true
   await page
@@ -391,7 +395,7 @@ test('failed refresh is explicit and a missing record never loads preview data',
       .getByText('Refresh failed. Showing previously fetched data.'),
   ).toBeVisible()
   await page
-    .getByRole('button', { name: `View facts ${first.id}`, exact: true })
+    .getByRole('button', { name: /^View facts for / }).first()
     .click()
   await expect(
     page.getByRole('dialog').getByText('Test service unavailable.'),
@@ -406,7 +410,7 @@ test('empty results, invalid identifiers and stale statuses are distinct', async
 }) => {
   await mockApi(page)
   await page.goto(
-    '/measurement?source=preview&category=nonexistent&record=bad-id',
+    '/measurement?view=records&category=nonexistent&record=bad-id',
   )
   await expect(
     page.getByText('No measurements found', { exact: true }),
@@ -417,9 +421,7 @@ test('empty results, invalid identifiers and stale statuses are distinct', async
   await page.getByRole('button', { name: 'Dismiss', exact: true }).click()
   await page.getByRole('button', { name: 'Clear filters', exact: true }).click()
   await expect(page.getByLabel('Category', { exact: true })).toHaveValue('')
-  await page
-    .getByRole('button', { name: 'Show superseded records', exact: true })
-    .click()
+  await page.getByLabel('Status', { exact: true }).selectOption('superseded')
   await expect(
     page
       .getByRole('region', { name: 'Measurement records' })
@@ -427,8 +429,7 @@ test('empty results, invalid identifiers and stale statuses are distinct', async
   ).toBeVisible()
   await page
     .getByRole('button', {
-      name: `View facts ${fixture.records[3].summary.id}`,
-      exact: true,
+      name: /^View facts for /,
     })
     .click()
   await expect(
@@ -454,7 +455,7 @@ test('scope mismatch fails closed; filters survive refresh and browser history',
     })
     return true
   })
-  await page.goto('/measurement')
+  await page.goto('/measurement?view=records')
   await page.getByLabel('Status', { exact: true }).selectOption('draft')
   await page.reload()
   await expect(page.getByLabel('Status', { exact: true })).toHaveValue('draft')
@@ -470,11 +471,12 @@ test('scope mismatch fails closed; filters survive refresh and browser history',
   ).toBeVisible()
 })
 
-test('measurement inspection fits a narrow viewport', async ({ page }) => {
+test('measurement inspection fits a narrow viewport', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 320, height: 720 })
   await mockApi(page)
   await page.goto(`/measurement?source=preview&record=${first.id}`)
   const dialog = page.getByRole('dialog')
+  await dialog.getByText('Method and confidence', { exact: true }).click()
   await expect(
     dialog.getByText('Confidence breakdown', { exact: true }),
   ).toBeVisible()
@@ -484,15 +486,27 @@ test('measurement inspection fits a narrow viewport', async ({ page }) => {
     ),
   ).toBe(true)
   await page.keyboard.press('Escape')
-  expect(
-    await page.evaluate(
+  await expect(dialog).not.toBeVisible()
+  try {
+    await expect.poll(() => page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,
-    ),
-  ).toBe(true)
+    )).toBe(true)
+  } finally {
+    const layout = await page.evaluate(() => ({
+      viewport: innerWidth,
+      document: document.documentElement.scrollWidth,
+      overflowing: Array.from(document.querySelectorAll('body *')).map(element => {
+        const box = element.getBoundingClientRect()
+        return { tag: element.tagName, class: element.className, text: element.textContent?.slice(0, 100), left: box.left, right: box.right, width: box.width }
+      }).filter(box => box.width > 0 && (box.right > innerWidth + 1 || box.left < -1)).slice(0, 30),
+    }))
+    await testInfo.attach('mobile-layout', { body: JSON.stringify(layout, null, 2), contentType: 'application/json' })
+    await page.screenshot({ path: testInfo.outputPath('measurement-mobile.png'), fullPage: true })
+  }
   await expect(
     page
       .getByRole('navigation', { name: 'Mobile navigation' })
-      .getByRole('link', { name: 'Measurements', exact: true }),
+      .getByRole('link', { name: 'Emissions', exact: true }),
   ).toHaveAttribute('aria-current', 'page')
 })
 
@@ -573,6 +587,7 @@ test('confidence v2 and hourly Scope 2 evidence use recorded API fields', async 
   })
   await page.goto(`/measurement?record=${first.id}`)
   const dialog = page.getByRole('dialog')
+  await dialog.getByText('Method and confidence', { exact: true }).click()
   await expect(dialog.getByText('Method fit', { exact: true })).toBeVisible()
   await expect(dialog.getByText('Factor recency', { exact: true })).toHaveCount(
     0,
@@ -581,11 +596,9 @@ test('confidence v2 and hourly Scope 2 evidence use recorded API fields', async 
     dialog.getByText('Partial reporting period', { exact: true }),
   ).toBeVisible()
   await dialog.getByRole('tab', { name: 'Evidence', exact: true }).click()
-  await expect(
-    dialog.getByText('Hourly grid evidence', { exact: true }),
-  ).toBeVisible()
+  await dialog.getByLabel('Source records', { exact: true }).selectOption('grid')
   await expect(
     dialog.getByText('Synthetic grid provider / IN-SO', { exact: true }),
   ).toBeVisible()
-  await expect(dialog.getByText('412.125', { exact: true })).toHaveCount(2)
+  await expect(dialog.getByText('412.125 gCO2e/kWh', { exact: true })).toBeVisible()
 })

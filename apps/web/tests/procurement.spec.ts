@@ -17,10 +17,10 @@ test('supplier catalog drills into API products and exact recorded facts', async
   const calls = await mockCatalog(page)
   await page.goto(base)
   await expect(
-    page.getByRole('heading', { name: 'Supplier catalog' }),
+    page.getByRole('heading', { name: 'Suppliers', exact: true, level: 1 }),
   ).toBeVisible()
   await expect(
-    page.getByText('Synthetic data / API', { exact: true }),
+    page.getByText('Synthetic data', { exact: true }).first(),
   ).toBeVisible()
   const suppliersRegion = page.getByRole('region', { name: 'Supplier results' })
   await expect(suppliersRegion.getByText('1-7 of 7')).toBeVisible()
@@ -35,11 +35,9 @@ test('supplier catalog drills into API products and exact recorded facts', async
   await expect(results.getByText('1-2 of 2')).toBeVisible()
   await expect(results.getByText('Missing', { exact: true })).toBeVisible()
   await expect(
-    results.getByText('1.123456789012', { exact: true }),
+    results.getByRole('cell').filter({ hasText: '1.123456789012' }),
   ).toBeVisible()
-  await expect(results.getByText('USD 3.123456', { exact: true })).toHaveCount(
-    2,
-  )
+  await expect(results.getByRole('cell').filter({ hasText: 'USD 3.123456' })).toHaveCount(2)
   await page.screenshot({
     path: testInfo.outputPath('products.png'),
     fullPage: true,
@@ -51,9 +49,7 @@ test('supplier catalog drills into API products and exact recorded facts', async
   await inspect.click()
   const dialog = page.getByRole('dialog')
   await expect(dialog.getByText('1.123456789012 kgCO2e/kg')).toBeVisible()
-  await expect(
-    dialog.getByText(products[0].evidence_item_id!, { exact: true }),
-  ).toBeVisible()
+  await expect(dialog.getByText(products[0].evidence_item_id!, { exact: true })).toHaveCount(0)
   await expect(
     dialog.getByText('Evidence linked', { exact: true }),
   ).toBeVisible()
@@ -223,7 +219,7 @@ test('errors support retry and cached refresh failures stay explicit', async ({
   await expect(
     results.getByText('Catalog temporarily unavailable.'),
   ).toBeVisible()
-  await expect(results.getByText('Trace: catalog-test')).toBeVisible()
+  await expect(results.getByText('Trace: catalog-test')).toHaveCount(0)
   fail = false
   await results.getByRole('button', { name: 'Retry', exact: true }).click()
   await expect(results.getByText('1-6 of 6')).toBeVisible()
@@ -354,7 +350,7 @@ test('product details and navigation fit narrow screens', async ({ page }) => {
   await expect(
     page
       .getByRole('navigation', { name: 'Mobile navigation' })
-      .getByRole('link', { name: 'Procurement', exact: true }),
+      .getByRole('link', { name: 'Suppliers', exact: true }),
   ).toHaveAttribute('aria-current', 'page')
   await page.getByRole('tab', { name: /^Suppliers/ }).click()
   await expect(
@@ -367,28 +363,11 @@ test('product details and navigation fit narrow screens', async ({ page }) => {
   ).toBe(true)
 })
 
-test('unauthenticated visitors do not send catalog requests', async ({
-  page,
-}) => {
-  const calls = await mockCatalog(page, async (route, url) => {
-    if (url.pathname !== '/api/auth/session') return
-    await route.fulfill({
-      status: 401,
-      json: {
-        detail: {
-          code: 'authentication_required',
-          message: 'Sign in required.',
-          retryable: false,
-        },
-      },
-    })
-    return true
-  })
+test('catalog opens without authentication requests or sign-in controls', async ({ page }) => {
+  const calls = await mockCatalog(page)
   await page.goto(base)
-  await expect(
-    page.getByRole('heading', { name: 'Sign in to CarbonMesh' }),
-  ).toBeVisible()
-  expect(
-    calls.some((call) => call.url.pathname.startsWith('/api/procurement/')),
-  ).toBe(false)
+  await expect(page.getByRole('button', { name: `Browse products from ${suppliers[0].name}` })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /Sign in/ })).toHaveCount(0)
+  expect(calls.some(call => call.url.pathname.startsWith('/api/procurement/'))).toBe(true)
+  expect(calls.some(call => call.url.pathname.startsWith('/api/auth/'))).toBe(false)
 })

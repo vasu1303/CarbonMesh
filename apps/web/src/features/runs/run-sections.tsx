@@ -1,8 +1,20 @@
 import { useQuery } from '@tanstack/react-query'
+import {
+  AlertCircle,
+  CheckCircle2,
+  Clock3,
+  RefreshCw,
+  XCircle,
+} from 'lucide-react'
 import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { EmptyState, QueryRefresh, QueryState } from '@/components/query-state'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { displayText, humanize } from '@/lib/presentation'
+import { formatDate } from '@/lib/format'
+import { RecordFields } from '@/features/approvals/review-components'
+import { reviewValue } from '@/features/approvals/presentation'
 import {
   Table,
   TableBody,
@@ -31,7 +43,9 @@ export function LedgerLink({
       to={`/ledger?event=${id}`}
       className="break-all text-emerald-700 underline underline-offset-4 dark:text-emerald-400"
     >
-      {children ?? id}
+      {typeof children === 'string'
+        ? displayText(children)
+        : (children ?? 'View supporting record')}
     </Link>
   )
 }
@@ -42,7 +56,9 @@ export function RecordedValues({ values }: { values: [string, ReactNode][] }) {
         <div key={label} className="min-w-0">
           <dt className="text-xs text-muted-foreground">{label}</dt>
           <dd className="mt-1 break-words [overflow-wrap:anywhere]">
-            {value ?? 'Not recorded'}
+            {typeof value === 'string'
+              ? reviewValue(value)
+              : (value ?? 'Not recorded')}
           </dd>
         </div>
       ))}
@@ -66,13 +82,12 @@ export function RunFacts({ run }: { run: AgentRun }) {
             {run.facts.map((fact) => (
               <TableRow key={fact.fact_id}>
                 <TableCell className="max-w-80 whitespace-normal break-words">
-                  {fact.metric_key}
+                  {humanize(fact.metric_key)}
                 </TableCell>
                 <TableCell className="font-medium tabular-nums">
-                  {fact.display_value}
+                  {displayText(fact.display_value)}
                 </TableCell>
                 <TableCell>
-                  <p className="font-mono text-xs">{fact.fact_id}</p>
                   <LedgerLink id={fact.ledger_event_id}>
                     Ledger lineage
                   </LedgerLink>
@@ -136,14 +151,17 @@ export function RunJudgments({ run }: { run: AgentRun }) {
           {run.judgments.map((judgment, index) => (
             <li key={index} className="space-y-2 py-3 text-sm">
               <p>
-                {judgment.kind.replaceAll('_', ' ')}:{' '}
-                <strong>{judgment.value.replaceAll('_', ' ')}</strong>
+                {humanize(judgment.kind)}:{' '}
+                <strong>{humanize(judgment.value)}</strong>
               </p>
               <p className="text-muted-foreground">
-                Basis: {judgment.basis.replaceAll('_', ' ')}
+                Basis: {humanize(judgment.basis)}
               </p>
               {judgment.matched_terms.length > 0 && (
-                <p>Matched terms: {judgment.matched_terms.join(', ')}</p>
+                <p>
+                  Matched terms:{' '}
+                  {judgment.matched_terms.map(displayText).join(', ')}
+                </p>
               )}
             </li>
           ))}
@@ -157,10 +175,12 @@ export function RunJudgments({ run }: { run: AgentRun }) {
       {(run.unsupported_reason || run.unsupported_items.length > 0) && (
         <div className="space-y-2 border-l-2 border-amber-500 pl-3 text-sm">
           <h3 className="font-medium">Unsupported items</h3>
-          {run.unsupported_reason && <p>{run.unsupported_reason}</p>}
+          {run.unsupported_reason && (
+            <p>{displayText(run.unsupported_reason)}</p>
+          )}
           <ul className="space-y-1">
             {run.unsupported_items.map((item, index) => (
-              <li key={index}>{item}</li>
+              <li key={index}>{displayText(item)}</li>
             ))}
           </ul>
         </div>
@@ -177,25 +197,25 @@ export function RunPlan({ run }: { run: AgentRun }) {
       {plan.success ? (
         <>
           <p className="text-xs text-muted-foreground">
-            {plan.data.version} / {plan.data.profile}
+            {humanize(plan.data.profile)}
           </p>
           <p className="text-sm break-words">
-            Context tools: {plan.data.context_tools.join(', ')}
+            Preparation: {plan.data.context_tools.map(humanize).join(', ')}
           </p>
           <ol className="divide-y">
             {plan.data.stages.map((stage) => (
               <li key={stage.stage_id} className="space-y-2 py-3 text-sm">
                 <div className="flex flex-wrap items-center gap-3">
-                  <strong>{stage.module}</strong>
+                  <strong>{humanize(stage.module)}</strong>
                   {stage.requires_human_approval && (
                     <Badge variant="outline">Human review</Badge>
                   )}
                 </div>
                 <p className="break-words text-muted-foreground">
-                  {stage.tool_names.join(', ')}
+                  {stage.tool_names.map(humanize).join(', ')}
                 </p>
                 {stage.depends_on.length > 0 && (
-                  <p>Depends on: {stage.depends_on.join(', ')}</p>
+                  <p>Follows: {stage.depends_on.map(humanize).join(', ')}</p>
                 )}
               </li>
             ))}
@@ -205,10 +225,11 @@ export function RunPlan({ run }: { run: AgentRun }) {
         <ul className="divide-y">
           {legacy.data.steps.map((step) => (
             <li key={step.id} className="space-y-1 py-3 text-sm">
-              <strong>{step.title}</strong>
-              <p>{step.responsibility}</p>
+              <strong>{displayText(step.title)}</strong>
+              <p>{displayText(step.responsibility)}</p>
               <p className="text-muted-foreground">
-                {step.status} / {step.tool_ids.join(', ')}
+                {humanize(step.status)} /{' '}
+                {step.tool_ids.map(humanize).join(', ')}
               </p>
             </li>
           ))}
@@ -226,22 +247,128 @@ export function RunPlan({ run }: { run: AgentRun }) {
     </section>
   )
 }
-export function RunTelemetry({
-  run,
+export function RunTimeline({
   events,
   connection,
+  onRefresh,
 }: {
-  run: AgentRun
   events: RunEvent[]
   connection: string
+  onRefresh: () => void
 }) {
+  return (
+    <section aria-label="Run timeline" className="space-y-4 border-t pt-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-base font-semibold">Run timeline</h2>
+        <Button size="sm" variant="outline" onClick={onRefresh}>
+          <RefreshCw />
+          Refresh events
+        </Button>
+      </div>
+      <p role="status" className="text-xs text-muted-foreground">
+        {displayText(connection)}
+      </p>
+      {events.length ? (
+        <ol className="ml-3 border-l">
+          {events.map((event) => {
+            const failed =
+              event.name.endsWith('.failed') || !!event.data.error_code
+            const review =
+              event.name.endsWith('.required') ||
+              event.name.endsWith('.warning') ||
+              event.name.endsWith('_blocked')
+            const complete =
+              event.name.endsWith('.completed') ||
+              event.name.endsWith('_resolved')
+            const Icon = failed
+              ? XCircle
+              : review
+                ? AlertCircle
+                : complete
+                  ? CheckCircle2
+                  : Clock3
+            return (
+              <li
+                key={event.sequence}
+                className="relative min-w-0 pb-6 pl-7 last:pb-0"
+              >
+                <Icon
+                  aria-hidden="true"
+                  className={`absolute top-0.5 -left-2.5 size-5 bg-background ${failed || review ? 'text-amber-600' : complete ? 'text-emerald-600' : 'text-muted-foreground'}`}
+                />
+                <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                  <h3 className="text-sm font-medium">
+                    {humanize(event.name)}
+                  </h3>
+                  <time
+                    dateTime={event.occurred_at}
+                    className="text-xs text-muted-foreground"
+                  >
+                    {formatDate(event.occurred_at)}
+                  </time>
+                </div>
+                {(event.data.tool_name ||
+                  event.data.tool ||
+                  event.data.node_name ||
+                  event.data.stage) && (
+                  <p className="mt-1 text-sm">
+                    {humanize(
+                      event.data.tool_name ??
+                        event.data.tool ??
+                        event.data.node_name ??
+                        event.data.stage ??
+                        '',
+                    )}
+                  </p>
+                )}
+                {event.data.message && (
+                  <p className="mt-1 break-words text-sm text-muted-foreground">
+                    {displayText(event.data.message)}
+                  </p>
+                )}
+                {event.data.error_code && (
+                  <p className="mt-1 text-sm text-amber-700">
+                    {humanize(event.data.error_code)}
+                  </p>
+                )}
+                {event.data.ledger_event_id && (
+                  <p className="mt-2 text-sm">
+                    <LedgerLink id={event.data.ledger_event_id}>
+                      View supporting record
+                    </LedgerLink>
+                  </p>
+                )}
+                <details className="mt-2">
+                  <summary className="cursor-pointer text-xs text-muted-foreground">
+                    Step details
+                  </summary>
+                  <div className="mt-3">
+                    <RecordFields value={event.data} />
+                  </div>
+                </details>
+              </li>
+            )
+          })}
+        </ol>
+      ) : (
+        <EmptyState
+          title="No events recorded yet"
+          detail="The timeline will appear when the run records its first step."
+        />
+      )}
+    </section>
+  )
+}
+
+export function RunTelemetry({ run }: { run: AgentRun }) {
   const t = run.telemetry
   return (
-    <section aria-label="Run telemetry" className="space-y-5 border-t pt-5">
+    <section aria-label="Run telemetry" className="space-y-5 pt-5">
       <h2 className="text-base font-semibold">Run telemetry</h2>
       <RecordedValues
         values={[
-          ['Provider', `${t.provider} / ${t.provider_status}`],
+          ['Provider', humanize(t.provider)],
+          ['Provider status', humanize(t.provider_status)],
           ['Model', t.model_id],
           ['Orchestrator', t.orchestrator_version],
           ['Model calls', t.model_calls],
@@ -265,18 +392,12 @@ export function RunTelemetry({
         ]}
       />
       {Object.keys(t.sustainability_assumptions).length > 0 && (
-        <details className="border-y py-3">
-          <summary className="cursor-pointer text-sm font-medium">
-            Recorded run proxy assumptions
-          </summary>
-          <div className="mt-4">
-            <RecordedValues
-              values={Object.entries(t.sustainability_assumptions).map(
-                ([key, value]) => [key.replaceAll('_', ' '), value],
-              )}
-            />
-          </div>
-        </details>
+        <div className="space-y-3">
+          <h3 className="text-sm font-medium">
+            Recorded footprint assumptions
+          </h3>
+          <RecordFields value={t.sustainability_assumptions} />
+        </div>
       )}
       {t.stage_timings.length > 0 && (
         <Table>
@@ -289,103 +410,13 @@ export function RunTelemetry({
           <TableBody>
             {t.stage_timings.map((stage, index) => (
               <TableRow key={index}>
-                <TableCell>{stage.stage}</TableCell>
+                <TableCell>{humanize(stage.stage)}</TableCell>
                 <TableCell>{stage.elapsed_ms}</TableCell>
               </TableRow>
             ))}
           </TableBody>
         </Table>
       )}
-      <div className="space-y-3">
-        <h3 className="text-sm font-medium">Persisted event trace</h3>
-        <p role="status" className="text-xs text-muted-foreground">
-          {connection}
-        </p>
-        {events.length ? (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Sequence / time</TableHead>
-                <TableHead>Event</TableHead>
-                <TableHead>Graph / node / tool</TableHead>
-                <TableHead>Provider / cache</TableHead>
-                <TableHead>Tokens in / out</TableHead>
-                <TableHead>Retry / latency</TableHead>
-                <TableHead>Outcome</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {events.map((event) => (
-                <TableRow key={event.sequence}>
-                  <TableCell>
-                    <p>{event.sequence}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {event.occurred_at}
-                    </p>
-                  </TableCell>
-                  <TableCell>{event.name}</TableCell>
-                  <TableCell>
-                    <p>{event.data.graph_name ?? 'Not recorded'}</p>
-                    <p className="text-xs">
-                      {event.data.node_name ?? event.data.stage ?? ''}
-                    </p>
-                    <p className="text-xs">
-                      {event.data.tool_name ?? event.data.tool ?? ''}
-                    </p>
-                  </TableCell>
-                  <TableCell>
-                    <p>{event.data.provider ?? 'Not recorded'}</p>
-                    <p className="text-xs">{event.data.model_id}</p>
-                    <p className="text-xs">
-                      {event.data.cache_hit === undefined ||
-                      event.data.cache_hit === null
-                        ? event.name === 'provider.cache_hit'
-                          ? 'Cache hit'
-                          : ''
-                        : event.data.cache_hit
-                          ? 'Cache hit'
-                          : 'Cache miss'}
-                    </p>
-                  </TableCell>
-                  <TableCell>
-                    {event.data.input_tokens ?? 'Not recorded'} /{' '}
-                    {event.data.output_tokens ?? 'Not recorded'}
-                  </TableCell>
-                  <TableCell>
-                    {event.data.retry_count ?? 'Not recorded'} /{' '}
-                    {event.data.latency_ms ??
-                      event.data.elapsed_ms ??
-                      'Not recorded'}{' '}
-                    ms
-                  </TableCell>
-                  <TableCell className="max-w-64 whitespace-normal">
-                    <p>
-                      {event.data.status ??
-                        event.data.terminal_state ??
-                        'Not recorded'}
-                    </p>
-                    {event.data.error_code && (
-                      <p className="text-xs text-amber-700">
-                        {event.data.error_code}
-                      </p>
-                    )}
-                    {event.data.ledger_event_id && (
-                      <LedgerLink id={event.data.ledger_event_id}>
-                        Source
-                      </LedgerLink>
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        ) : (
-          <EmptyState
-            title="No event trace returned"
-            detail="Persisted events are unavailable or this run has not recorded a step."
-          />
-        )}
-      </div>
     </section>
   )
 }
@@ -493,10 +524,7 @@ export function SustainabilitySection({ companyId }: { companyId: string }) {
                 <TableBody>
                   {data.benefit_facts.map((fact) => (
                     <TableRow key={fact.ledger_event_id}>
-                      <TableCell>
-                        {fact.target_type}
-                        <p className="font-mono text-xs">{fact.target_id}</p>
-                      </TableCell>
+                      <TableCell>{humanize(fact.target_type)}</TableCell>
                       <TableCell>{fact.avoided_kgco2e}</TableCell>
                       <TableCell>
                         <LedgerLink id={fact.ledger_event_id}>

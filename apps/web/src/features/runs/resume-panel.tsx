@@ -4,15 +4,16 @@ import { useId, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { z } from 'zod'
 import { QueryRefresh, QueryState } from '@/components/query-state'
+import { RecordSelect } from '@/components/record-select'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { humanize } from '@/lib/presentation'
+import { formatDate } from '@/lib/format'
 import { AgentContextForm, CommandError } from '@/features/agents/context-form'
 import {
   agentContextSchema,
   resumeRequestSchema,
 } from '@/features/agents/schemas'
-import { useWorkspaceActor } from '@/features/auth/use-workspace-actor'
 import type { WorkspaceScope } from '@/lib/workspace'
 import { apiRequest } from '@/services/api'
 import { approvalObserverOptions, runOptions } from './queries'
@@ -79,10 +80,9 @@ function ApprovalObserver({
   onResumed: () => void
 }) {
   const interrupt = run.pending_interrupt!
-  const actor = useWorkspaceActor()
-  const [actorId, setActorId] = useState('')
+  const requesterFieldId = useId()
+  const [actorId, setActorId] = useState(run.context.actor_id)
   const [invalid, setInvalid] = useState(false)
-  const fieldId = useId()
   const { command, submit } = useResume(run, onResumed)
   const query = useQuery({
     ...approvalObserverOptions(
@@ -114,23 +114,26 @@ function ApprovalObserver({
         Review exact approval
       </Link>
       <p className="text-sm text-muted-foreground">
-        Resume observes the decision recorded in Approvals. It cannot approve,
-        reject, purchase, or actuate equipment.
+        Continue this run after the review decision has been recorded.
       </p>
       <dl className="grid gap-2 text-xs sm:grid-cols-2">
         <div>
           <dt className="text-muted-foreground">Target</dt>
           <dd className="break-all">
-            {interrupt.target_type}: {interrupt.target_id}
+            {humanize(interrupt.target_type ?? 'Review')}
           </dd>
         </div>
         <div>
-          <dt className="text-muted-foreground">Preview hash</dt>
-          <dd className="break-all font-mono">{interrupt.preview_hash}</dd>
+          <dt className="text-muted-foreground">Review integrity</dt>
+          <dd>Exact preview recorded</dd>
         </div>
         <div>
           <dt className="text-muted-foreground">Expires</dt>
-          <dd>{interrupt.expires_at ?? 'Not recorded'}</dd>
+          <dd>
+            {interrupt.expires_at
+              ? formatDate(interrupt.expires_at)
+              : 'Not recorded'}
+          </dd>
         </div>
       </dl>
       <QueryState query={query}>
@@ -157,10 +160,8 @@ function ApprovalObserver({
               onSubmit={(event) => {
                 event.preventDefault()
                 if (!usable) return
-                const parsed = z
-                  .uuid()
-                  .safeParse(actor.actorId || actorId.trim())
-                if (!parsed.success) {
+                const parsed = z.uuid().safeParse(actorId)
+                if (!parsed.success || parsed.data !== run.context.actor_id) {
                   setInvalid(true)
                   return
                 }
@@ -174,7 +175,7 @@ function ApprovalObserver({
               }}
             >
               <p className="text-sm">
-                Recorded approval: <strong>{approval.status}</strong>
+                Recorded approval: <strong>{humanize(approval.status)}</strong>
               </p>
               {!bound && (
                 <p role="alert" className="text-sm text-amber-700">
@@ -191,37 +192,36 @@ function ApprovalObserver({
                   Approval preview is stale.
                 </p>
               )}
-              {!actor.actorId ? (
-                <div className="max-w-lg space-y-1.5">
-                  <Label htmlFor={fieldId} className="text-sm font-medium">
-                    Observer actor UUID (required)
-                  </Label>
-                  <Input
-                    id={fieldId}
-                    value={actorId}
-                    onChange={(event) => setActorId(event.target.value)}
-                    required
-                    disabled={command.isPending}
-                  />
-                </div>
-              ) : (
-                <p className="break-all text-xs">Observer: {actor.actorId}</p>
-              )}
+              <div className="space-y-1.5">
+                <Label htmlFor={requesterFieldId}>Requester</Label>
+                <RecordSelect
+                  id={requesterFieldId}
+                  kind="actors"
+                  value={actorId}
+                  placeholder="Choose the original requester"
+                  required
+                  disabled={command.isPending}
+                  onChange={(event) => {
+                    setActorId(event.target.value)
+                    setInvalid(false)
+                  }}
+                />
+              </div>
               {invalid && (
                 <p role="alert" className="text-sm text-amber-700">
-                  Enter a valid actor UUID.
+                  Choose the original requester before continuing this activity.
                 </p>
               )}
               <CommandError error={command.error} />
               {command.data && (
                 <p role="status" className="text-sm">
                   Recorded resume result:{' '}
-                  {command.data.terminal_state.replaceAll('_', ' ')}
+                  {humanize(command.data.terminal_state)}
                 </p>
               )}
               <Button
                 type="submit"
-                disabled={!usable || command.isPending}
+                disabled={!usable || command.isPending || !actorId}
                 variant="outline"
               >
                 <ArrowRight />
@@ -246,24 +246,17 @@ function Clarification({
   scope: WorkspaceScope
   onResumed: () => void
 }) {
-  const actor = useWorkspaceActor()
   const { command, submit } = useResume(run, onResumed)
   const [error, setError] = useState<Error | null>(null)
-  const mismatch = !!actor.actorId && actor.actorId !== run.context.actor_id
   return (
     <section
       aria-label="Clarification required"
       className="space-y-4 border-y py-5"
     >
       <h2 className="text-base font-semibold">Clarification required</h2>
-      <p className="break-all text-sm text-muted-foreground">
-        Resume actor must match the original requester: {run.context.actor_id}
+      <p className="text-sm text-muted-foreground">
+        The original requester must provide the missing information.
       </p>
-      {mismatch && (
-        <p role="alert" className="text-sm text-amber-700">
-          The current actor is not the original requester.
-        </p>
-      )}
       <AgentContextForm
         scope={scope}
         initialContext={agentContextSchema.parse(run.context)}
@@ -271,13 +264,12 @@ function Clarification({
         promptRequired={run.plan === null}
         missingFields={run.pending_interrupt!.missing_fields}
         pending={command.isPending}
-        disabled={mismatch}
         error={error ?? command.error}
         submitLabel="Resume with clarification"
         onSubmit={(context, query) => {
           if (context.actor_id !== run.context.actor_id) {
             setError(
-              new Error('The actor UUID must match the original requester.'),
+              new Error('Only the original requester can clarify this run.'),
             )
             return
           }

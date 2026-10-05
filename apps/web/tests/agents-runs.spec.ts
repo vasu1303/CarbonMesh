@@ -11,19 +11,18 @@ import {
   streamFixture,
 } from './agents-runs-fixtures'
 
-test('run landing opens a UUID without a history endpoint', async ({
+test('run landing requires a named selection before reading its saved result', async ({
   page,
 }) => {
   const calls = await mockAgents(page)
   await page.goto('/runs')
   await expect(
-    page.getByRole('heading', { name: 'Open run', exact: true }),
+    page.getByRole('heading', { name: 'Activity', exact: true }),
   ).toBeVisible()
-  await page.getByLabel('Run UUID', { exact: true }).fill('invalid')
   await page.getByRole('button', { name: 'Open run', exact: true }).click()
-  await expect(page.getByRole('alert')).toContainText('valid run UUID')
+  await expect(page.getByLabel('Saved run', { exact: true })).toHaveValue('')
   expect(calls.some((call) => call.path.startsWith('/api/runs'))).toBe(false)
-  await page.getByLabel('Run UUID', { exact: true }).fill(runId)
+  await page.getByLabel('Saved run', { exact: true }).selectOption({ label: 'Synthetic measurement run' })
   await page.getByRole('button', { name: 'Open run', exact: true }).click()
   await expect(page).toHaveURL(`/runs/${runId}`)
   await expect(
@@ -32,34 +31,25 @@ test('run landing opens a UUID without a history endpoint', async ({
   expect(calls.some((call) => call.path === '/api/runs')).toBe(false)
 })
 
-test('fresh procurement uses explicit actor and exact decimal strings only on submit', async ({
+test('prepared procurement uses a named requester and exact decimal constraints only on submit', async ({
   page,
 }) => {
   const calls = await mockAgents(page)
   await page.goto('/ask')
   await expect(
-    page.getByText('Synthetic data / API', { exact: true }),
+    page.getByText('Synthetic data', { exact: true }).first(),
   ).toBeVisible()
   await page
-    .getByLabel('Request', { exact: true })
+    .getByLabel('What would you like to find out?', { exact: true })
     .fill('Compare the scoped recycled aluminium products.')
-  await page.getByLabel('Input sections').selectOption('procurement')
-  await page.getByLabel('Source inputs').selectOption('fresh')
-  await page
-    .getByRole('combobox', { name: 'Select products' })
-    .selectOption(id(1501))
-  await page
-    .getByLabel('Material codes (required)', { exact: true })
-    .fill('AL-REC')
-  await page
-    .getByLabel('Quantity (kg) (required)')
-    .fill('10000.000000000000001')
-  await page.getByLabel('Procurement method UUID (required)').fill(id(801))
-  await page.getByLabel('Maximum cost increase (%) (required)').fill('2.50000')
-  await page.getByLabel('Maximum lead time (days) (required)').fill('14')
-  await page.getByLabel('Minimum circularity score (required)').fill('75.0000')
-  const actor = page.getByLabel('Actor UUID (required)', { exact: true })
-  if (await actor.count()) await actor.fill(actorId)
+  await page.getByLabel('Workflow').selectOption('procurement')
+  await page.getByLabel('Requester', { exact: true }).selectOption({ label: 'Synthetic analyst / active' })
+  await page.getByLabel('Materials (required)', { exact: true }).selectOption('AL')
+  await page.getByLabel('Procurement scenario (required)', { exact: true }).selectOption({ label: 'Synthetic aluminium comparison' })
+  await page.getByText('Commercial constraints', { exact: true }).click()
+  await page.getByLabel('Maximum cost increase (%)').fill('2.50000')
+  await page.getByLabel('Maximum lead time (days)').fill('14')
+  await page.getByLabel('Minimum circularity score').fill('75.0000')
   expect(
     calls.filter((call) => call.path === '/api/agent/requests'),
   ).toHaveLength(0)
@@ -74,11 +64,8 @@ test('fresh procurement uses explicit actor and exact decimal strings only on su
       site_id: id(2),
       reporting_period_id: id(3),
       grid_source_mode: 'live',
-      current_product_id: id(1501),
-      fresh_inputs: {
-        procurement_quantity: '10000.000000000000001',
-        procurement_method_id: id(801),
-      },
+      procurement_scenario_id: id(6001),
+      material_scope: ['AL'],
       constraints: {
         max_cost_increase_pct: '2.50000',
         max_lead_time_days: 14,
@@ -108,10 +95,11 @@ test('run facts, judgments, recorded trace and documented proxy remain separate'
   ).toHaveAttribute('href', `/ledger?event=${id(501)}`)
   await expect(
     page.getByRole('region', { name: 'Judgments', exact: true }),
-  ).toContainText('structured model plan')
+  ).toContainText('Structured model plan')
+  await page.getByText('Technical telemetry and footprint estimates', { exact: true }).click()
   await expect(
-    page.getByRole('region', { name: 'Run telemetry', exact: true }),
-  ).toContainText('run.completed')
+    page.getByRole('region', { name: 'Run timeline', exact: true }),
+  ).toContainText('Run completed')
   await expect(
     page.getByRole('region', { name: 'Run telemetry', exact: true }),
   ).toContainText('synthetic-test-model')
@@ -119,7 +107,7 @@ test('run facts, judgments, recorded trace and documented proxy remain separate'
     page.getByRole('region', { name: 'Company sustainability telemetry' }),
   ).toContainText('not measured realized savings')
   await expect(
-    page.getByRole('link', { name: 'Measurement', exact: true }),
+    page.getByRole('link', { name: 'Purchased-material emissions (synthetic)', exact: true }),
   ).toHaveAttribute('href', `/measurement/${id(201)}`)
   expect(
     await page.evaluate(
@@ -155,8 +143,8 @@ test('native event replay uses configured credentials and closes after a termina
   await mockAgents(page)
   await page.goto(`/runs/${runId}`)
   await expect(
-    page.getByRole('region', { name: 'Run telemetry', exact: true }),
-  ).toContainText('run.completed')
+    page.getByRole('region', { name: 'Run timeline', exact: true }),
+  ).toContainText('Run completed')
   const tracking = () =>
     page.evaluate(
       () =>
@@ -173,7 +161,7 @@ test('native event replay uses configured credentials and closes after a termina
   await expect.poll(async () => (await tracking()).closed).toBeGreaterThan(0)
   expect(
     (await tracking()).credentials.every(
-      (value) => value === (process.env.VITE_AUTH_REQUIRED !== 'false'),
+      (value) => value === false,
     ),
   ).toBe(true)
 })
@@ -219,9 +207,7 @@ test('clarification preserves retry keys, renews changed payload and never repla
   const form = page.getByRole('form', { name: 'Clarification form' })
   await expect(form).toBeVisible()
   await expect(form.getByLabel('Clarified request')).toHaveCount(0)
-  await form.getByLabel('Known measurements UUID').fill(id(201))
-  const actor = form.getByLabel('Actor UUID (required)', { exact: true })
-  if (await actor.count()) await actor.fill(actorId)
+  await form.getByLabel('Verified measurement', { exact: true }).selectOption({ label: 'Purchased-material emissions (synthetic)' })
   const submit = form.getByRole('button', { name: 'Resume with clarification' })
   await submit.click()
   await expect(form.getByRole('alert')).toContainText(
@@ -239,7 +225,7 @@ test('clarification preserves retry keys, renews changed payload and never repla
   expect(resumes[0].clarification as object).not.toHaveProperty(
     'clarified_query',
   )
-  await form.getByLabel('Known measurements UUID').fill(id(202))
+  await form.getByLabel('Verified measurement', { exact: true }).selectOption({ label: 'Earlier material emissions (synthetic)' })
   await submit.click()
   await expect.poll(() => resumes.length).toBe(3)
   expect(resumes[2].idempotency_key).not.toBe(resumes[1].idempotency_key)
@@ -292,8 +278,6 @@ test('approval observer only resumes after an exact recorded human decision', as
   approval.ledger_event_id = id(502)
   await panel.getByRole('button', { name: 'Refresh approval decision' }).click()
   await expect(submit).toBeEnabled()
-  const actor = panel.getByLabel('Observer actor UUID (required)')
-  if (await actor.count()) await actor.fill(actorId)
   await submit.click()
   await expect
     .poll(() => calls.filter((call) => call.path.endsWith('/resume')).length)
@@ -333,8 +317,8 @@ test('failed event stream falls back to reads and stops on terminal result', asy
     }
   })
   await page.goto(`/runs/${runId}`)
-  await expect(page.getByRole('region', { name: 'Run status' })).toContainText(
-    'running',
+  await expect(page.getByRole('region', { name: 'Run outcome' })).toContainText(
+    'Running',
   )
   await expect(
     page.getByText('Event stream unavailable; checking persisted status'),
@@ -342,8 +326,8 @@ test('failed event stream falls back to reads and stops on terminal result', asy
   await expect.poll(() => fallbackReads).toBeGreaterThan(0)
   // Mount/refetch reads must not complete the fixture before fallback is observed.
   completed = true
-  await expect(page.getByRole('region', { name: 'Run status' })).toContainText(
-    'success',
+  await expect(page.getByRole('region', { name: 'Run outcome' })).toContainText(
+    'Success',
   )
   await expect(
     page.getByText('Updates stopped at the recorded state'),
@@ -378,8 +362,8 @@ for (const state of [
     })
     await page.goto(`/runs/${runId}`)
     await expect(
-      page.getByRole('region', { name: 'Run status' }),
-    ).toContainText(state.replaceAll('_', ' '))
+      page.getByRole('region', { name: 'Run outcome' }),
+    ).toContainText(new RegExp(state.replaceAll('_', ' '), 'i'))
     await expect(
       page.getByRole('region', { name: 'Verified facts' }),
     ).toContainText('No verified facts recorded')
@@ -412,6 +396,7 @@ test('sustainability failure does not hide verified run facts', async ({
     }
   })
   await page.goto(`/runs/${runId}`)
+  await page.getByText('Technical telemetry and footprint estimates', { exact: true }).click()
   await expect(
     page.getByRole('region', { name: 'Company sustainability telemetry' }),
   ).toContainText('Projected benefits no longer match approved ledger facts.')

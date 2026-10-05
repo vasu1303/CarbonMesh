@@ -10,6 +10,8 @@ import {
   QueryRefresh,
   QueryState,
 } from '@/components/query-state'
+import { RecordSelect } from '@/components/record-select'
+import { displayText, humanize } from '@/lib/presentation'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
@@ -59,6 +61,7 @@ function AssuranceWorkspace({ scope }: { scope: WorkspaceScope }) {
       requirement_ids: [],
     },
   })
+  const watched = useWatch({ control: form.control })
   const selectedStandard = useWatch({
     control: form.control,
     name: 'standard_id',
@@ -77,7 +80,7 @@ function AssuranceWorkspace({ scope }: { scope: WorkspaceScope }) {
     mutationFn: (values: CreateDraftForm) => {
       const body = {
         ...values,
-        requested_by: actor.actorId || values.requested_by,
+        requested_by: values.requested_by,
         title: values.title || null,
         company_id: scope.company_id,
         site_id: scope.site_id,
@@ -110,9 +113,9 @@ function AssuranceWorkspace({ scope }: { scope: WorkspaceScope }) {
   return (
     <main className="min-w-0 space-y-6 px-5 py-6 sm:px-8">
       <header>
-        <h1 className="text-2xl font-semibold">Assurance</h1>
+        <h1 className="text-2xl font-semibold">Disclosures</h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          POC disclosure drafts; not assurance opinions or filings.
+          Disclosure drafts and supporting evidence. POC only.
         </p>
       </header>
       <WorkflowContext scope={scope} />
@@ -135,21 +138,19 @@ function AssuranceWorkspace({ scope }: { scope: WorkspaceScope }) {
               {page.items.map((item) => (
                 <details key={item.id} className="border-b py-3">
                   <summary className="cursor-pointer text-sm font-medium">
-                    {item.name}{' '}
+                    {displayText(item.name)}{' '}
                     <span className="text-muted-foreground">
-                      {item.code} / {item.version}
+                      Version {displayText(item.version)}
                     </span>
                   </summary>
                   <p className="my-3 text-sm text-muted-foreground">
-                    {item.description}
+                    {displayText(item.description)}
                   </p>
                   <ul className="divide-y">
                     {item.requirements.map((req) => (
                       <li key={req.id} className="space-y-1 py-3 text-sm">
-                        <p className="font-medium">
-                          {req.requirement_code}: {req.title}
-                        </p>
-                        <p>{req.description}</p>
+                        <p className="font-medium">{displayText(req.title)}</p>
+                        <p>{displayText(req.description)}</p>
                         <p className="text-xs text-muted-foreground">
                           {req.is_required ? 'Required' : 'Optional'} /{' '}
                           {req.is_active ? 'Active' : 'Inactive'} / Minimum
@@ -209,7 +210,7 @@ function AssuranceWorkspace({ scope }: { scope: WorkspaceScope }) {
                   .filter((item) => item.is_active)
                   .map((item) => (
                     <NativeSelectOption key={item.id} value={item.id}>
-                      {item.name} / {item.version}
+                      {displayText(item.name)} / {displayText(item.version)}
                     </NativeSelectOption>
                   ))}
               </NativeSelect>
@@ -238,8 +239,8 @@ function AssuranceWorkspace({ scope }: { scope: WorkspaceScope }) {
                       </NativeSelectOption>
                       {page.items.map((item) => (
                         <NativeSelectOption key={item.id} value={item.id}>
-                          {item.metric_key} / {item.value_kgco2e} {item.unit} /{' '}
-                          {item.id}
+                          {humanize(item.metric_key)} / {item.value_kgco2e}{' '}
+                          {item.unit}
                         </NativeSelectOption>
                       ))}
                     </NativeSelect>
@@ -282,11 +283,12 @@ function AssuranceWorkspace({ scope }: { scope: WorkspaceScope }) {
                 htmlFor="assurance-actor"
                 className="mb-2 block text-xs font-medium"
               >
-                Requesting actor UUID
+                Requested by
               </label>
-              <Input
+              <RecordSelect
+                kind="actors"
+                value={watched.requested_by ?? ''}
                 id="assurance-actor"
-                readOnly={!!actor.actorId}
                 required
                 {...form.register('requested_by')}
               />
@@ -338,7 +340,7 @@ function AssuranceWorkspace({ scope }: { scope: WorkspaceScope }) {
                       }}
                     />
                     <span>
-                      {item.requirement_code}: {item.title}
+                      {displayText(item.title)}
                       {item.is_required ? ' (required)' : ' (optional)'}
                     </span>
                   </Label>

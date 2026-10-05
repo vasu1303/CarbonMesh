@@ -120,7 +120,7 @@ export const ledgerFiltersSchema = z
   )
   .refine(
     (v) => !!v.audit_type === !!v.audit_id,
-    'An audit requires both an entity type and UUID.',
+    'Choose a record type and a record to audit.',
   )
 export const auditEntityTypes = [
   'measurement',
@@ -136,6 +136,9 @@ export const auditEntityTypes = [
   'data_source',
   'source_document',
   'evidence_item',
+  'disclosure_draft',
+  'dispatch_scenario',
+  'dispatch_forecast_snapshot',
 ] as const
 export type LedgerFilters = z.infer<typeof ledgerFiltersSchema>
 export type LedgerEvent = z.infer<typeof eventDetailSchema>

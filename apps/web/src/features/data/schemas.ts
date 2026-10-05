@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-export const uuid = z.uuid('Enter a valid UUID.')
+export const uuid = z.uuid('Select a record.')
 export const timestamp = z.iso.datetime({ offset: true })
 export const decimal = z
   .string()
@@ -85,7 +85,6 @@ export const metricsSchema = z.object({
 export const importFormSchema = z
   .object({
     kind: z.enum(['activity', 'suppliers']),
-    actor_id: uuid,
     source_name: z.string().trim().min(1, 'Source name is required.').max(160),
     metric_definition_id: optionalUuid,
     interval_start: z.union([timestamp, z.literal('')]),
@@ -99,7 +98,7 @@ export const importFormSchema = z
       ctx.addIssue({
         code: 'custom',
         path: ['metric_definition_id'],
-        message: 'Select a metric or enter its UUID.',
+        message: 'Select a metric.',
       })
     if (!!data.interval_start !== !!data.interval_end)
       ctx.addIssue({
@@ -128,13 +127,26 @@ export const importFormSchema = z
   })
 export type ImportForm = z.infer<typeof importFormSchema>
 
-export const sourceFormSchema = z.object({
-  actor_id: uuid,
-  source_name: z.string().trim().min(1).max(200),
-  evidence_type: z.string().trim().min(1, 'Evidence type is required.').max(40),
-  external_reference: z.string().trim().max(255),
-  is_synthetic: z.boolean(),
-})
+export const sourceFormSchema = z
+  .object({
+    actor_id: uuid,
+    source_name: z.string().trim().min(1).max(200),
+    evidence_type: z
+      .string()
+      .trim()
+      .min(1, 'Evidence type is required.')
+      .max(40),
+    custom_evidence_type: z.string().trim().max(40),
+    external_reference: z.string().trim().max(255),
+    is_synthetic: z.boolean(),
+  })
+  .refine(
+    (value) => value.evidence_type !== 'custom' || !!value.custom_evidence_type,
+    {
+      path: ['custom_evidence_type'],
+      message: 'Enter an evidence category.',
+    },
+  )
 export const sourceUploadSchema = z.object({
   replayed: z.boolean(),
   ingestion_method_id: z.string(),

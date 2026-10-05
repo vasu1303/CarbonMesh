@@ -7,6 +7,8 @@ import { Link, useOutletContext, useSearchParams } from 'react-router-dom'
 import { z } from 'zod'
 
 import { EmptyState, QueryRefresh, QueryState } from '@/components/query-state'
+import { RecordSelect } from '@/components/record-select'
+import { displayText, humanize } from '@/lib/presentation'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -21,12 +23,10 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { useWorkspaceActor } from '@/features/auth/use-workspace-actor'
 import type { WorkspaceScope } from '@/lib/workspace'
 import { apiRequest, retryApiQuery } from '@/services/api'
 import { readImportFile } from './files'
 import {
-  ActorField,
   CommandError,
   Field,
   MetricField,
@@ -71,16 +71,13 @@ function ImportInspection({ id }: { id: string }) {
         {(data) => (
           <div className="space-y-4">
             <div className="flex flex-wrap gap-2">
-              <Badge variant="outline">
-                {data.status.replaceAll('_', ' ')}
-              </Badge>
+              <Badge variant="outline">{humanize(data.status)}</Badge>
               <Badge variant="outline">
                 {data.is_synthetic
                   ? 'Synthetic source'
                   : 'Non-synthetic source'}
               </Badge>
             </div>
-            <p className="break-all font-mono text-xs">{data.import_id}</p>
             <dl className="grid gap-4 text-sm sm:grid-cols-3">
               {[
                 ['Accepted', data.accepted_count],
@@ -101,8 +98,22 @@ function ImportInspection({ id }: { id: string }) {
                 className="text-emerald-700 underline dark:text-emerald-400"
                 to={`/quality?import_id=${data.import_id}`}
               >
-                Review import issues
+                Review quality checks
               </Link>
+              {data.accepted_count > 0 && (
+                <Link
+                  className="text-emerald-700 underline dark:text-emerald-400"
+                  to={
+                    data.import_type === 'suppliers'
+                      ? '/procurement/suppliers'
+                      : '/measurement'
+                  }
+                >
+                  {data.import_type === 'suppliers'
+                    ? 'Browse supplier products'
+                    : 'Continue to measurement'}
+                </Link>
+              )}
               {data.source_document_id && (
                 <Link
                   className="text-emerald-700 underline dark:text-emerald-400"
@@ -126,11 +137,17 @@ function ImportInspection({ id }: { id: string }) {
                   {data.issues.map((issue) => (
                     <TableRow key={issue.id}>
                       <TableCell>{issue.row_number ?? 'Document'}</TableCell>
-                      <TableCell>{issue.severity}</TableCell>
-                      <TableCell>{issue.field_name ?? 'Document'}</TableCell>
+                      <TableCell>{humanize(issue.severity)}</TableCell>
+                      <TableCell>
+                        {humanize(issue.field_name ?? 'Document')}
+                      </TableCell>
                       <TableCell className="min-w-56 whitespace-normal">
-                        <span className="font-medium">{issue.code}</span>
-                        <p className="text-muted-foreground">{issue.message}</p>
+                        <span className="font-medium">
+                          {humanize(issue.code)}
+                        </span>
+                        <p className="text-muted-foreground">
+                          {displayText(issue.message)}
+                        </p>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -152,7 +169,6 @@ function ImportInspection({ id }: { id: string }) {
 
 export function ImportPanel() {
   const scope = useOutletContext<WorkspaceScope>()
-  const actor = useWorkspaceActor()
   const client = useQueryClient()
   const [params, setParams] = useSearchParams()
   const file = useRef<HTMLInputElement>(null)
@@ -162,7 +178,6 @@ export function ImportPanel() {
     resolver: zodResolver(importFormSchema),
     defaultValues: {
       kind: 'activity',
-      actor_id: actor.actorId,
       source_name: '',
       metric_definition_id: '',
       interval_start: '',
@@ -171,12 +186,14 @@ export function ImportPanel() {
       is_synthetic: false,
     },
   })
+  const watched = useWatch({ control: form.control })
   const open = useForm<z.infer<typeof openSchema>>({
     resolver: zodResolver(openSchema),
     defaultValues: {
       import_id: params.get('import') ?? params.get('import_id') ?? '',
     },
   })
+  const openValues = useWatch({ control: open.control })
   const kind = useWatch({ control: form.control, name: 'kind' })
   const id = params.get('import') ?? params.get('import_id')
   function openImport(importId: string) {
@@ -229,7 +246,6 @@ export function ImportPanel() {
               ...body,
               idempotency_key: idempotencyKey({
                 kind: values.kind,
-                actor_id: values.actor_id,
                 ...body,
               }),
             },
@@ -251,7 +267,9 @@ export function ImportPanel() {
   return (
     <>
       <section aria-label="New import" className={sectionClass}>
-        <h2 className="text-sm font-semibold">Import activity or suppliers</h2>
+        <h2 className="text-sm font-semibold">
+          Upload activity or supplier data
+        </h2>
         <form
           onSubmit={(event) => {
             void form.handleSubmit(submit)(event)
@@ -280,10 +298,6 @@ export function ImportPanel() {
                   maxLength={160}
                 />
               </Field>
-              <ActorField
-                registration={form.register('actor_id')}
-                error={form.formState.errors.actor_id?.message}
-              />
               <Field label="Import file">
                 <Input
                   ref={file}
@@ -292,44 +306,64 @@ export function ImportPanel() {
                   required
                 />
               </Field>
-              <Field
-                label="External reference (optional)"
-                error={form.formState.errors.external_reference?.message}
-              >
-                <Input
-                  {...form.register('external_reference')}
-                  maxLength={255}
-                />
-              </Field>
               {kind === 'activity' && (
                 <MetricField
+                  value={watched.metric_definition_id ?? ''}
                   registration={form.register('metric_definition_id')}
                   error={form.formState.errors.metric_definition_id?.message}
                 />
               )}
             </div>
-            {kind === 'activity' && (
+            <details className="space-y-3 text-sm">
+              <summary className="cursor-pointer font-medium">
+                Additional upload details
+              </summary>
               <div className={formGrid}>
                 <Field
-                  label="Hourly interval start (optional, ISO offset)"
-                  error={form.formState.errors.interval_start?.message}
+                  label="Source reference (optional)"
+                  error={form.formState.errors.external_reference?.message}
                 >
                   <Input
-                    {...form.register('interval_start')}
-                    placeholder="YYYY-MM-DDTHH:00:00Z"
+                    {...form.register('external_reference')}
+                    maxLength={255}
                   />
                 </Field>
-                <Field
-                  label="Hourly interval end (exclusive, ISO offset)"
-                  error={form.formState.errors.interval_end?.message}
-                >
-                  <Input
-                    {...form.register('interval_end')}
-                    placeholder="YYYY-MM-DDTHH:00:00Z"
-                  />
-                </Field>
+                {kind === 'activity' && (
+                  <>
+                    <Field
+                      label="Interval start (UTC, optional)"
+                      error={form.formState.errors.interval_start?.message}
+                    >
+                      <Input
+                        type="datetime-local"
+                        step={3600}
+                        {...form.register('interval_start', {
+                          setValueAs: (value: string) =>
+                            value && !value.endsWith('Z')
+                              ? new Date(value + 'Z').toISOString()
+                              : value,
+                        })}
+                      />
+                    </Field>
+                    <Field
+                      label="Interval end (UTC, optional)"
+                      error={form.formState.errors.interval_end?.message}
+                    >
+                      <Input
+                        type="datetime-local"
+                        step={3600}
+                        {...form.register('interval_end', {
+                          setValueAs: (value: string) =>
+                            value && !value.endsWith('Z')
+                              ? new Date(value + 'Z').toISOString()
+                              : value,
+                        })}
+                      />
+                    </Field>
+                  </>
+                )}
               </div>
-            )}
+            </details>
             <div className="flex items-start gap-2">
               <Controller
                 name="is_synthetic"
@@ -356,54 +390,12 @@ export function ImportPanel() {
                 This file contains synthetic data
               </Label>
             </div>
-            <div className="space-y-2 text-xs text-muted-foreground">
-              <p>
-                Server limits: CSV or JSON, UTF-8, maximum 5 MiB and 5,000 rows.
-                Row validation and accepted/rejected counts are returned by the
-                server.
-              </p>
-              {!actor.authenticated && (
-                <p>
-                  Imports record an actor only for authenticated sessions. This
-                  API does not accept an actor in the import payload.
-                </p>
-              )}
-            </div>
-            <details className="text-xs">
-              <summary className="cursor-pointer font-medium">
-                Required source columns
-              </summary>
-              <div className="mt-3 space-y-2 text-muted-foreground">
-                {kind === 'activity' ? (
-                  <>
-                    <p>
-                      Materials: material_code, quantity, unit. Optional
-                      activity_date, unit_cost with currency, and
-                      supplier_product_id or supplier_code with
-                      supplier_product_code.
-                    </p>
-                    <p>
-                      Hourly electricity: timestamp with UTC offset at an exact
-                      UTC hour, quantity or kwh. Units default to kWh. Explicit
-                      interval boundaries make missing hours reviewable.
-                    </p>
-                  </>
-                ) : (
-                  <p>
-                    supplier_code, supplier_name, supplier_country_code,
-                    product_code, product_name, material_code, category,
-                    pcf_kgco2e_per_unit, circularity_score,
-                    recycled_content_pct, recyclable_pct,
-                    evidence_quality_score, lead_time_days, unit_cost, currency,
-                    effective_from, evidence_text. Optional pcf_unit defaults to
-                    kgCO2e/kg.
-                  </p>
-                )}
-              </div>
-            </details>
+            <p className="text-xs text-muted-foreground">
+              CSV or JSON, up to 5 MiB.
+            </p>
             <Button type="submit" disabled={command.pending}>
               <FileUp />
-              {command.pending ? 'Importing...' : 'Import file'}
+              {command.pending ? 'Importing...' : 'Upload and check'}
             </Button>
           </fieldset>
           <CommandError error={command.error} />
@@ -417,10 +409,15 @@ export function ImportPanel() {
         >
           <div className="min-w-0 basis-80 grow">
             <Field
-              label="Import UUID"
+              label="Import"
               error={open.formState.errors.import_id?.message}
             >
-              <Input {...open.register('import_id')} required />
+              <RecordSelect
+                kind="imports"
+                {...open.register('import_id')}
+                value={openValues.import_id ?? ''}
+                required
+              />
             </Field>
           </div>
           <Button type="submit" className="mt-6" variant="outline">
@@ -434,13 +431,15 @@ export function ImportPanel() {
           <ImportInspection key={id} id={id} />
         ) : (
           <CommandError
-            error={new Error('The import URL requires a valid UUID.')}
+            error={
+              new Error('This import link is invalid. Select an import above.')
+            }
           />
         )
       ) : (
         <EmptyState
           title="No import selected"
-          detail="Import results are available by their persisted import identifier."
+          detail="No upload results to show."
         />
       )}
     </>

@@ -6,6 +6,7 @@ import {
 } from '@tanstack/react-query'
 import {
   AlertTriangle,
+  ArrowRight,
   ClipboardCheck,
   Database,
   Leaf,
@@ -16,12 +17,12 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { lazy, Suspense, useState, type ReactNode } from 'react'
+import { Link } from 'react-router-dom'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { ApprovalsPanel } from './components/approvals-panel'
-import { GridPanel } from './components/grid-panel'
 import { LedgerPanel } from './components/ledger-panel'
 import { MeasurementsPanel } from './components/measurements-panel'
 import { QualityPanel } from './components/quality-panel'
@@ -62,44 +63,13 @@ function SummaryCard<T>({
   )
 }
 
-function InventoryItem({
-  scope,
-  kind,
-  label,
-  icon: Icon,
-}: {
-  scope: DashboardScope
-  kind: 'suppliers' | 'products' | 'standards' | 'loads'
-  label: string
-  icon: LucideIcon
-}) {
-  const options = dashboardQueries[kind](scope)
-  const query = useQuery(options)
-  return (
-    <div className="min-w-0 border-t py-4">
-      <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
-        <Icon className="size-4" />
-        {label}
-      </div>
-      <QueryState query={query}>
-        {(data) => (
-          <>
-            <p className="font-mono text-2xl font-semibold tabular-nums">
-              {data.total}
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {data.total === 0
-                ? 'No active records'
-                : kind === 'loads'
-                  ? 'Selected site'
-                  : 'Company-wide'}
-            </p>
-          </>
-        )}
-      </QueryState>
-    </div>
-  )
-}
+const workflow = [
+  { label: 'Upload data', path: '/data', icon: Database },
+  { label: 'Check data', path: '/quality', icon: AlertTriangle },
+  { label: 'Measure', path: '/measurement', icon: Leaf },
+  { label: 'Plan', path: '/procurement/suppliers', icon: PackageSearch },
+  { label: 'Review', path: '/approvals', icon: ClipboardCheck },
+]
 
 export function DashboardPage({ scope }: { scope: DashboardScope }) {
   const context = useQuery(dashboardQueries.context(scope))
@@ -122,20 +92,29 @@ export function DashboardPage({ scope }: { scope: DashboardScope }) {
           </p>
           <h1 className="text-2xl font-semibold">Overview</h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            Measurement, evidence and decisions
+            Your emissions, open checks and decisions.
           </p>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={fetching}
-          onClick={() =>
-            void client.invalidateQueries({ queryKey: dashboardKey })
-          }
-        >
-          <RefreshCw className={fetching ? 'motion-safe:animate-spin' : ''} />
-          Refresh data
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button asChild size="sm">
+            <Link to="/data">
+              <Database />
+              Upload data
+            </Link>
+          </Button>
+          <Button
+            variant="outline"
+            size="icon"
+            aria-label="Refresh dashboard"
+            title="Refresh dashboard"
+            disabled={fetching}
+            onClick={() =>
+              void client.invalidateQueries({ queryKey: dashboardKey })
+            }
+          >
+            <RefreshCw className={fetching ? 'motion-safe:animate-spin' : ''} />
+          </Button>
+        </div>
       </div>
 
       <section
@@ -159,12 +138,31 @@ export function DashboardPage({ scope }: { scope: DashboardScope }) {
           )}
         </QueryState>
         {!context.data && (
-          <p className="mt-2 break-all text-xs text-muted-foreground">
-            Configured context: {scope.site_id}. Synthetic demo configuration;
-            provenance is unverified until context resolves.
+          <p className="mt-2 text-xs text-muted-foreground">
+            Workspace details are unavailable. Reporting data will load
+            independently.
           </p>
         )}
       </section>
+
+      <nav
+        aria-label="Carbon workflow"
+        className="mx-5 mb-6 grid grid-cols-2 gap-2 border-b pb-5 sm:mx-8 sm:grid-cols-5"
+      >
+        {workflow.map(({ label, path, icon: Icon }, index) => (
+          <Link
+            key={path}
+            to={path}
+            className="group flex min-w-0 items-center gap-2 rounded-md px-2 py-3 text-sm font-medium transition-colors hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
+          >
+            <span className="flex size-7 shrink-0 items-center justify-center rounded-full border text-xs text-muted-foreground">
+              {index + 1}
+            </span>
+            <span className="min-w-0 flex-1">{label}</span>
+            <Icon className="size-4 shrink-0 text-muted-foreground" />
+          </Link>
+        ))}
+      </nav>
 
       <div className="grid grid-cols-1 gap-3 px-5 pb-6 sm:grid-cols-2 sm:px-8 xl:grid-cols-4">
         <SummaryCard
@@ -183,7 +181,7 @@ export function DashboardPage({ scope }: { scope: DashboardScope }) {
                   {formatDecimal(data.items[0].value_kgco2e)}
                 </Button>
                 <p className="mt-2 text-xs text-muted-foreground">
-                  kgCO2e / {data.total} verified results in context
+                  kgCO2e / latest verified measurement
                 </p>
               </>
             ) : (
@@ -207,7 +205,7 @@ export function DashboardPage({ scope }: { scope: DashboardScope }) {
                 {data.total}
               </p>
               <p className="mt-2 text-xs text-muted-foreground">
-                Company-wide / all severities
+                Awaiting review across your company
               </p>
             </>
           )}
@@ -223,7 +221,7 @@ export function DashboardPage({ scope }: { scope: DashboardScope }) {
                 {data.total}
               </p>
               <p className="mt-2 text-xs text-muted-foreground">
-                Company-wide / includes expired previews
+                Pending review, including expired previews
               </p>
             </>
           )}
@@ -248,12 +246,50 @@ export function DashboardPage({ scope }: { scope: DashboardScope }) {
 
       <div className="border-y bg-card lg:grid lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)] lg:divide-x">
         <MeasurementsPanel scope={scope} onInspect={inspectMeasurement} />
-        <div className="border-t lg:border-t-0">
-          <GridPanel
-            scope={scope}
-            onInspect={(item) => setSelection({ kind: 'grid', item })}
-          />
-        </div>
+        <section
+          aria-labelledby="workflows-title"
+          className="min-w-0 border-t p-5 sm:p-6 lg:border-t-0"
+        >
+          <h2 id="workflows-title" className="mb-2 text-sm font-semibold">
+            Continue your work
+          </h2>
+          <div className="divide-y">
+            {[
+              {
+                title: 'Review data checks',
+                path: '/quality',
+                icon: AlertTriangle,
+              },
+              { title: 'Measure emissions', path: '/measurement', icon: Leaf },
+              {
+                title: 'Compare suppliers',
+                path: '/procurement/suppliers',
+                icon: PackageSearch,
+              },
+              {
+                title: 'Prepare a disclosure',
+                path: '/assurance',
+                icon: ShieldCheck,
+              },
+              { title: 'Plan energy use', path: '/dispatch', icon: Zap },
+              {
+                title: 'Review decisions',
+                path: '/approvals',
+                icon: ClipboardCheck,
+              },
+            ].map(({ title, path, icon: Icon }) => (
+              <Link
+                key={path}
+                to={path}
+                className="flex items-center gap-3 py-4 text-sm transition-colors hover:text-emerald-700 dark:hover:text-emerald-400"
+              >
+                <Icon className="size-4 text-muted-foreground" />
+                <span className="flex-1">{title}</span>
+                <ArrowRight className="size-4" />
+              </Link>
+            ))}
+          </div>
+        </section>
       </div>
       <div className="border-b bg-card lg:grid lg:grid-cols-2 lg:divide-x">
         <ApprovalsPanel
@@ -264,49 +300,15 @@ export function DashboardPage({ scope }: { scope: DashboardScope }) {
           <QualityPanel scope={scope} />
         </div>
       </div>
-      <div className="border-b bg-card lg:grid lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)] lg:divide-x">
+      <details className="border-b bg-card">
+        <summary className="cursor-pointer px-5 py-4 text-sm font-medium sm:px-6">
+          Recent activity
+        </summary>
         <LedgerPanel
           scope={scope}
           onInspect={(id) => setSelection({ kind: 'event', id })}
         />
-        <section
-          aria-labelledby="inputs-title"
-          className="min-w-0 border-t p-5 sm:p-6 lg:border-t-0"
-        >
-          <h2 id="inputs-title" className="text-sm font-semibold">
-            Available inputs
-          </h2>
-          <p className="mt-1 mb-4 text-xs text-muted-foreground">
-            Active source catalogs, not completed workflow results
-          </p>
-          <div className="grid grid-cols-2 gap-x-6">
-            <InventoryItem
-              scope={scope}
-              kind="suppliers"
-              label="Suppliers"
-              icon={PackageSearch}
-            />
-            <InventoryItem
-              scope={scope}
-              kind="products"
-              label="Supplier products"
-              icon={Database}
-            />
-            <InventoryItem
-              scope={scope}
-              kind="standards"
-              label="Assurance standards"
-              icon={ShieldCheck}
-            />
-            <InventoryItem
-              scope={scope}
-              kind="loads"
-              label="Flexible loads"
-              icon={Zap}
-            />
-          </div>
-        </section>
-      </div>
+      </details>
       <p className="px-5 py-4 text-xs text-muted-foreground sm:px-8">
         Dispatch is advisory only. Procurement projections are not realized
         reductions.

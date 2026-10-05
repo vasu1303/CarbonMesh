@@ -4,21 +4,15 @@ import { lazy, Suspense, useState } from 'react'
 import { useOutletContext, useSearchParams } from 'react-router-dom'
 import { z } from 'zod'
 
-import {
-  EmptyState,
-  PageControls,
-  QueryRefresh,
-  QueryState,
-} from '@/components/query-state'
+import { EmptyState, PageControls, QueryState } from '@/components/query-state'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import type { WorkspaceScope } from '@/lib/workspace'
+import { displayText, humanize } from '@/lib/presentation'
 import { RecordsTable } from './components/records-table'
-import { StatusBadge } from './components/status-badge'
 import { measurementKey, measurementQueries } from './queries'
 import { measurementFiltersSchema, type MeasurementStatus } from './schemas'
 
@@ -33,62 +27,6 @@ const statuses: MeasurementStatus[] = [
   'superseded',
   'unsupported',
 ]
-
-function StatusCount({
-  scope,
-  status,
-  category,
-  onSelect,
-}: {
-  scope: WorkspaceScope
-  status: MeasurementStatus
-  category: string
-  onSelect: () => void
-}) {
-  const query = useQuery(
-    measurementQueries.list(scope, {
-      status,
-      category,
-      limit: 1,
-      offset: 0,
-    }),
-  )
-  return (
-    <Card className="min-w-0 rounded-lg">
-      <CardHeader className="flex flex-row items-center justify-between pb-3">
-        <CardTitle>
-          <StatusBadge status={status} />
-        </CardTitle>
-        <QueryRefresh query={query} label={`${status} count`} />
-      </CardHeader>
-      <CardContent>
-        <QueryState query={query}>
-          {(data) => (
-            <>
-              <Button
-                variant="link"
-                className="h-auto p-0 font-mono text-2xl font-semibold tabular-nums"
-                aria-label={`Show ${status} records`}
-                onClick={onSelect}
-              >
-                {data.total}
-              </Button>
-              <p className="mt-2 text-xs text-muted-foreground">
-                {status === 'verified'
-                  ? 'Verified by the recorded method'
-                  : status === 'draft'
-                    ? 'Not yet verified'
-                    : status === 'superseded'
-                      ? 'Historical, replaced results'
-                      : 'Not usable as verified facts'}
-              </p>
-            </>
-          )}
-        </QueryState>
-      </CardContent>
-    </Card>
-  )
-}
 
 export default function MeasurementsPage() {
   const [calculating, setCalculating] = useState(false)
@@ -139,7 +77,7 @@ export default function MeasurementsPage() {
           <p className="mb-2 text-xs font-medium text-muted-foreground">
             Carbon ledger
           </p>
-          <h1 className="text-2xl font-semibold">Measurements</h1>
+          <h1 className="text-2xl font-semibold">Emissions</h1>
           <p className="mt-2 text-sm text-muted-foreground">
             Recorded emissions, confidence and source evidence
           </p>
@@ -171,31 +109,24 @@ export default function MeasurementsPage() {
         <QueryState query={context}>
           {(data) => (
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
-              <span className="font-medium">{data.company.name}</span>
-              <span className="text-muted-foreground">{data.site.name}</span>
+              <span className="font-medium">
+                {displayText(data.company.name)}
+              </span>
               <span className="text-muted-foreground">
-                {data.reporting_period.name}
+                {displayText(data.site.name)}
+              </span>
+              <span className="text-muted-foreground">
+                {displayText(data.reporting_period.name)}
               </span>
               <Badge variant="outline" className="sm:ml-auto">
                 {data.company.is_synthetic
-                  ? 'Synthetic data / API'
-                  : 'Non-synthetic data / API'}
+                  ? 'Synthetic data'
+                  : 'Non-synthetic data'}
               </Badge>
             </div>
           )}
         </QueryState>
       </section>
-      <div className="grid grid-cols-1 gap-3 px-5 pb-6 sm:grid-cols-2 sm:px-8 xl:grid-cols-4">
-        {statuses.map((status) => (
-          <StatusCount
-            key={status}
-            scope={scope}
-            status={status}
-            category={filters.category}
-            onSelect={() => update({ status })}
-          />
-        ))}
-      </div>
       <section
         aria-label="Measurement records"
         className="min-w-0 border-y bg-card px-5 py-5 sm:px-8"
@@ -243,7 +174,7 @@ export default function MeasurementsPage() {
               <NativeSelectOption value="">All categories</NativeSelectOption>
               {categoryOptions.map((item) => (
                 <NativeSelectOption key={item.id} value={item.key}>
-                  {item.name}
+                  {displayText(item.name)}
                 </NativeSelectOption>
               ))}
               {filters.category &&
@@ -251,7 +182,7 @@ export default function MeasurementsPage() {
                   (item) => item.key === filters.category,
                 ) && (
                   <NativeSelectOption value={filters.category}>
-                    {filters.category}
+                    {humanize(filters.category)}
                   </NativeSelectOption>
                 )}
             </NativeSelect>

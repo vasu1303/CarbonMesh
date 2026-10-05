@@ -2,12 +2,13 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, Download, ShieldCheck } from 'lucide-react'
 import { useEffect } from 'react'
-import { useForm } from 'react-hook-form'
+import { useForm, useWatch } from 'react-hook-form'
 import { Link, useOutletContext, useParams } from 'react-router-dom'
 import { z } from 'zod'
 import { EmptyState, QueryRefresh, QueryState } from '@/components/query-state'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { RecordSelect } from '@/components/record-select'
+import { displayText, humanize } from '@/lib/presentation'
 import { useWorkspaceActor } from '@/features/auth/use-workspace-actor'
 import type { WorkspaceScope } from '@/lib/workspace'
 import { ApiError, apiRequest } from '@/services/api'
@@ -37,7 +38,7 @@ function AtomicClaim({ claim }: { claim: Claim }) {
     >
       <div className="flex flex-wrap items-center gap-2">
         <h3 className="text-sm font-semibold">
-          {claim.requirement_code ?? claim.claim_type}
+          {humanize(claim.requirement_code ?? claim.claim_type)}
         </h3>
         <StateBadge state={claim.support_status} />
         <span className="text-xs text-muted-foreground">
@@ -45,16 +46,8 @@ function AtomicClaim({ claim }: { claim: Claim }) {
         </span>
       </div>
       <p className="whitespace-pre-wrap break-words text-sm">
-        {claim.rendered_text ?? 'No supported claim text.'}
+        {displayText(claim.rendered_text ?? 'No supported claim text.')}
       </p>
-      {!claim.rendered_text && (
-        <details className="text-sm">
-          <summary className="cursor-pointer text-muted-foreground">
-            Unbound claim template
-          </summary>
-          <p className="mt-2 break-words">{claim.claim_template}</p>
-        </details>
-      )}
       <ValidationReasons details={claim.validation_details} />
       {claim.ledger_event_id && (
         <p className="text-xs">
@@ -63,7 +56,7 @@ function AtomicClaim({ claim }: { claim: Claim }) {
       )}
       {claim.fact_binding_id && (
         <p className="break-all text-xs text-muted-foreground">
-          Fact binding: {claim.fact_binding_id}
+          Verified fact linked
         </p>
       )}
       <h4 className="text-xs font-semibold">Citations</h4>
@@ -75,11 +68,13 @@ function AtomicClaim({ claim }: { claim: Claim }) {
           <div className="flex flex-wrap items-center gap-2">
             <StateBadge state={citation.validation_status} />
             <span className="break-words">
-              {citation.evidence?.source_filename ?? 'Ledger citation'}
+              {displayText(
+                citation.evidence?.source_filename ?? 'Ledger citation',
+              )}
             </span>
           </div>
           <p className="break-words text-xs">
-            {citation.locator ?? citation.evidence?.locator}
+            {displayText(citation.locator ?? citation.evidence?.locator)}
           </p>
           {citation.ledger_event_id && (
             <LedgerLink id={citation.ledger_event_id}>
@@ -88,7 +83,7 @@ function AtomicClaim({ claim }: { claim: Claim }) {
           )}
           {citation.evidence_item_id && (
             <p className="break-all text-xs text-muted-foreground">
-              Evidence: {citation.evidence_item_id}
+              Supporting evidence linked
             </p>
           )}
           <ValidationReasons details={citation.validation_details} />
@@ -105,10 +100,6 @@ function AtomicClaim({ claim }: { claim: Claim }) {
               </Link>
               <dl className="mt-3 grid gap-3 sm:grid-cols-2">
                 <HashValue
-                  label="Source document"
-                  value={citation.evidence.source_document_id}
-                />
-                <HashValue
                   label="Source checksum"
                   value={citation.evidence.source_document_checksum}
                 />
@@ -116,10 +107,14 @@ function AtomicClaim({ claim }: { claim: Claim }) {
                   label="Evidence checksum"
                   value={citation.evidence.checksum}
                 />
-                <HashValue
-                  label="Evidence type"
-                  value={citation.evidence.evidence_type}
-                />
+                <div>
+                  <dt className="text-xs text-muted-foreground">
+                    Evidence type
+                  </dt>
+                  <dd className="text-xs">
+                    {humanize(citation.evidence.evidence_type)}
+                  </dd>
+                </div>
               </dl>
             </details>
           )}
@@ -129,7 +124,7 @@ function AtomicClaim({ claim }: { claim: Claim }) {
   )
 }
 
-const actorSchema = z.object({ requested_by: z.uuid() })
+const actorSchema = z.object({ requested_by: z.uuid('Select a reviewer.') })
 function DraftContent({
   draft,
   scope,
@@ -146,6 +141,7 @@ function DraftContent({
     resolver: zodResolver(actorSchema),
     defaultValues: { requested_by: actor.actorId },
   })
+  const watched = useWatch({ control: form.control })
   useEffect(() => {
     if (actor.actorId) form.setValue('requested_by', actor.actorId)
   }, [actor.actorId, form])
@@ -157,7 +153,7 @@ function DraftContent({
     mutationFn: ({ requested_by }: z.infer<typeof actorSchema>) => {
       const body = {
         company_id: scope.company_id,
-        requested_by: actor.actorId || requested_by,
+        requested_by,
         expected_context_hash: draft.context_hash,
       }
       return apiRequest(
@@ -208,7 +204,7 @@ function DraftContent({
       )
       const link = document.createElement('a')
       link.href = url
-      link.download = `assurance-${draft.id}-evidence-pack.json`
+      link.download = 'disclosure-evidence-pack.json'
       link.click()
       setTimeout(() => URL.revokeObjectURL(url), 1000)
     },
@@ -219,11 +215,14 @@ function DraftContent({
   return (
     <>
       <header className="space-y-3">
-        <h1 className="break-words text-2xl font-semibold">{draft.title}</h1>
+        <h1 className="break-words text-2xl font-semibold">
+          {displayText(draft.title)}
+        </h1>
         <div className="flex flex-wrap items-center gap-3">
           <StateBadge state={draft.status} />
           <span className="text-sm text-muted-foreground">
-            {draft.standard.code} / {draft.standard.version}
+            {displayText(draft.standard.name)} /{' '}
+            {displayText(draft.standard.version)}
           </span>
           <span className="text-sm">Version {draft.version}</span>
         </div>
@@ -273,12 +272,13 @@ function DraftContent({
               htmlFor="validate-actor"
               className="mb-2 block text-xs font-medium"
             >
-              Validating actor UUID
+              Reviewed by
             </label>
-            <Input
+            <RecordSelect
+              kind="actors"
+              value={watched.requested_by ?? ''}
               id="validate-actor"
               required
-              readOnly={!!actor.actorId}
               {...form.register('requested_by')}
             />
             <FieldError message={form.formState.errors.requested_by?.message} />
@@ -382,23 +382,25 @@ function DraftContent({
             <div className="flex flex-wrap items-center gap-2">
               <StateBadge state={gap.status} />
               <span className="text-xs font-medium">
-                {gap.severity} / {gap.code}
+                {humanize(gap.severity)} / {humanize(gap.code)}
               </span>
             </div>
-            <p className="text-sm">{gap.message}</p>
+            <p className="text-sm">{displayText(gap.message)}</p>
             <ValidationReasons details={gap.details} />
           </article>
         ))}
       </section>
       <details className="border-t pt-4">
         <summary className="cursor-pointer text-sm font-medium">
-          Record identity and hashes
+          Record integrity
         </summary>
         <dl className="mt-4 grid gap-4 sm:grid-cols-2">
-          <HashValue label="Draft" value={draft.id} />
           <HashValue label="Context hash" value={draft.context_hash} />
           <HashValue label="Payload hash" value={draft.payload_hash} />
-          <HashValue label="Updated" value={draft.updated_at} />
+          <div>
+            <dt className="text-xs text-muted-foreground">Updated</dt>
+            <dd className="text-xs">{draft.updated_at}</dd>
+          </div>
         </dl>
       </details>
     </>
@@ -411,7 +413,7 @@ function DraftWorkspace({ scope, id }: { scope: WorkspaceScope; id: string }) {
       <div className="flex items-center justify-between">
         <Link to="/assurance" className="flex items-center gap-2 text-sm">
           <ArrowLeft className="size-4" />
-          Assurance
+          Disclosures
         </Link>
         <QueryRefresh query={query} label="draft" />
       </div>
@@ -436,7 +438,7 @@ export default function AssuranceDraftPage() {
       <main className="px-5 py-6 sm:px-8">
         <h1 className="text-xl font-semibold">Invalid draft identifier</h1>
         <Link to="/assurance" className="text-sm underline">
-          Return to Assurance
+          Return to Disclosures
         </Link>
       </main>
     )

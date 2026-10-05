@@ -20,6 +20,7 @@ from app.api.routes.measurements import router as measurements_router
 from app.api.routes.procurement import router as procurement_router
 from app.api.routes.semantic import router as semantic_router
 from app.api.routes.sources import router as sources_router
+from app.api.routes.workspace import router as workspace_router
 from app.core.auth import authorize_request
 
 api_router = APIRouter(dependencies=[Depends(authorize_request)])
@@ -43,3 +44,4 @@ api_router.include_router(approvals_router, tags=["approvals"])
 api_router.include_router(audit_router, tags=["audit"])
 api_router.include_router(integrations_router, tags=["integrations"])
 api_router.include_router(ledger_router)
+api_router.include_router(workspace_router)

@@ -3,7 +3,8 @@ import { ArrowRight, Building2, MapPin } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { formatDate, humanize } from '@/lib/format'
+import { formatDate } from '@/lib/format'
+import { displayText, humanize } from '@/lib/presentation'
 import type { Supplier } from '../schemas'
 
 export function SupplierList({
@@ -20,19 +21,16 @@ export function SupplierList({
           key={supplier.id}
           className="min-w-0 rounded-lg shadow-none transition-colors hover:border-foreground/25"
         >
-            <CardHeader className="min-w-0 gap-3 wrap-anywhere">
+          <CardHeader className="min-w-0 gap-3 wrap-anywhere">
             <div className="flex items-center justify-between gap-3">
               <Building2 className="size-5 text-muted-foreground" />
               <Badge variant="outline" className="capitalize">
                 {humanize(supplier.status)}
               </Badge>
             </div>
-              <CardTitle className="min-w-0 text-base leading-6">
-              {supplier.name}
+            <CardTitle className="min-w-0 text-base leading-6">
+              {displayText(supplier.name)}
             </CardTitle>
-            <p className="break-all font-mono text-xs text-muted-foreground">
-              {supplier.supplier_code}
-            </p>
           </CardHeader>
           <CardContent className="flex flex-1 flex-col gap-4">
             <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
@@ -68,7 +66,7 @@ export function SupplierList({
               size="sm"
               className="mt-auto w-full justify-between"
               onClick={() => onProducts(supplier.id)}
-              aria-label={`Browse products from ${supplier.name}`}
+              aria-label={`Browse products from ${displayText(supplier.name)}`}
             >
               Browse products
               <ArrowRight />

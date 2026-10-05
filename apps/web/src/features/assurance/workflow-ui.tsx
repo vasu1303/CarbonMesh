@@ -1,13 +1,14 @@
 import { useQuery } from '@tanstack/react-query'
 import { ArrowRight } from 'lucide-react'
-import { useForm } from 'react-hook-form'
+import { useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { Link, useNavigate } from 'react-router-dom'
 import { z } from 'zod'
 import { QueryState } from '@/components/query-state'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { RecordSelect } from '@/components/record-select'
+import { displayText, humanize } from '@/lib/presentation'
 import type { WorkspaceScope } from '@/lib/workspace'
 import { contextSchema } from '@/schemas/context'
 import { ApiError, apiRequest, retryApiQuery } from '@/services/api'
@@ -45,13 +46,13 @@ export function WorkflowContext({ scope }: { scope: WorkspaceScope }) {
       <QueryState query={query}>
         {(data) => (
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-            <span className="font-medium">{data.company.name}</span>
-            <span>{data.site.name}</span>
-            <span>{data.reporting_period.name}</span>
+            <span className="font-medium">
+              {displayText(data.company.name)}
+            </span>
+            <span>{displayText(data.site.name)}</span>
+            <span>{displayText(data.reporting_period.name)}</span>
             <Badge variant="outline">
-              {data.company.is_synthetic
-                ? 'Synthetic data / API'
-                : 'Non-synthetic data / API'}
+              {data.company.is_synthetic ? 'Synthetic data' : 'Workspace data'}
             </Badge>
           </div>
         )}
@@ -72,25 +73,22 @@ export function CommandError({ error }: { error: Error | null }) {
       role="alert"
       className="space-y-1 break-words text-sm text-destructive"
     >
-      <p>{error.message}</p>
+      <p>{displayText(error.message)}</p>
       {error instanceof ApiError && (
         <>
-          <p className="font-mono text-xs">{error.code}</p>
-          {error.terminalState && <p>{error.terminalState}</p>}
-          {error.traceId && (
-            <p className="break-all text-xs">Trace: {error.traceId}</p>
-          )}
+          {error.terminalState && <p>{humanize(error.terminalState)}</p>}
           {error.fieldDetails && (
             <dl className="space-y-1 text-xs">
               {Object.entries(error.fieldDetails).map(([field, value]) => (
                 <div key={field}>
-                  <dt className="font-medium">{field.replaceAll('_', ' ')}</dt>
+                  <dt className="font-medium">{humanize(field)}</dt>
                   <dd>
                     {typeof value === 'string'
-                      ? value
+                      ? displayText(value)
                       : Array.isArray(value)
                         ? value
                             .filter((item) => typeof item === 'string')
+                            .map(displayText)
                             .join('; ')
                         : 'Rejected by server validation'}
                   </dd>
@@ -106,7 +104,7 @@ export function CommandError({ error }: { error: Error | null }) {
 export function FieldError({ message }: { message?: string }) {
   return message ? (
     <p role="alert" className="mt-1 text-xs text-destructive">
-      {message}
+      {displayText(message)}
     </p>
   ) : null
 }
@@ -121,7 +119,7 @@ export function StateBadge({ state }: { state: string }) {
           : 'text-muted-foreground'
       }
     >
-      {state.replaceAll('_', ' ')}
+      {humanize(state)}
     </Badge>
   )
 }
@@ -137,7 +135,7 @@ export function LedgerLink({
       className="break-all text-emerald-700 underline underline-offset-4 dark:text-emerald-400"
       to={`/ledger?event=${id}`}
     >
-      {children ?? id}
+      {children ?? 'View evidence trail'}
     </Link>
   )
 }
@@ -150,18 +148,23 @@ export function HashValue({
 }) {
   return (
     <div className="min-w-0 space-y-1">
-      <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className="break-all font-mono text-xs">{value ?? 'Not recorded'}</dd>
+      <dt className="text-xs text-muted-foreground">
+        {humanize(label.replace(/hash|checksum|signature/gi, 'integrity'))}
+      </dt>
+      <dd className="text-xs">
+        {value ? 'Integrity recorded' : 'Integrity missing'}
+      </dd>
     </div>
   )
 }
-const openSchema = z.object({ id: z.uuid() })
+const openSchema = z.object({ id: z.uuid('Select a record.') })
 export function OpenArtifact({ kind, path }: { kind: string; path: string }) {
   const navigate = useNavigate()
   const form = useForm<z.infer<typeof openSchema>>({
     resolver: zodResolver(openSchema),
     defaultValues: { id: '' },
   })
+  const watched = useWatch({ control: form.control })
   return (
     <form
       aria-label={`Open ${kind}`}
@@ -173,11 +176,19 @@ export function OpenArtifact({ kind, path }: { kind: string; path: string }) {
           htmlFor={`open-${kind}`}
           className="mb-2 block text-xs font-medium"
         >
-          {kind} UUID
+          {kind}
         </label>
-        <Input
+        <RecordSelect
+          kind={
+            path === '/assurance'
+              ? 'assurance'
+              : path === '/dispatch'
+                ? 'dispatch'
+                : 'procurement'
+          }
           id={`open-${kind}`}
           {...form.register('id')}
+          value={watched.id ?? ''}
           aria-invalid={!!form.formState.errors.id}
           required
         />
@@ -207,7 +218,7 @@ export function ValidationReasons({
   return reasons.length ? (
     <ul className="list-inside list-disc text-sm text-muted-foreground">
       {reasons.map((reason, index) => (
-        <li key={`${index}-${reason}`}>{reason.replaceAll('_', ' ')}</li>
+        <li key={`${index}-${reason}`}>{displayText(reason)}</li>
       ))}
     </ul>
   ) : null

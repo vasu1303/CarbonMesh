@@ -5,6 +5,17 @@ through deterministic calculations, an append-only evidence ledger, bounded
 agent workflows, and explicit approval decisions. The backend uses FastAPI,
 SQLAlchemy, PostgreSQL with pgvector, and a configurable model provider.
 
+## Using the workspace
+
+Start with the [complete user walkthrough](docs/user-guide.md). The normal flow is
+**Upload data -> Check data -> Emissions -> Plan -> Approvals**. Named selectors
+replace manual identifier entry, and evidence is shown as a connected diagram.
+The workspace has no sign-in screen, API-status badge, or System screen.
+
+This no-login experience is for a trusted local/demo environment. Keep the API
+private. Database records remain labeled synthetic where applicable; the frontend
+does not invent data or silently substitute fixtures.
+
 ## Run the backend with Neon
 
 Requires Python 3.12 or newer. From the repository root, on Windows:
@@ -26,27 +37,25 @@ Configure `apps/api/.env` using [.env.example](apps/api/.env.example):
   `sslmode=require`.
 - `AI_PROVIDER`, the selected provider's API key, and its model identifier.
   For OpenAI, use `AI_PROVIDER=openai`, `OPENAI_API_KEY`, and `OPENAI_MODEL`.
-- `ELECTRICITY_MAPS_API_TOKEN`: needed for live grid history and forecasts.
+- `ELECTRICITY_MAPS_LIVE_ENABLED=false`: leave disabled for this workspace.
+  Stored grid data and forecasts remain usable. A stored provider token alone
+  does not permit live calls.
 - `DEMO_RESET_TOKEN`: required only for the guarded demo reset endpoint.
-- `AUTH_SIGNING_KEY`: a random secret of at least 32 characters.
-- `AUTH_ACCESS_KEYS`: a JSON array of server-provisioned access keys bound to
-  existing company/actor UUIDs; see `.env.example`. Each key needs at least 32
-  random characters. Actor roles and activation are checked in the database.
+- `AUTH_REQUIRED=false`: trusted local/demo mode with no frontend login.
+  Named actors still identify commands and decisions; they are not authentication.
+  Do not expose this mode publicly. Backend authentication remains available
+  for separately secured API deployments using `AUTH_SIGNING_KEY` and `AUTH_ACCESS_KEYS`.
 - `EMBEDDING_PROVIDER=openai` and `EMBEDDING_MODEL`: evidence embeddings use
   the existing OpenAI key and 768 dimensions. `hash` is explicit offline mode.
 
 The application loads this file directly. Keep credentials local; `.env` is
 ignored by Git and is excluded from the Docker build context.
 
-Exchange an access key at `POST /api/auth/session` with
-`{"access_key":"your-local-access-key"}`. The response returns a short-lived
-Bearer token and sets an HttpOnly session cookie for browser/SSE requests.
-Company and actor selectors must match the session. Health checks remain public.
-For loopback HTTP development set `AUTH_COOKIE_SECURE=false`; HTTPS deployments
-keep it true. Configure explicit `CORS_ORIGINS` for a separate browser origin.
-Cross-site cookie/SSE deployments also require `AUTH_COOKIE_SAMESITE=none` over
-HTTPS. Ordinary local tests explicitly disable authentication; security tests
-exercise the real signed-session boundary.
+The standard browser workflow uses no access key. Configure explicit
+`CORS_ORIGINS` if the frontend and API run on different origins. For a separate
+API deployment with `AUTH_REQUIRED=true`, the existing signed-session API and
+its security tests remain in place; this simplified frontend does not supply a
+login flow for that deployment.
 
 Verify an existing database and start the API from `apps/api`:
 
@@ -93,43 +102,21 @@ To build the API image directly:
 docker build -f apps/api/Dockerfile -t carbonmesh-api .
 ```
 
-Open:
+## Run the frontend
 
-Dashboard and Measurements use authenticated API data only, including during
-development. Sign in using an operator-provisioned key from `AUTH_ACCESS_KEYS`
-in the ignored `apps/api/.env` (use the analyst grant for these screens).
-In the seeded local setup, the analyst actor UUID ends with `000004`.
-The company must match `VITE_COMPANY_ID`; site/period IDs must already exist.
-The browser uses the API's HttpOnly session cookie, not a token in localStorage.
-Never place access keys in `VITE_*` variables or commit them. Session expiry
-returns to sign-in and clears cached workspace data. Seeded database records
-remain labeled synthetic; no frontend preview or fallback dataset exists.
-
-Dashboard and Measurements use authenticated API data only, including during
-development. Sign in using an operator-provisioned key from `AUTH_ACCESS_KEYS`
-in the ignored `apps/api/.env` (use the analyst grant for these screens).
-In the seeded local setup, the analyst actor UUID ends with `000004`.
-The company must match `VITE_COMPANY_ID`; site/period IDs must already exist.
-The browser uses the API's HttpOnly session cookie, not a token in localStorage.
-Never place access keys in `VITE_*` variables or commit them. Session expiry
-returns to sign-in and clears cached workspace data. Seeded database records
-remain labeled synthetic; no frontend preview or fallback dataset exists.
-
-## Demo data and provider modes
-## Frontend
-
-Requires Node.js 22.12 or newer and npm 10 or newer. In a separate terminal:
+Requires Node.js 22.12 or newer and npm 10 or newer. From the repository root,
+in a separate terminal:
 
 ```bash
-make db-bootstrap
-make db-check
-make test
-make lint
+npm --prefix apps/web install
+npm run dev
 ```
 
-Docker and GNU Make were not available in the environment that produced this
-change, so the Compose YAML was parsed and reviewed but still needs one
-clean-machine rehearsal.
+The frontend runs at <http://localhost:3000>. The Vite proxy forwards `/api`
+requests to the backend on port 8000. Optional workspace configuration is in
+`apps/web/.env.example`; internal references stay in configuration, not user forms.
+
+Before pushing, run `npm run typecheck`, `npm run lint`, and `npm run build`.
 
 ## Run without Docker
 
@@ -157,14 +144,11 @@ suppliers, standards, loads, recommendations, and approvals remain untouched.
 Scope 2 and Assurance results still require suitable timestamp-aligned grid and
 activity data; empty tables are not filled with fabricated artifacts.
 
-To verify the API, exchange a locally provisioned access key at
-`POST /api/auth/session`, then use the returned session for `GET /api/measurements`
-with the company/site/period selectors. Inspect each result at
-`GET /api/measurements/{id}` and `GET /api/measurements/{id}/lineage`.
-The response IDs, exact values, output hashes, and ledger IDs should match Neon.
-API-backed synthetic test data is still synthetic; its labels must remain even
-after frontend-only preview data is removed. Local HTTP development uses
-`AUTH_COOKIE_SECURE=false`; deployed HTTPS environments must keep it true.
+To verify API data, use `GET /api/measurements` with the configured workspace
+selectors, then inspect the result and its lineage. Internal references, exact
+values, output hashes and ledger references must match the database. API-backed
+synthetic data remains synthetic. Authentication is optional only in the trusted
+local/demo configuration described above.
 
 For a small additive API test dataset on an existing synthetic Maverick tenant,
 run the following from `apps/api` after configuring its database connection:
@@ -190,32 +174,18 @@ suppliers, standards, loads, recommendations, and approvals remain untouched.
 Scope 2 and Assurance results still require suitable timestamp-aligned grid and
 activity data; empty tables are not filled with fabricated artifacts.
 
-To verify the API, exchange a locally provisioned access key at
-`POST /api/auth/session`, then use the returned session for `GET /api/measurements`
-with the company/site/period selectors. Inspect each result at
-`GET /api/measurements/{id}` and `GET /api/measurements/{id}/lineage`.
-The response IDs, exact values, output hashes, and ledger IDs should match Neon.
-API-backed synthetic test data is still synthetic; its labels must remain even
-after frontend-only preview data is removed. Local HTTP development uses
-`AUTH_COOKIE_SECURE=false`; deployed HTTPS environments must keep it true.
+To verify API data, use `GET /api/measurements` with the configured workspace
+selectors, then inspect the result and its lineage. Internal references, exact
+values, output hashes and ledger references must match the database. API-backed
+synthetic data remains synthetic. Authentication is optional only in the trusted
+local/demo configuration described above.
 
-Grid calls default to **live** data. Offline demos must explicitly choose
-`mode: "fixture"` for history, `source_mode: "fixture"` for forecast sync, and
-`context.grid_source_mode: "fixture"` for an agent request. Agent source mode is
-bound into the run signature. Live failures never silently switch to fixtures.
-
-```powershell
-cd apps/api
-py -m venv .venv
-.venv\Scripts\Activate.ps1
-python -m pip install -e ".[dev]"
-Copy-Item .env.example .env
-npm --prefix apps/web install
-npm run dev
-```
-
-The frontend runs at <http://localhost:3000>. Frontend implementation and browser
-testing are owned separately; backend checks do not certify browser journeys.
+Electricity Maps live calls are **disabled by default**, including agent calls.
+The UI has no provider test or synchronization controls. Stored measurements,
+history and forecast snapshots remain usable. An operator must deliberately
+enable live calls outside the normal UI when needed. Fixture requests still
+require explicit opt-in and retain synthetic provenance; disabled or failed
+live requests never silently fall back to fixtures.
 
 ## Demo data and provider modes
 
@@ -244,10 +214,12 @@ For an existing database, use the import and domain APIs in `/docs` to add data
 without resetting it. Activity/supplier imports, source uploads, calculations,
 scenarios, and approvals persist their own lineage and idempotency records.
 
-Grid calls default to **live** data. Offline demos must explicitly choose
-`mode: "fixture"` for history, `source_mode: "fixture"` for forecast sync, and
-`context.grid_source_mode: "fixture"` for an agent request. Agent source mode is
-bound into the run signature. Live failures never silently switch to fixtures.
+Electricity Maps live calls are **disabled by default**, including agent calls.
+The UI has no provider test or synchronization controls. Stored measurements,
+history and forecast snapshots remain usable. An operator must deliberately
+enable live calls outside the normal UI when needed. Fixture requests still
+require explicit opt-in and retain synthetic provenance; disabled or failed
+live requests never silently fall back to fixtures.
 
 For a fresh agent run, supply `context.fresh_inputs` with source measurement
 selectors, bounded history dates, and explicit procurement/dispatch inputs. The
@@ -258,7 +230,7 @@ signature and cannot reuse the earlier artifact IDs.
 
 Source uploads retain original bytes and index text with the selected embedding
 provider. Supplier-import evidence can be indexed explicitly through
-`POST /api/sources/{document_id}/index`. Downloads use the authenticated
+`POST /api/sources/{document_id}/index`. Downloads use the tenant-scoped
 `GET /api/sources/{document_id}/content` route. Model/provider failures are typed
 errors; upload/indexing never silently substitutes hash embeddings.
 

@@ -3,7 +3,7 @@ import { useId, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { z } from 'zod'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { RecordSelect } from '@/components/record-select'
 import { Label } from '@/components/ui/label'
 
 export function OpenRunForm() {
@@ -27,9 +27,11 @@ export function OpenRunForm() {
       }}
     >
       <Label htmlFor={id} className="text-sm font-medium">
-        Run UUID
+        Saved run
       </Label>
-      <Input
+      <RecordSelect
+        kind="runs"
+        placeholder="Choose a saved run"
         id={id}
         required
         value={value}
@@ -38,7 +40,7 @@ export function OpenRunForm() {
       />
       {error && (
         <p role="alert" className="text-sm text-amber-700">
-          Enter a valid run UUID.
+          Choose an available run.
         </p>
       )}
       <Button type="submit" variant="outline" size="sm">

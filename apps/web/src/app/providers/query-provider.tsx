@@ -1,61 +1,23 @@
 import {
   MutationCache,
-  QueryCache,
   QueryClient,
   QueryClientProvider,
 } from '@tanstack/react-query'
 import type { PropsWithChildren } from 'react'
-import {
-  authenticationRequired,
-  clearWorkspaceQueries,
-  sessionKey,
-} from '@/features/auth/session'
-import { ApiError } from '@/services/api'
+import { retryApiQuery } from '@/services/api'
 
 const queryClient = new QueryClient({
   mutationCache: new MutationCache({
-    onError: (error) => {
-      if (
-        authenticationRequired &&
-        error instanceof ApiError &&
-        error.status === 401
-      ) {
-        void queryClient.cancelQueries(
-          { queryKey: sessionKey },
-          { revert: false },
-        )
-        queryClient.setQueryData(sessionKey, null)
-        void clearWorkspaceQueries(queryClient)
-      }
-    },
-  }),
-  queryCache: new QueryCache({
-    onSuccess: (data, query) => {
-      if (query.queryKey[0] === 'session' && data === null)
-        void clearWorkspaceQueries(queryClient)
-    },
-    onError: (error, query) => {
-      if (
-        authenticationRequired &&
-        error instanceof ApiError &&
-        error.status === 401
-      ) {
-        void queryClient.cancelQueries(
-          { queryKey: sessionKey },
-          { revert: false },
-        )
-        queryClient.setQueryData(sessionKey, null)
-        void clearWorkspaceQueries(queryClient)
-      } else if (query.queryKey[0] === 'session') {
-        void clearWorkspaceQueries(queryClient)
-      }
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['workspace-options'] })
     },
   }),
   defaultOptions: {
     queries: {
-      retry: 1,
+      retry: retryApiQuery,
       staleTime: 30_000,
     },
+    mutations: { retry: false },
   },
 })
 

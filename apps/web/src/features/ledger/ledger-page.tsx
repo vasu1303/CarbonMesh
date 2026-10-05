@@ -10,6 +10,7 @@ import {
   QueryState,
 } from '@/components/query-state'
 import { Button } from '@/components/ui/button'
+import { RecordSelect, type RecordKind } from '@/components/record-select'
 import { Input } from '@/components/ui/input'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import {
@@ -17,6 +18,8 @@ import {
   WorkspaceProvenance,
 } from '@/features/approvals/review-components'
 import type { WorkspaceScope } from '@/lib/workspace'
+import { formatDate } from '@/lib/format'
+import { displayText, humanize } from '@/lib/presentation'
 import { EntityAudit, LedgerDetail } from './ledger-detail'
 import { ledgerQueries } from './queries'
 import {
@@ -24,6 +27,89 @@ import {
   ledgerFiltersSchema,
   type LedgerFilters,
 } from './schemas'
+
+const entityKinds: Record<string, RecordKind | undefined> = {
+  measurement: 'measurements',
+  carbon_measurement: 'measurements',
+  procurement_scenario: 'procurement',
+  scenario: 'procurement',
+  supplier: 'suppliers',
+  supplier_product: 'products',
+  agent_run: 'runs',
+  source_document: 'documents',
+  evidence_item: 'evidence',
+  disclosure_draft: 'assurance',
+  dispatch_scenario: 'dispatch',
+  dispatch_forecast_snapshot: 'forecasts',
+}
+
+function EntityFields({
+  audit = false,
+  initialType,
+  initialId,
+}: {
+  audit?: boolean
+  initialType: string
+  initialId: string
+}) {
+  const [type, setType] = useState(initialType)
+  const kind = Object.hasOwn(entityKinds, type) ? entityKinds[type] : undefined
+  const types = audit
+    ? auditEntityTypes.filter((item) => entityKinds[item])
+    : auditEntityTypes
+  return (
+    <>
+      <Field label={audit ? 'Audit record type' : 'Record type'}>
+        <NativeSelect
+          name={audit ? 'audit_type' : 'entity_type'}
+          value={type}
+          onChange={(event) => setType(event.target.value)}
+        >
+          {!audit && (
+            <NativeSelectOption value="">All record types</NativeSelectOption>
+          )}
+          {type && !types.some((item) => item === type) && (
+            <NativeSelectOption value={type}>
+              {humanize(type)}
+            </NativeSelectOption>
+          )}
+          {types.map((item) => (
+            <NativeSelectOption key={item} value={item}>
+              {humanize(item)}
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
+      </Field>
+      <Field label={audit ? 'Record to audit' : 'Record'}>
+        {kind ? (
+          <RecordSelect
+            key={type}
+            kind={kind}
+            name={audit ? 'audit_id' : 'entity_id'}
+            defaultValue={type === initialType ? initialId : ''}
+            placeholder={audit ? 'Select a record' : 'All records of this type'}
+            required={audit}
+          />
+        ) : (
+          <NativeSelect
+            key={type}
+            name={audit ? 'audit_id' : 'entity_id'}
+            defaultValue={type === initialType ? initialId : ''}
+          >
+            <NativeSelectOption value="">
+              {type ? 'All records of this type' : 'Choose a record type first'}
+            </NativeSelectOption>
+            {type === initialType && initialId && (
+              <NativeSelectOption value={initialId}>
+                Selected {humanize(type).toLowerCase()}
+              </NativeSelectOption>
+            )}
+          </NativeSelect>
+        )}
+      </Field>
+    </>
+  )
+}
 
 function localTime(value: string) {
   if (!value) return ''
@@ -51,7 +137,7 @@ function LedgerExplorer({ filters }: { filters: LedgerFilters }) {
     <div className="min-w-0 space-y-6 px-5 py-6 sm:px-8">
       <header>
         <p className="mb-2 text-xs text-muted-foreground">Traceability</p>
-        <h1 className="text-2xl font-semibold">Ledger and audit</h1>
+        <h1 className="text-2xl font-semibold">Evidence trail</h1>
       </header>
       <WorkspaceProvenance />
       <form
@@ -86,7 +172,10 @@ function LedgerExplorer({ filters }: { filters: LedgerFilters }) {
           if (!parsed.success) {
             setError(
               parsed.error.issues
-                .map((i) => `${i.path.join(' ')}: ${i.message}`)
+                .map(
+                  (i) =>
+                    `${humanize(i.path.join(' '))}: ${displayText(i.message)}`,
+                )
                 .join(' '),
             )
             return
@@ -112,18 +201,17 @@ function LedgerExplorer({ filters }: { filters: LedgerFilters }) {
               maxLength={100}
             />
           </Field>
-          <Field label="Entity type">
-            <Input
-              name="entity_type"
-              defaultValue={filters.entity_type}
-              maxLength={100}
+          <EntityFields
+            initialType={filters.entity_type}
+            initialId={filters.entity_id}
+          />
+          <Field label="Agent run">
+            <RecordSelect
+              kind="runs"
+              name="agent_run_id"
+              defaultValue={filters.agent_run_id}
+              placeholder="All runs"
             />
-          </Field>
-          <Field label="Entity UUID">
-            <Input name="entity_id" defaultValue={filters.entity_id} />
-          </Field>
-          <Field label="Agent run UUID">
-            <Input name="agent_run_id" defaultValue={filters.agent_run_id} />
           </Field>
           <Field label="Created from (local time)">
             <Input
@@ -200,13 +288,7 @@ function LedgerExplorer({ filters }: { filters: LedgerFilters }) {
                   <table className="w-full text-left text-sm">
                     <thead className="border-b text-xs text-muted-foreground">
                       <tr>
-                        {[
-                          'Created',
-                          'Event',
-                          'Entity',
-                          'Payload hash',
-                          'Inspect',
-                        ].map((v) => (
+                        {['Created', 'Event', 'Entity', 'Inspect'].map((v) => (
                           <th className="p-2 font-medium" key={v}>
                             {v}
                           </th>
@@ -217,25 +299,19 @@ function LedgerExplorer({ filters }: { filters: LedgerFilters }) {
                       {data.items.map((item) => (
                         <tr key={item.id} className="border-b align-top">
                           <td className="whitespace-nowrap p-2 text-xs">
-                            {item.created_at}
+                            {formatDate(item.created_at)}
                           </td>
                           <td className="min-w-40 p-2 wrap-anywhere">
-                            {item.event_type}
+                            {humanize(item.event_type)}
                           </td>
                           <td className="min-w-48 p-2">
-                            <p>{item.entity_type}</p>
-                            <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
-                              {item.entity_id}
-                            </p>
-                          </td>
-                          <td className="max-w-52 break-all p-2 font-mono text-xs">
-                            {item.payload_hash}
+                            <p>{humanize(item.entity_type)}</p>
                           </td>
                           <td className="p-2">
                             <Button
                               variant="outline"
                               size="sm"
-                              aria-label={`Inspect event ${item.id}`}
+                              aria-label={`Inspect ${humanize(item.event_type)} recorded ${formatDate(item.created_at)}`}
                               onClick={() => update({ event: item.id })}
                             >
                               Inspect
@@ -290,15 +366,20 @@ function LedgerExplorer({ filters }: { filters: LedgerFilters }) {
               new FormData(e.currentTarget).get('event') || '',
             ).trim()
             if (!z.uuid().safeParse(id).success) {
-              setOpenError('Enter a valid event UUID.')
+              setOpenError('Select a ledger event.')
               return
             }
             setOpenError('')
             update({ event: id })
           }}
         >
-          <Field label="Event UUID">
-            <Input name="event" required />
+          <Field label="Ledger event">
+            <RecordSelect
+              kind="ledger"
+              name="event"
+              placeholder="Select an event"
+              required
+            />
           </Field>
           <Button variant="outline" size="sm">
             <FolderOpen />
@@ -317,7 +398,7 @@ function LedgerExplorer({ filters }: { filters: LedgerFilters }) {
             const data = new FormData(e.currentTarget)
             const id = String(data.get('audit_id') || '').trim()
             if (!z.uuid().safeParse(id).success) {
-              setAuditError('Enter a valid audit entity UUID.')
+              setAuditError('Select a record to audit.')
               return
             }
             setAuditError('')
@@ -325,18 +406,7 @@ function LedgerExplorer({ filters }: { filters: LedgerFilters }) {
           }}
         >
           <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Audit entity type">
-              <NativeSelect name="audit_type" defaultValue="measurement">
-                {auditEntityTypes.map((v) => (
-                  <NativeSelectOption value={v} key={v}>
-                    {v.replaceAll('_', ' ')}
-                  </NativeSelectOption>
-                ))}
-              </NativeSelect>
-            </Field>
-            <Field label="Audit entity UUID">
-              <Input name="audit_id" required />
-            </Field>
+            <EntityFields audit initialType="measurement" initialId="" />
           </div>
           <Button variant="outline" size="sm">
             <Search />
@@ -380,7 +450,8 @@ export default function LedgerPage() {
       <section role="alert" className="space-y-4 px-5 py-6 sm:px-8">
         <h1 className="text-xl font-semibold">Invalid ledger filters</h1>
         <p className="text-sm">
-          {parsed.error.issues.map((i) => i.message).join(' ')}
+          The selected records or dates are no longer valid. Reset the filters
+          to continue.
         </p>
         <Button variant="outline" onClick={() => setParams({})}>
           Reset filters

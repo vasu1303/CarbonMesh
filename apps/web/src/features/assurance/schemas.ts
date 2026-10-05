@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-const uuid = z.uuid()
+const uuid = z.uuid('Select a record.')
 const timestamp = z.iso.datetime({ offset: true })
 const hash = z.string().regex(/^[0-9a-f]{64}$/)
 const decimal = z.string().regex(/^-?\d+(\.\d+)?([eE][+-]?\d+)?$/)

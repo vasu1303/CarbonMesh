@@ -2,7 +2,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Plus, Search } from 'lucide-react'
 import { useState } from 'react'
-import { useForm } from 'react-hook-form'
+import { useForm, useWatch } from 'react-hook-form'
 import { Link, useOutletContext, useSearchParams } from 'react-router-dom'
 import { z } from 'zod'
 
@@ -12,6 +12,8 @@ import {
   QueryRefresh,
   QueryState,
 } from '@/components/query-state'
+import { RecordSelect } from '@/components/record-select'
+import { displayText, humanize } from '@/lib/presentation'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -69,6 +71,7 @@ function FactorRegistration() {
       factor_recency: '',
     },
   })
+  const watched = useWatch({ control: form.control })
   const fields = [
     ['factor_code', 'Factor code', 100],
     ['version', 'Version', 50],
@@ -76,7 +79,6 @@ function FactorRegistration() {
     ['material_code', 'Material code', 100],
     ['product_code', 'Product code (optional)', 100],
     ['geography', 'Geography', 100],
-    ['evidence_item_id', 'Evidence item UUID', 36],
     ['factor_value', 'Factor value (kgCO2e/kg)', 25],
     ['source_quality', 'Source quality (0 to 1)', 7],
     ['factor_specificity', 'Factor specificity (0 to 1)', 7],
@@ -123,13 +125,26 @@ function FactorRegistration() {
           <div className={formGrid}>
             <ActorField
               registration={form.register('actor_id')}
+              value={watched.actor_id ?? ''}
               error={form.formState.errors.actor_id?.message}
             />
             <MetricField
               materialOnly
+              value={watched.metric_definition_id ?? ''}
               registration={form.register('metric_definition_id')}
               error={form.formState.errors.metric_definition_id?.message}
             />
+            <Field
+              label="Supporting evidence"
+              error={form.formState.errors.evidence_item_id?.message}
+            >
+              <RecordSelect
+                kind="evidence"
+                {...form.register('evidence_item_id')}
+                value={watched.evidence_item_id ?? ''}
+                required
+              />
+            </Field>
             {fields.map(([name, label, max]) => (
               <Field
                 key={name}
@@ -171,11 +186,6 @@ function FactorRegistration() {
               <Input {...form.register('effective_to')} type="date" />
             </Field>
           </div>
-          <p className="text-xs text-muted-foreground">
-            Registration requires trusted source evidence and an active
-            purchased-material metric. Code, version and geography identify the
-            factor; changed content requires a new version.
-          </p>
           <Button type="submit" disabled={command.pending}>
             <Plus />
             {command.pending ? 'Registering...' : 'Register factor'}
@@ -188,11 +198,11 @@ function FactorRegistration() {
               {command.data.replayed
                 ? 'Existing factor verified'
                 : 'Factor registered'}
-              : {command.data.factor.name}
+              : {displayText(command.data.factor.name)}
             </p>
-            <p className="break-all font-mono text-xs">
-              {command.data.factor.id}
-            </p>
+            <Link className="mr-4 text-emerald-700 underline" to="/measurement">
+              Continue to measurement
+            </Link>
             <Link
               className="text-emerald-700 underline dark:text-emerald-400"
               to={`/ledger?event=${command.data.ledger_event_id}`}
@@ -321,19 +331,18 @@ export function FactorPanel() {
                     {data.items.map((item) => (
                       <TableRow key={item.id}>
                         <TableCell className="min-w-48 whitespace-normal">
-                          <p className="font-medium">{item.name}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {item.factor_code} / {item.version}
+                          <p className="font-medium">
+                            {displayText(item.name)}
                           </p>
-                          <p className="mt-1 break-all font-mono text-xs">
-                            {item.id}
+                          <p className="text-xs text-muted-foreground">
+                            Version {displayText(item.version)}
                           </p>
                         </TableCell>
                         <TableCell>
-                          {item.material_code ?? 'Unscoped'}
+                          {humanize(item.material_code ?? 'Unscoped')}
                           <p className="text-xs text-muted-foreground">
-                            {item.product_code ?? 'All products'} /{' '}
-                            {item.geography}
+                            {displayText(item.product_code ?? 'All products')} /{' '}
+                            {displayText(item.geography)}
                           </p>
                         </TableCell>
                         <TableCell className="font-mono">
@@ -349,7 +358,9 @@ export function FactorPanel() {
                           </p>
                         </TableCell>
                         <TableCell>
-                          <Badge variant="outline">{item.status}</Badge>
+                          <Badge variant="outline">
+                            {humanize(item.status)}
+                          </Badge>
                         </TableCell>
                         <TableCell>
                           <details>
@@ -358,9 +369,9 @@ export function FactorPanel() {
                             </summary>
                             <dl className="mt-2 space-y-2 text-xs">
                               <div>
-                                <dt>Evidence UUID</dt>
+                                <dt>Supporting evidence</dt>
                                 <dd className="font-mono">
-                                  {item.evidence_item_id}
+                                  {item.evidence_item_id ? 'Linked' : 'Missing'}
                                 </dd>
                               </div>
                               <div>
@@ -397,7 +408,12 @@ export function FactorPanel() {
           )}
         </QueryState>
       </section>
-      <FactorRegistration />
+      <details className="border-t py-4">
+        <summary className="cursor-pointer text-sm font-medium">
+          Register a factor
+        </summary>
+        <FactorRegistration />
+      </details>
     </>
   )
 }
