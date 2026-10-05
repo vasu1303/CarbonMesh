@@ -144,7 +144,8 @@ async def test_approval_decision_locks_only_the_requested_company(monkeypatch) -
 
 
 @pytest.mark.asyncio
-async def test_unconfigured_electricity_maps_client_does_not_attempt_network() -> None:
+async def test_unconfigured_electricity_maps_client_does_not_attempt_network(monkeypatch) -> None:
+    monkeypatch.setenv("ELECTRICITY_MAPS_LIVE_ENABLED", "true")
     client = ElectricityMapsHttpClient(token=None)
 
     with pytest.raises(ElectricityMapsProviderError) as caught:

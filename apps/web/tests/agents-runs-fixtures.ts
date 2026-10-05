@@ -1,5 +1,6 @@
 import type { Page, Route } from '@playwright/test'
 import { fixtureFor, id } from './dashboard-fixtures'
+import { factor, metrics } from './intake-quality-fixtures'
 
 // Synthetic browser-test responses only. No application fallback data.
 export const runId = id(1701)
@@ -259,6 +260,14 @@ export async function mockAgents(
       url,
     })
     if (override && (await override(route, url))) return
+    if (path === '/api/emission-factors') {
+      await route.fulfill({ json: { items: [factor], total: 1, offset: 0, limit: 100 } })
+      return
+    }
+    if (path === '/api/metrics') {
+      await route.fulfill({ json: metrics })
+      return
+    }
     if (path === '/api/auth/session') {
       await route.fulfill({
         json: {

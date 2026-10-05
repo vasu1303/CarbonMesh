@@ -1,14 +1,13 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, ChartNoAxesCombined } from 'lucide-react'
-import { useEffect } from 'react'
 import { Controller, useForm } from 'react-hook-form'
 import { Link, useOutletContext, useParams } from 'react-router-dom'
 import { z } from 'zod'
 import { EmptyState, QueryRefresh, QueryState } from '@/components/query-state'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Input } from '@/components/ui/input'
+import { displayText, humanize } from '@/lib/presentation'
 import { Label } from '@/components/ui/label'
 import {
   Table,
@@ -18,7 +17,6 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { useWorkspaceActor } from '@/features/auth/use-workspace-actor'
 import {
   CommandError,
   FieldError,
@@ -84,9 +82,9 @@ function RecommendationFacts({ value }: { value: Recommendation }) {
         </TableBody>
       </Table>
       <div className="space-y-2">
-        <h3 className="text-sm font-medium">Recorded rationale template</h3>
+        <h3 className="text-sm font-medium">Rationale</h3>
         <p className="whitespace-pre-wrap break-words text-sm text-muted-foreground">
-          {value.rationale}
+          {displayText(value.rationale)}
         </p>
       </div>
       <div className="space-y-3">
@@ -113,7 +111,7 @@ function RecommendationFacts({ value }: { value: Recommendation }) {
       </div>
       <details>
         <summary className="cursor-pointer text-sm font-medium">
-          Calculation and evidence identity
+          Calculation integrity
         </summary>
         <Link
           className="mt-2 block text-sm text-emerald-700 underline"
@@ -131,18 +129,19 @@ function RecommendationFacts({ value }: { value: Recommendation }) {
             value={value.impact_snapshot.output_hash}
           />
           <HashValue
-            label="Forecast source document"
-            value={value.approval.preview_payload.forecast_source_document_id}
-          />
-          <HashValue
             label="Forecast checksum"
             value={
               value.approval.preview_payload.forecast_source_document_checksum
             }
           />
-          {value.evidence_item_ids.map((id) => (
-            <HashValue key={id} label="Evidence item" value={id} />
-          ))}
+          <div>
+            <dt className="text-xs text-muted-foreground">
+              Supporting evidence
+            </dt>
+            <dd className="text-xs">
+              {value.evidence_item_ids.length ? 'Linked' : 'Missing'}
+            </dd>
+          </div>
         </dl>
       </details>
     </section>
@@ -150,7 +149,6 @@ function RecommendationFacts({ value }: { value: Recommendation }) {
 }
 
 const optimizeFormSchema = z.object({
-  actor_id: z.uuid(),
   acknowledged: z.boolean().refine(Boolean, 'Acknowledge the advisory scope.'),
 })
 function ScenarioWorkspace({
@@ -161,7 +159,6 @@ function ScenarioWorkspace({
   id: string
 }) {
   const client = useQueryClient()
-  const actor = useWorkspaceActor()
   const query = useQuery(dispatchQueries.recommendation(scope, id))
   // Creation returns a scenario; the mounted API only exposes recommendations for subsequent reads.
   const cachedScenario = client.getQueryData<Scenario>(
@@ -173,11 +170,8 @@ function ScenarioWorkspace({
       : undefined
   const form = useForm<z.infer<typeof optimizeFormSchema>>({
     resolver: zodResolver(optimizeFormSchema),
-    defaultValues: { actor_id: actor.actorId, acknowledged: false },
+    defaultValues: { acknowledged: false },
   })
-  useEffect(() => {
-    if (actor.actorId) form.setValue('actor_id', actor.actorId)
-  }, [actor.actorId, form])
   const optimize = useMutation({
     mutationFn: () =>
       apiRequest(
@@ -220,15 +214,18 @@ function ScenarioWorkspace({
       <div className="flex items-center justify-between">
         <Link to="/dispatch" className="flex items-center gap-2 text-sm">
           <ArrowLeft className="size-4" />
-          Dispatch
+          Energy planning
         </Link>
         <QueryRefresh query={query} label="recommendation" />
       </div>
       <header className="space-y-2">
-        <h1 className="text-2xl font-semibold">Advisory scenario</h1>
-        <p className="break-all font-mono text-xs text-muted-foreground">
-          {id}
-        </p>
+        <h1 className="text-2xl font-semibold">
+          {displayText(
+            constraints?.load_snapshot?.name ??
+              scenario?.flexible_load.name ??
+              'Advisory scenario',
+          )}
+        </h1>
         <p className="text-sm text-muted-foreground">
           Advisory only. Approval cannot actuate equipment.
         </p>
@@ -279,21 +276,6 @@ function ScenarioWorkspace({
           onSubmit={form.handleSubmit(() => optimize.mutate())}
           className="space-y-4"
         >
-          <div className="max-w-md">
-            <label
-              htmlFor="optimize-actor"
-              className="mb-2 block text-xs font-medium"
-            >
-              Workspace actor UUID
-            </label>
-            <Input
-              id="optimize-actor"
-              required
-              readOnly={!!actor.actorId}
-              {...form.register('actor_id')}
-            />
-            <FieldError message={form.formState.errors.actor_id?.message} />
-          </div>
           <Label
             htmlFor="dispatch-advisory-acknowledged"
             className="flex items-start gap-2 text-sm leading-relaxed font-normal"
@@ -317,8 +299,7 @@ function ScenarioWorkspace({
                 />
               )}
             />
-            Advisory recommendation and approval preview only; retain the frozen
-            constraints.
+            Keep the recorded constraints; advisory recommendation only.
           </Label>
           <FieldError message={form.formState.errors.acknowledged?.message} />
           <CommandError error={optimize.error} />
@@ -355,7 +336,7 @@ function ScenarioWorkspace({
                     <TableCell className="whitespace-normal">
                       <ul>
                         {window.reasons.map((reason) => (
-                          <li key={reason}>{reason.replaceAll('_', ' ')}</li>
+                          <li key={reason}>{humanize(reason)}</li>
                         ))}
                       </ul>
                     </TableCell>
@@ -372,8 +353,7 @@ function ScenarioWorkspace({
       )}
       {!constraints && (
         <p className="text-sm text-muted-foreground">
-          No frozen scenario details are available from this recommendation
-          read.
+          Scenario details are unavailable until a recommendation is recorded.
         </p>
       )}
     </main>
@@ -387,7 +367,7 @@ export default function DispatchScenarioPage() {
       <main className="px-5 py-6 sm:px-8">
         <h1 className="text-xl font-semibold">Invalid scenario identifier</h1>
         <Link to="/dispatch" className="text-sm underline">
-          Return to Dispatch
+          Return to Energy planning
         </Link>
       </main>
     )

@@ -3,7 +3,6 @@ import {
   Activity,
   ClipboardCheck,
   Database,
-  FlaskConical,
   LayoutDashboard,
   Leaf,
   ListChecks,
@@ -35,10 +34,8 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { workspaceScope } from '@/lib/workspace'
-import { SessionBoundary } from '@/features/auth/session-boundary'
-import { retryApiQuery } from '@/services/api'
-import { getHealth } from '@/services/health'
+import { workspaceScope, type WorkspaceScope } from '@/lib/workspace'
+import { dashboardQueries } from '@/features/dashboard/queries'
 
 const navigation = [
   {
@@ -48,46 +45,50 @@ const navigation = [
     root: '/dashboard',
   },
   {
-    label: 'Agent workspace',
+    label: 'Assistant',
     icon: MessageSquareText,
     path: '/ask',
     root: '/ask',
   },
-  { label: 'Data intake', icon: Database, path: '/data', root: '/data' },
+  { label: 'Upload data', icon: Database, path: '/data', root: '/data' },
   {
-    label: 'Data quality',
+    label: 'Check data',
     icon: ListChecks,
     path: '/quality',
     root: '/quality',
   },
   {
-    label: 'Measurements',
+    label: 'Emissions',
     icon: Ruler,
     path: '/measurement',
     root: '/measurement',
   },
   {
-    label: 'Assurance',
+    label: 'Disclosures',
     icon: ShieldCheck,
     path: '/assurance',
     root: '/assurance',
   },
   {
-    label: 'Procurement',
+    label: 'Suppliers',
     icon: ShoppingCart,
     path: '/procurement/suppliers',
     root: '/procurement',
   },
-  { label: 'Dispatch', icon: Zap, path: '/dispatch', root: '/dispatch' },
+  { label: 'Energy planning', icon: Zap, path: '/dispatch', root: '/dispatch' },
   {
     label: 'Approvals',
     icon: ClipboardCheck,
     path: '/approvals',
     root: '/approvals',
   },
-  { label: 'Run trace', icon: Activity, path: '/runs', root: '/runs' },
-  { label: 'Ledger', icon: ScrollText, path: '/ledger', root: '/ledger' },
-  { label: 'System', icon: FlaskConical, path: '/demo', root: '/demo' },
+  { label: 'Activity', icon: Activity, path: '/runs', root: '/runs' },
+  {
+    label: 'Evidence trail',
+    icon: ScrollText,
+    path: '/ledger',
+    root: '/ledger',
+  },
 ]
 
 function initialTheme() {
@@ -112,12 +113,6 @@ export default function App() {
   useEffect(() => {
     window.scrollTo({ top: 0 })
   }, [location.pathname])
-  const health = useQuery({
-    queryKey: ['health'],
-    queryFn: getHealth,
-    retry: retryApiQuery,
-    refetchInterval: 60_000,
-  })
   useEffect(() => {
     document.documentElement.classList.toggle('dark', dark)
     try {
@@ -128,28 +123,40 @@ export default function App() {
   }, [dark])
 
   function navigationLinks(closeOnSelect = false) {
-    return navigation.map(({ label, icon: Icon, path, root }) => (
-      <Button
-        key={path}
-        asChild
-        variant="ghost"
-        className={
-          activeItem?.root === root
-            ? 'w-full justify-start bg-muted'
-            : 'w-full justify-start text-muted-foreground'
-        }
-      >
-        <Link
-          to={path}
-          aria-current={activeItem?.root === root ? 'page' : undefined}
-          onClick={() => {
-            if (closeOnSelect) setMenuOpen(false)
-          }}
-        >
-          <Icon className="size-4" />
-          {label}
-        </Link>
-      </Button>
+    return [
+      { label: 'Workspace', items: navigation.slice(0, 2) },
+      { label: 'Prepare', items: navigation.slice(2, 5) },
+      { label: 'Plan', items: navigation.slice(5, 8) },
+      { label: 'Review', items: navigation.slice(8) },
+    ].map((group) => (
+      <div key={group.label} className="pb-4">
+        <p className="px-3 pt-3 pb-2 text-xs font-medium text-muted-foreground">
+          {group.label}
+        </p>
+        {group.items.map(({ label, icon: Icon, path, root }) => (
+          <Button
+            key={path}
+            asChild
+            variant="ghost"
+            className={
+              activeItem?.root === root
+                ? 'w-full justify-start bg-emerald-50 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-200'
+                : 'w-full justify-start text-muted-foreground'
+            }
+          >
+            <Link
+              to={path}
+              aria-current={activeItem?.root === root ? 'page' : undefined}
+              onClick={() => {
+                if (closeOnSelect) setMenuOpen(false)
+              }}
+            >
+              <Icon className="size-4" />
+              {label}
+            </Link>
+          </Button>
+        ))}
+      </div>
     ))
   }
 
@@ -178,12 +185,6 @@ export default function App() {
           >
             {navigationLinks()}
           </nav>
-          <div className="border-t p-5 text-xs text-muted-foreground">
-            <p className="font-medium text-foreground">
-              Human-reviewed decisions
-            </p>
-            <p className="mt-1">Traceable facts. Advisory dispatch.</p>
-          </div>
         </aside>
         <div className="min-w-0">
           <header className="flex min-h-16 flex-wrap items-center justify-between gap-3 border-b bg-background px-5 py-3 sm:px-8">
@@ -197,16 +198,9 @@ export default function App() {
               <span>{activeItem?.label ?? 'Workspace'}</span>
             </div>
             <div className="flex items-center gap-3">
-              <Badge variant="outline" className="text-xs">
-                <span
-                  className={`size-1.5 rounded-full ${health.isError ? 'bg-amber-500' : health.data ? 'bg-emerald-500' : 'bg-neutral-400'}`}
-                />
-                {health.isError
-                  ? 'API unavailable'
-                  : health.data
-                    ? 'API online'
-                    : 'Connecting'}
-              </Badge>
+              {workspaceScope.success && (
+                <WorkspaceLabel scope={workspaceScope.data} />
+              )}
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
@@ -262,17 +256,15 @@ export default function App() {
           </Dialog>
           <main id="main-content" className="mx-auto max-w-[1600px]">
             {workspaceScope.success ? (
-              <SessionBoundary>
-                <Outlet context={workspaceScope.data} />
-              </SessionBoundary>
+              <Outlet context={workspaceScope.data} />
             ) : (
               <section role="alert" className="p-8">
                 <h1 className="text-lg font-semibold">
                   Workspace context is not configured
                 </h1>
                 <p className="mt-2 text-sm text-muted-foreground">
-                  Set valid company, site, reporting period and metric UUIDs in
-                  the frontend environment.
+                  Your workspace needs a company, site and reporting period. Ask
+                  the project owner to complete the workspace setup.
                 </p>
               </section>
             )}
@@ -280,5 +272,19 @@ export default function App() {
         </div>
       </div>
     </TooltipProvider>
+  )
+}
+
+function WorkspaceLabel({ scope }: { scope: WorkspaceScope }) {
+  const query = useQuery(dashboardQueries.context(scope))
+  if (!query.data) return null
+  return (
+    <div className="flex max-w-72 flex-wrap items-center justify-end gap-2 text-xs text-muted-foreground">
+      <span>{query.data.site.name}</span>
+      <span>{query.data.reporting_period.name}</span>
+      {query.data.company.is_synthetic && (
+        <Badge variant="outline">Synthetic data</Badge>
+      )}
+    </div>
   )
 }

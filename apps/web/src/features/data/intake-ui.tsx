@@ -4,6 +4,7 @@ import {
   cloneElement,
   isValidElement,
   useId,
+  useEffect,
   type ReactElement,
   type ReactNode,
 } from 'react'
@@ -11,15 +12,14 @@ import type { UseFormRegisterReturn } from 'react-hook-form'
 import { useOutletContext } from 'react-router-dom'
 
 import { QueryState } from '@/components/query-state'
+import { RecordSelect } from '@/components/record-select'
 import { Badge } from '@/components/ui/badge'
-import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { useWorkspaceActor } from '@/features/auth/use-workspace-actor'
+import { displayText, humanize } from '@/lib/presentation'
 import type { WorkspaceScope } from '@/lib/workspace'
 import { contextSchema } from '@/schemas/context'
 import { ApiError, apiRequest, retryApiQuery } from '@/services/api'
-import { metricsSchema } from './schemas'
 
 export const formGrid = 'grid min-w-0 gap-4 sm:grid-cols-2 xl:grid-cols-3'
 export const sectionClass = 'space-y-4 border-t py-6'
@@ -62,7 +62,7 @@ export function Field({
           role="alert"
           className="font-normal text-destructive"
         >
-          {error}
+          {displayText(error)}
         </span>
       )}
     </div>
@@ -72,25 +72,29 @@ export function Field({
 export function ActorField({
   registration,
   error,
+  value,
 }: {
   registration: UseFormRegisterReturn
   error?: string
+  value?: string
 }) {
   const actor = useWorkspaceActor()
+  useEffect(() => {
+    if (actor.actorId && !value)
+      void registration.onChange({
+        target: { name: registration.name, value: actor.actorId },
+        type: 'change',
+      })
+  }, [actor.actorId, registration, value])
   return (
-    <Field label="Actor UUID" error={error}>
-      <Input
+    <Field label="Requested by" error={error}>
+      <RecordSelect
+        kind="actors"
         {...registration}
-        readOnly={actor.authenticated || !!actor.actorId}
+        value={value}
         required
-        autoComplete="off"
         aria-invalid={!!error}
       />
-      <span className="font-normal text-muted-foreground">
-        {actor.authenticated
-          ? 'Authenticated principal'
-          : 'An existing company actor is required for commands.'}
-      </span>
     </Field>
   )
 }
@@ -104,13 +108,11 @@ export function CommandError({ error }: { error: unknown }) {
       className="space-y-2 border-l-2 border-amber-600 pl-3 text-sm"
     >
       {api && (
-        <p className="font-medium">
-          {(api.terminalState || api.code).replaceAll('_', ' ')}
-        </p>
+        <p className="font-medium">{humanize(api.terminalState || api.code)}</p>
       )}
       <p>
         {error instanceof Error
-          ? error.message
+          ? displayText(error.message)
           : 'The request could not be completed.'}
       </p>
       {api?.fieldDetails && (
@@ -122,15 +124,10 @@ export function CommandError({ error }: { error: unknown }) {
             )
             .map(([key, value]) => (
               <li key={key}>
-                {key}: {value}
+                {humanize(key)}: {displayText(value)}
               </li>
             ))}
         </ul>
-      )}
-      {api?.traceId && (
-        <p className="break-all font-mono text-xs text-muted-foreground">
-          Trace: {api.traceId}
-        </p>
       )}
     </div>
   )
@@ -168,15 +165,15 @@ export function WorkspaceProvenance() {
       <QueryState query={context}>
         {(data) => (
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
-            <span className="font-medium">{data.company.name}</span>
-            <span>{data.site.name}</span>
+            <span className="font-medium">
+              {displayText(data.company.name)}
+            </span>
+            <span>{displayText(data.site.name)}</span>
             <span className="text-muted-foreground">
-              {data.reporting_period.name}
+              {displayText(data.reporting_period.name)}
             </span>
             <Badge variant="outline">
-              {data.company.is_synthetic
-                ? 'Synthetic workspace / API'
-                : 'Non-synthetic workspace / API'}
+              {data.company.is_synthetic ? 'Synthetic data' : 'Workspace data'}
             </Badge>
           </div>
         )}
@@ -193,61 +190,26 @@ export function WorkspaceProvenance() {
 export function MetricField({
   registration,
   error,
+  value,
   materialOnly = false,
 }: {
   registration: UseFormRegisterReturn
   error?: string
   materialOnly?: boolean
+  value?: string
 }) {
-  const scope = useOutletContext<WorkspaceScope>()
-  const listId = useId()
-  const metrics = useQuery({
-    queryKey: ['intake-metrics', scope.company_id],
-    queryFn: ({ signal }) =>
-      apiRequest(
-        '/semantic/metrics',
-        metricsSchema.refine((data) => data.company_id === scope.company_id),
-        { signal, params: { company_id: scope.company_id, active_only: true } },
-      ),
-    staleTime: 60_000,
-    retry: retryApiQuery,
-  })
-  const items = metrics.data?.items.filter(
-    (item) => !materialOnly || item.key === 'emissions.scope3.category1',
-  )
   return (
-    <Field label="Metric definition UUID" error={error}>
-      {items?.length ? (
-        <NativeSelect
-          {...registration}
-          aria-invalid={!!error}
-          required
-          className="w-full min-w-0"
-        >
-          <NativeSelectOption value="">Select a metric</NativeSelectOption>
-          {items.map((item) => (
-            <NativeSelectOption key={item.id} value={item.id}>
-              {item.name} ({item.version})
-            </NativeSelectOption>
-          ))}
-        </NativeSelect>
-      ) : (
-        <Input
-          {...registration}
-          aria-invalid={!!error}
-          required
-          aria-describedby={listId}
-        />
-      )}
-      <span id={listId} className="font-normal text-muted-foreground">
-        {metrics.isPending
-          ? 'Loading metric catalog. A known metric UUID may be entered.'
-          : metrics.isError
-            ? `Catalog unavailable: ${metrics.error.message}`
-            : !items?.length
-              ? 'No matching catalog entries. A valid metric UUID is required.'
-              : 'Versioned metric from the API catalog'}
-      </span>
+    <Field
+      label={materialOnly ? 'Purchased-material metric' : 'Metric'}
+      error={error}
+    >
+      <RecordSelect
+        kind="metrics"
+        {...registration}
+        value={value}
+        required
+        aria-invalid={!!error}
+      />
     </Field>
   )
 }

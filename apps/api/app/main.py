@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import socket
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -106,7 +107,7 @@ app.add_exception_handler(RequestValidationError, request_validation_error_respo
 
 async def handle_database_error(
     request: Request,
-    _: SQLAlchemyError | DatabaseConfigurationError,
+    _: SQLAlchemyError | DatabaseConfigurationError | OSError,
 ) -> JSONResponse:
     body = safe_error_body(
         code="data_unavailable",
@@ -137,6 +138,11 @@ async def handle_unexpected_error(request: Request, _: Exception) -> JSONRespons
 
 app.add_exception_handler(SQLAlchemyError, handle_database_error)
 app.add_exception_handler(DatabaseConfigurationError, handle_database_error)
+# asyncpg can raise these before SQLAlchemy has acquired a connection. Keep
+# transient connectivity failures retryable without exposing hosts or credentials.
+app.add_exception_handler(socket.gaierror, handle_database_error)
+app.add_exception_handler(ConnectionError, handle_database_error)
+app.add_exception_handler(TimeoutError, handle_database_error)
 app.add_exception_handler(Exception, handle_unexpected_error)
 app.include_router(api_router, prefix="/api")
 

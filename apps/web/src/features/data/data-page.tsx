@@ -1,5 +1,6 @@
 import { Database, FileText, Upload } from 'lucide-react'
-import { useOutletContext, useSearchParams } from 'react-router-dom'
+import { Button } from '@/components/ui/button'
+import { Link, useOutletContext, useSearchParams } from 'react-router-dom'
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import type { WorkspaceScope } from '@/lib/workspace'
@@ -19,11 +20,16 @@ function DataIntake() {
         : 'imports'
   return (
     <div className="min-w-0 space-y-5 px-5 py-6 sm:px-8">
-      <header>
-        <h1 className="text-2xl font-semibold">Data intake</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Activity records, source evidence and emission factors
-        </p>
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold">Upload data</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Activity data, supplier products and supporting evidence
+          </p>
+        </div>
+        <Button asChild variant="outline">
+          <Link to="/quality">Review quality checks</Link>
+        </Button>
       </header>
       <WorkspaceProvenance />
       <Tabs
@@ -39,15 +45,15 @@ function DataIntake() {
           <TabsList aria-label="Data intake">
             <TabsTrigger value="imports">
               <Upload className="size-4" />
-              Imports
+              Activity & suppliers
             </TabsTrigger>
             <TabsTrigger value="documents">
               <FileText className="size-4" />
-              Documents
+              Evidence documents
             </TabsTrigger>
             <TabsTrigger value="factors">
               <Database className="size-4" />
-              Factors
+              Emission factors
             </TabsTrigger>
           </TabsList>
         </div>

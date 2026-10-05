@@ -7,17 +7,12 @@ import {
   importResult,
   mockIntake,
   qualityIssues,
-  resetReceipt,
   sourceReceipt,
   time,
 } from './intake-quality-fixtures'
 
-const operatorTarget = process.env.VITE_DEMO_RESET_TARGET?.trim() ?? ''
-const resetConfigured = process.env.VITE_DEMO_RESET_ENABLED === 'true' && operatorTarget.length > 0
-
 async function supplyActor(region: Locator) {
-  const actor = region.getByLabel('Actor UUID', { exact: true })
-  if (await actor.isEditable()) await actor.fill(id(4))
+  await region.getByLabel('Requested by', { exact: true }).selectOption({ label: 'Synthetic analyst / active' })
 }
 
 test('import deep link reads bounded status, provenance and quality links without commands', async ({
@@ -30,7 +25,7 @@ test('import deep link reads bounded status, provenance and quality links withou
     exact: true,
   })
   await expect(
-    status.getByText('completed with errors', { exact: true }),
+    status.getByText('Completed with errors', { exact: true }),
   ).toBeVisible()
   await expect(
     status.getByText('Synthetic source', { exact: true }),
@@ -41,8 +36,9 @@ test('import deep link reads bounded status, provenance and quality links withou
   await expect(
     status.getByRole('link', { name: 'Open source document' }),
   ).toHaveAttribute('href', `/data?document=${documentId}`)
-  await status.getByRole('link', { name: 'Review import issues' }).click()
-  await expect(page.getByLabel('Import UUID filter')).toHaveValue(importId)
+  await status.getByRole('link', { name: 'Review quality checks' }).click()
+  await expect(page).toHaveURL(new RegExp(`/quality\\?import_id=${importId}`))
+  await expect(page.getByLabel('Import', { exact: true })).toHaveValue(importId)
   expect(
     calls
       .filter((call) => call.method !== 'GET')
@@ -75,11 +71,11 @@ test('file import retains raw decimals and retry identity until its payload chan
   })
   await page.goto('/data')
   const form = page.getByRole('region', { name: 'New import', exact: true })
-  await supplyActor(form)
+  await expect(form.getByLabel('Requested by', { exact: true })).toHaveCount(0)
   await form
     .getByLabel('Source name', { exact: true })
     .fill('Synthetic hourly source')
-  await form.getByLabel('Metric definition UUID').selectOption(id(101))
+  await form.getByLabel('Metric').selectOption(id(101))
   await form.getByLabel('This file contains synthetic data').check()
   const original =
     '[{"timestamp":"2026-07-01T00:00:00Z","kwh":123456789012.123456}]'
@@ -91,11 +87,11 @@ test('file import retains raw decimals and retry identity until its payload chan
       buffer: Buffer.from(original),
     })
   expect(bodies).toHaveLength(0)
-  await form.getByRole('button', { name: 'Import file', exact: true }).click()
+  await form.getByRole('button', { name: 'Upload and check', exact: true }).click()
   await expect(
     form.getByText('Synthetic transient import failure.'),
   ).toBeVisible()
-  await form.getByRole('button', { name: 'Import file', exact: true }).click()
+  await form.getByRole('button', { name: 'Upload and check', exact: true }).click()
   await expect.poll(() => bodies.length).toBe(2)
   await expect(
     form.getByText('Synthetic transient import failure.'),
@@ -109,7 +105,7 @@ test('file import retains raw decimals and retry identity until its payload chan
   await form
     .getByLabel('Source name', { exact: true })
     .fill('Synthetic changed source')
-  await form.getByRole('button', { name: 'Import file', exact: true }).click()
+  await form.getByRole('button', { name: 'Upload and check', exact: true }).click()
   await expect(page).toHaveURL(new RegExp(`import=${importId}`))
   expect(bodies[2].idempotency_key).not.toBe(bodies[1].idempotency_key)
 })
@@ -130,7 +126,6 @@ test('supplier imports use the canonical envelope and no activity scope fields',
   await page.goto('/data')
   const form = page.getByRole('region', { name: 'New import', exact: true })
   await form.getByLabel('Import type').selectOption('suppliers')
-  await supplyActor(form)
   await form
     .getByLabel('Source name', { exact: true })
     .fill('Synthetic supplier file')
@@ -143,7 +138,7 @@ test('supplier imports use the canonical envelope and no activity scope fields',
       mimeType: 'text/csv',
       buffer: Buffer.from(csv),
     })
-  await form.getByRole('button', { name: 'Import file', exact: true }).click()
+  await form.getByRole('button', { name: 'Upload and check', exact: true }).click()
   await expect.poll(() => body).toBeTruthy()
   expect(body?.content).toBe(csv)
   expect(body?.is_synthetic).toBe(true)
@@ -157,14 +152,13 @@ test('oversized imports and malformed UUIDs are blocked before any command', asy
   const calls = await mockIntake(page)
   await page.goto('/data?import=invalid')
   await expect(
-    page.getByText('The import URL requires a valid UUID.'),
+    page.getByText('This import link is invalid. Select an import above.'),
   ).toBeVisible()
   const form = page.getByRole('region', { name: 'New import', exact: true })
-  await supplyActor(form)
   await form
     .getByLabel('Source name', { exact: true })
     .fill('Synthetic oversized import')
-  await form.getByLabel('Metric definition UUID').selectOption(id(101))
+  await form.getByLabel('Metric').selectOption(id(101))
   await form
     .getByLabel('Import file', { exact: true })
     .setInputFiles({
@@ -172,7 +166,7 @@ test('oversized imports and malformed UUIDs are blocked before any command', asy
       mimeType: 'text/csv',
       buffer: Buffer.alloc(5 * 1024 * 1024 + 1, 'x'),
     })
-  await form.getByRole('button', { name: 'Import file', exact: true }).click()
+  await form.getByRole('button', { name: 'Upload and check', exact: true }).click()
   await expect(
     form.getByText('Import files must be non-empty and no larger than 5 MiB.'),
   ).toBeVisible()
@@ -221,7 +215,8 @@ test('document deep link downloads original content and indexes only on submit',
     name: 'Source document',
     exact: true,
   })
-  await expect(source.getByText(documentId, { exact: true })).toBeVisible()
+  await expect(source.getByText(documentId, { exact: true })).toHaveCount(0)
+  await expect(source.getByRole('button', { name: 'Download source content' })).toBeEnabled()
   expect(indexes).toBe(0)
   const download = page.waitForEvent('download')
   await source.getByRole('button', { name: 'Download source content' }).click()
@@ -254,7 +249,7 @@ test('source upload encodes the actual selected bytes and exposes API evidence I
     .fill('Synthetic evidence')
   await form
     .getByLabel('Evidence type', { exact: true })
-    .fill('supplier_declaration')
+    .selectOption({ label: 'Supplier declaration' })
   await form.getByLabel('This document contains synthetic data').check()
   await form
     .getByLabel('Source document file')
@@ -320,7 +315,7 @@ test('quality filters and paging stay on server; errors cannot be waived', async
   await page.getByRole('button', { name: 'Apply filters', exact: true }).click()
   await expect(results.getByText('1-1 of 1')).toBeVisible()
   await results
-    .getByRole('button', { name: /^Review missing_quantity/ })
+    .getByRole('button', { name: /^Review Missing quantity/ })
     .click()
   const dialog = page.getByRole('dialog')
   await expect(dialog.getByRole('option', { name: 'Waive' })).toBeDisabled()
@@ -330,7 +325,7 @@ test('quality filters and paging stay on server; errors cannot be waived', async
     .fill('Synthetic source corrected and reimported; review only.')
   await dialog.getByRole('button', { name: 'Record decision' }).click()
   await expect(
-    dialog.getByText('Decision recorded. Source validity is unchanged.'),
+    dialog.getByText('Decision recorded.'),
   ).toBeVisible()
   expect(decision?.status).toBe('resolved')
   expect(decision?.actor_id).toBe(id(4))
@@ -365,11 +360,12 @@ test('factor registration preserves decimal strings and reports rejected evidenc
   await expect(
     page
       .getByRole('region', { name: 'Emission factor catalog' })
-      .getByText(factor.factor_value, { exact: true }),
+      .getByRole('cell').filter({ hasText: factor.factor_value }),
   ).toBeVisible()
+  await page.getByText('Register a factor', { exact: true }).click()
   const form = page.getByRole('region', { name: 'Register emission factor' })
   await supplyActor(form)
-  await form.getByLabel('Metric definition UUID').selectOption(id(102))
+  await form.getByLabel('Purchased-material metric').selectOption(id(102))
   for (const [label, value] of Object.entries({
     'Factor code': 'SYNTHETIC-NEW',
     Version: 'test-v2',
@@ -389,138 +385,26 @@ test('factor registration preserves decimal strings and reports rejected evidenc
   await expect(
     form.getByText('Synthetic evidence trust failure.'),
   ).toBeVisible()
-  await expect(form.getByText('Trace: synthetic-factor-trace')).toBeVisible()
+  await expect(form.getByText('Trace: synthetic-factor-trace')).toHaveCount(0)
   expect(submitted?.factor_value).toBe('1.123456789012')
   expect(submitted?.evidence_item_id).toBe(id(8400))
 })
 
-test('system diagnostics remain independent and reset requires explicit confirmation', async ({
-  page,
-}) => {
-  const calls = await mockIntake(page, async (route, url) => {
-    if (url.pathname !== '/api/health/ready') return
-    await route.fulfill({
-      status: 503,
-      json: {
-        detail: {
-          code: 'database_not_ready',
-          message: 'Synthetic readiness failure.',
-          retryable: false,
-        },
-      },
-    })
-    return true
-  })
+test('legacy system route redirects without diagnostics, reset or provider requests', async ({ page }) => {
+  const calls = await mockIntake(page)
   await page.goto('/demo')
-  await expect(
-    page
-      .getByRole('region', { name: 'API availability', exact: true })
-      .getByText('ok', { exact: true }),
-  ).toBeVisible()
-  await expect(
-    page
-      .getByRole('region', { name: 'Database readiness', exact: true })
-      .getByText('Synthetic readiness failure.'),
-  ).toBeVisible()
-  await expect(
-    page
-      .getByRole('region', { name: 'Database connection', exact: true })
-      .getByText('Connected', { exact: true }),
-  ).toBeVisible()
-  await expect(
-    page.getByRole('button', { name: 'Reset synthetic demo' }),
-  ).toBeDisabled()
-  if (!resetConfigured) await expect(page.getByLabel('Manual reset token')).toBeDisabled()
-  expect(
-    calls.some((call) =>
-      [
-        '/api/demo/reset',
-        '/api/measurement/grid/history/sync',
-        '/api/integrations/electricity-maps/test',
-      ].includes(call.url.pathname),
-    ),
-  ).toBe(false)
+  await expect(page).toHaveURL(/\/dashboard$/)
+  await expect(page.getByRole('heading', { name: 'Overview', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: /Reset synthetic demo|Test provider connection|Sync grid history/ })).toHaveCount(0)
+  expect(calls.some(call => /health|db\/demo|demo\/reset|electricity-maps|grid\//.test(call.url.pathname))).toBe(false)
 })
 
-test('provider and grid sync execute only submitted live requests and expose source lineage', async ({
-  page,
-}) => {
-  const calls = await mockIntake(page, async (route, url) => {
-    if (url.pathname === '/api/integrations/electricity-maps/test') {
-      await route.fulfill({
-        json: {
-          provider: 'electricity_maps',
-          api_version: 'v4',
-          authenticated: true,
-          accessible_zone_count: 1,
-          zones_truncated: false,
-          zones: [
-            {
-              zone: 'IN-NO',
-              zone_name: 'Synthetic test zone',
-              country_code: 'IN',
-              accessible_endpoints: ['history'],
-            },
-          ],
-        },
-      })
-      return true
-    }
-    if (url.pathname === '/api/measurement/grid/history/sync') {
-      expect(route.request().postDataJSON().mode).toBe('live')
-      expect(route.request().postDataJSON().disable_estimations).toBe(true)
-      expect(url.searchParams.get('company_id')).toBe(id(1))
-      expect(url.searchParams.get('site_id')).toBe(id(2))
-      await route.fulfill({
-        json: {
-          site_id: id(2),
-          zone: 'IN-NO',
-          zone_resolution: 'request',
-          requested_start: '2026-09-29T12:00:00Z',
-          requested_end: time,
-          received_points: 24,
-          inserted_points: 24,
-          existing_points: 0,
-          estimated_points: 0,
-          data_source_id: importId,
-          source_document_id: documentId,
-          response_checksum: 'a'.repeat(64),
-        },
-      })
-      return true
-    }
-  })
-  await page.goto('/demo')
-  const provider = page.getByRole('region', {
-    name: 'Electricity Maps connection',
-    exact: true,
-  })
-  await expect(provider.getByLabel('Actor UUID', { exact: true })).toHaveCount(0)
-  await provider
-    .getByRole('button', { name: 'Test provider connection' })
-    .click()
-  await expect(provider.getByText('Accessible zones: 1')).toBeVisible()
-  const sync = page.getByRole('region', {
-    name: 'Grid history synchronization',
-    exact: true,
-  })
-  await expect(sync.getByLabel('Actor UUID', { exact: true })).toHaveCount(0)
-  await sync.getByLabel('Grid zone (optional)').fill('IN-NO')
-  await sync
-    .getByRole('checkbox', { name: 'Exclude estimated provider values' })
-    .check()
-  await sync
-    .getByRole('button', { name: 'Sync grid history', exact: true })
-    .click()
-  await expect(sync.getByText('History synchronized for IN-NO')).toBeVisible()
-  await expect(
-    sync.getByRole('link', { name: 'Open synced source' }),
-  ).toHaveAttribute('href', `/data?document=${documentId}`)
-  expect(
-    calls.filter(
-      (call) => call.url.pathname === '/api/measurement/grid/history/sync',
-    ),
-  ).toHaveLength(1)
+test('upload data offers recorded sources without live grid controls', async ({ page }) => {
+  const calls = await mockIntake(page)
+  await page.goto('/data')
+  await expect(page.getByRole('region', { name: 'New import', exact: true })).toBeVisible()
+  await expect(page.getByText(/Electricity Maps/i)).toHaveCount(0)
+  expect(calls.some(call => /electricity-maps|grid\/.*sync/.test(call.url.pathname))).toBe(false)
 })
 
 test('a warning can be waived only with an explicit actor and decision note', async ({
@@ -552,7 +436,7 @@ test('a warning can be waived only with an explicit actor and decision note', as
     return true
   })
   await page.goto('/quality?severity=warning')
-  await page.getByRole('button', { name: /^Review estimated_factor/ }).click()
+  await page.getByRole('button', { name: /^Review Estimated factor/ }).click()
   const dialog = page.getByRole('dialog')
   await supplyActor(dialog)
   await dialog.getByLabel('Decision', { exact: true }).selectOption('waived')
@@ -561,7 +445,7 @@ test('a warning can be waived only with an explicit actor and decision note', as
   await dialog.getByLabel('Decision note').fill('Synthetic evidence reviewed.')
   await dialog.getByRole('button', { name: 'Record decision' }).click()
   await expect(
-    dialog.getByText('Decision recorded. Source validity is unchanged.'),
+    dialog.getByText('Decision recorded.'),
   ).toBeVisible()
   expect(decisions).toBe(1)
 })
@@ -586,7 +470,7 @@ test('stale quality data stays visible but cannot be reviewed after refresh fail
   })
   await page.goto('/quality?severity=error')
   await expect(
-    page.getByRole('button', { name: /^Review missing_quantity/ }),
+    page.getByRole('button', { name: /^Review Missing quantity/ }),
   ).toBeVisible()
   fail = true
   await page
@@ -595,7 +479,7 @@ test('stale quality data stays visible but cannot be reviewed after refresh fail
   await expect(
     page.getByText('Refresh failed. Showing previously fetched data.'),
   ).toBeVisible()
-  await page.getByRole('button', { name: /^Review missing_quantity/ }).click()
+  await page.getByRole('button', { name: /^Review Missing quantity/ }).click()
   await expect(
     page.getByRole('dialog').getByRole('button', { name: 'Record decision' }),
   ).toBeDisabled()
@@ -626,22 +510,22 @@ test('numeric JSON factors fail the Decimal string boundary', async ({
   await expect(catalog.getByText(factor.name, { exact: true })).toHaveCount(0)
 })
 
-test('intake, quality and system fit narrow screens', async ({
+test('intake, quality and redirected overview fit narrow screens', async ({
   page,
 }, testInfo) => {
   await mockIntake(page)
   await page.setViewportSize({ width: 320, height: 740 })
   for (const [url, title] of [
-    ['/data', 'Data intake'],
-    ['/quality', 'Data quality'],
-    ['/demo', 'System'],
+    ['/data', 'Upload data'],
+    ['/quality', 'Check data'],
+    ['/demo', 'Overview'],
   ]) {
     await page.goto(url)
     await expect(
       page.getByRole('heading', { name: title, exact: true }),
     ).toBeVisible()
     await expect(
-      page.getByText('Synthetic workspace / API', { exact: true }),
+      page.getByText('Synthetic data', { exact: true }).first(),
     ).toBeVisible()
     expect(
       await page.evaluate(
@@ -655,90 +539,12 @@ test('intake, quality and system fit narrow screens', async ({
   }
 })
 
-test('demo reset remains unavailable without explicit operator configuration', async ({ page }) => {
-  test.skip(resetConfigured, 'This assertion covers the default disabled build.')
+test('demo URLs cannot expose reset controls even with saved operator state', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('demo-reset-enabled', 'true'))
   const calls = await mockIntake(page)
-  await page.goto('/demo')
-  const reset = page.getByRole('region', { name: 'Demo reset', exact: true })
-  await expect(reset.getByText('Operator mode disabled', { exact: true })).toBeVisible()
-  await expect(reset.getByLabel('Confirm exact target')).toBeDisabled()
-  await expect(reset.getByLabel('Manual reset token')).toBeDisabled()
-  await expect(reset.getByRole('checkbox')).toBeDisabled()
-  await expect(reset.getByRole('button', { name: 'Reset synthetic demo' })).toBeDisabled()
+  await page.goto('/demo?view=reset')
+  await expect(page).toHaveURL(/\/dashboard$/)
+  await expect(page.getByLabel('Manual reset token')).toHaveCount(0)
+  await expect(page.getByRole('region', { name: 'Demo reset', exact: true })).toHaveCount(0)
   expect(calls.some(call => call.url.pathname === '/api/demo/reset')).toBe(false)
-})
-
-test.describe('operator demo reset', () => {
-  test.skip(!resetConfigured, 'Requires an explicitly enabled test build with VITE_DEMO_RESET_TARGET.')
-
-  test('requires an exact target, token and acknowledgement; clears cached data after one reset', async ({ page }) => {
-    let resets = 0
-    const token = 'synthetic-test-reset-token'
-    await mockIntake(page, async (route, url) => {
-      if (url.pathname === '/api/demo/reset') {
-        resets++
-        expect(route.request().method()).toBe('POST')
-        expect(route.request().postData()).toBeNull()
-        expect(route.request().headers()['x-demo-reset-token']).toBe(token)
-        expect(url.search).toBe('')
-        await route.fulfill({ json: resetReceipt })
-        return true
-      }
-      if (url.pathname === '/api/db/demo') {
-        await route.fulfill({ json: { connected: true, database_time: time, message: resets ? 'Synthetic database refreshed after reset.' : 'Synthetic database before reset.' } })
-        return true
-      }
-    })
-    await page.goto('/demo')
-    await expect(page.getByText('Synthetic database before reset.')).toBeVisible()
-    const reset = page.getByRole('region', { name: 'Demo reset', exact: true })
-    const button = reset.getByRole('button', { name: 'Reset synthetic demo' })
-    await expect(reset.getByLabel('Configured operator target')).toHaveValue(operatorTarget)
-    await expect(reset.getByText(/not a server-verified database identity/)).toBeVisible()
-    await expect(button).toBeDisabled()
-    await reset.getByLabel('Confirm exact target').fill(`${operatorTarget}-mismatch`)
-    await reset.getByLabel('Manual reset token').fill(token)
-    await reset.getByRole('checkbox').check()
-    await expect(button).toBeDisabled()
-    await reset.getByLabel('Confirm exact target').fill(operatorTarget)
-    await reset.getByLabel('Manual reset token').fill('short')
-    await expect(button).toBeDisabled()
-    await reset.getByLabel('Manual reset token').fill(token)
-    await reset.getByRole('checkbox').uncheck()
-    await expect(button).toBeDisabled()
-    expect(resets).toBe(0)
-    await reset.getByRole('checkbox').check()
-    await expect(button).toBeEnabled()
-    await button.click()
-    await expect(reset.getByText('Synthetic demo reset completed. Cached workspace data was cleared.')).toBeVisible()
-    await expect(page.getByText('Synthetic database refreshed after reset.')).toBeVisible()
-    await expect(reset.getByLabel('Manual reset token')).toHaveValue('')
-    await expect(reset.getByLabel('Confirm exact target')).toHaveValue('')
-    await expect(reset.getByRole('checkbox')).not.toBeChecked()
-    await expect(button).toBeDisabled()
-    expect(resets).toBe(1)
-    expect(await page.evaluate(value => [...Object.values(localStorage), ...Object.values(sessionStorage)].some(entry => entry.includes(value)), token)).toBe(false)
-  })
-
-  test('clears the reset token after failure and never retries automatically', async ({ page }) => {
-    let resets = 0
-    await page.clock.install()
-    await mockIntake(page, async (route, url) => {
-      if (url.pathname !== '/api/demo/reset') return
-      resets++
-      await route.fulfill({ status: 503, json: { detail: { code: 'database_unavailable', message: 'Synthetic reset failure.', retryable: true } } })
-      return true
-    })
-    await page.goto('/demo')
-    const reset = page.getByRole('region', { name: 'Demo reset', exact: true })
-    await reset.getByLabel('Confirm exact target').fill(operatorTarget)
-    await reset.getByLabel('Manual reset token').fill('synthetic-test-reset-token')
-    await reset.getByRole('checkbox').check()
-    await reset.getByRole('button', { name: 'Reset synthetic demo' }).click()
-    await expect(reset.getByText('Synthetic reset failure.')).toBeVisible()
-    await expect(reset.getByLabel('Manual reset token')).toHaveValue('')
-    await expect(reset.getByRole('button', { name: 'Reset synthetic demo' })).toBeDisabled()
-    await page.clock.fastForward(60_000)
-    expect(resets).toBe(1)
-  })
 })

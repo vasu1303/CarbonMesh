@@ -1,3 +1,4 @@
+import { displayText } from '@/lib/presentation'
 import { Badge } from '@/components/ui/badge'
 import { AuditLink } from '@/features/approvals/review-components'
 import type { Assessment } from '../scenario-schemas'
@@ -32,10 +33,10 @@ export function ScenarioAssessments({ items }: { items: Assessment[] }) {
             <tr key={v.score_id} className="border-b align-top">
               <td className="min-w-44 max-w-64 p-2 wrap-anywhere">
                 <AuditLink type="supplier_product" id={v.product.id}>
-                  {v.product.name}
+                  {displayText(v.product.name)}
                 </AuditLink>
                 <div className="mt-1 text-xs text-muted-foreground">
-                  {v.product.supplier_name}
+                  {displayText(v.product.supplier_name)}
                 </div>
               </td>
               <td className="min-w-48 max-w-72 p-2">
@@ -45,12 +46,12 @@ export function ScenarioAssessments({ items }: { items: Assessment[] }) {
                 <ul className="mt-2 space-y-2 text-xs">
                   {v.infeasibility_reasons.map((r, i) => (
                     <li key={`${r.code}-${i}`} className="wrap-anywhere">
-                      {r.message}
+                      {displayText(r.message)}
                       {r.actual !== null && r.actual !== undefined && (
-                        <div>Actual: {String(r.actual)}</div>
+                        <div>Actual: {displayText(r.actual)}</div>
                       )}
                       {r.required !== null && r.required !== undefined && (
-                        <div>Required: {String(r.required)}</div>
+                        <div>Required: {displayText(r.required)}</div>
                       )}
                     </li>
                   ))}

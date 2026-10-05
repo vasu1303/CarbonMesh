@@ -14,12 +14,12 @@ test('assurance lookup and atomic claims are read-only until an explicit command
   const calls = await mockAssurance(page)
   await page.goto('/assurance')
   await expect(
-    page.getByRole('heading', { name: 'Assurance', exact: true }),
+    page.getByRole('heading', { name: 'Disclosures', exact: true }),
   ).toBeVisible()
   await expect(
-    page.getByText('Synthetic data / API', { exact: true }),
+    page.getByText('Synthetic data', { exact: true }).first(),
   ).toBeVisible()
-  await page.getByLabel('Draft UUID', { exact: true }).fill(assuranceDraft.id)
+  await page.getByLabel('Draft', { exact: true }).selectOption({ label: assuranceDraft.title })
   await page.getByRole('button', { name: 'Open draft', exact: true }).click()
   await expect(page).toHaveURL(new RegExp(`/assurance/${assuranceDraft.id}$`))
   await expect(
@@ -83,8 +83,7 @@ test('draft creation preserves unchanged retry keys and renews keys for changed 
   await page
     .getByLabel('Verified measurement', { exact: true })
     .selectOption(assuranceMeasurement.id)
-  const actor = page.getByLabel('Requesting actor UUID', { exact: true })
-  if (await actor.isEditable()) await actor.fill(id(4))
+  await page.getByLabel('Requested by', { exact: true }).selectOption({ label: 'Synthetic analyst / active' })
   await page.getByRole('button', { name: 'Create draft', exact: true }).click()
   await expect(
     page.getByText('Temporary draft failure.', { exact: true }),
@@ -120,8 +119,7 @@ test('validation binds the current context and evidence export is explicitly req
   await expect(
     page.getByRole('heading', { name: assuranceDraft.title, exact: true }),
   ).toBeVisible()
-  const actor = page.getByLabel('Validating actor UUID', { exact: true })
-  if (await actor.isEditable()) await actor.fill(id(4))
+  await page.getByLabel('Reviewed by', { exact: true }).selectOption({ label: 'Synthetic analyst / active' })
   await page
     .getByRole('button', { name: 'Validate draft', exact: true })
     .click()
@@ -142,7 +140,7 @@ test('validation binds the current context and evidence export is explicitly req
     .getByRole('button', { name: 'Export evidence pack', exact: true })
     .click()
   expect((await download).suggestedFilename()).toBe(
-    `assurance-${assuranceDraft.id}-evidence-pack.json`,
+    'disclosure-evidence-pack.json',
   )
 })
 
@@ -166,8 +164,7 @@ test('stale validation blocks export and preserves recorded facts', async ({
     return true
   })
   await page.goto(`/assurance/${assuranceDraft.id}`)
-  const actor = page.getByLabel('Validating actor UUID', { exact: true })
-  if (await actor.isEditable()) await actor.fill(id(4))
+  await page.getByLabel('Reviewed by', { exact: true }).selectOption({ label: 'Synthetic analyst / active' })
   await page
     .getByRole('button', { name: 'Validate draft', exact: true })
     .click()
@@ -214,7 +211,7 @@ test('standards can fail independently and cross-company drafts fail closed', as
     page.getByText('Standards unavailable.', { exact: true }),
   ).toBeVisible()
   await expect(
-    page.getByText('Synthetic data / API', { exact: true }),
+    page.getByText('Synthetic data', { exact: true }).first(),
   ).toBeVisible()
   await expect(
     page.getByRole('button', { name: 'Create draft', exact: true }),
@@ -281,18 +278,17 @@ test('optional requirements can be excluded while required claims stay bound to 
     .selectOption(assuranceMeasurement.id)
   await expect(
     page.getByRole('checkbox', {
-      name: 'S2-TOTAL: Reported emissions (required)',
+      name: 'Reported emissions (required)',
       exact: true,
     }),
   ).toBeDisabled()
   await page
     .getByRole('checkbox', {
-      name: 'S2-REDUCTION: Prior-period reduction (optional)',
+      name: 'Prior-period reduction (optional)',
       exact: true,
     })
     .uncheck()
-  const actor = page.getByLabel('Requesting actor UUID', { exact: true })
-  if (await actor.isEditable()) await actor.fill(id(4))
+  await page.getByLabel('Requested by', { exact: true }).selectOption({ label: 'Synthetic analyst / active' })
   await page.getByRole('button', { name: 'Create draft', exact: true }).click()
   await expect(
     page.getByRole('link', { name: 'Review approval', exact: true }),

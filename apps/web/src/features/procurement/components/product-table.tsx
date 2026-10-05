@@ -19,7 +19,8 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { formatDecimal, humanize } from '@/lib/format'
+import { formatDecimal } from '@/lib/format'
+import { displayText, humanize } from '@/lib/presentation'
 import type { Product } from '../schemas'
 
 function ProductDetails({ product }: { product: Product }) {
@@ -37,8 +38,8 @@ function ProductDetails({ product }: { product: Product }) {
       'Evidence quality score',
       `${formatDecimal(product.evidence_quality_score)} / 100`,
     ],
-    ['Material code', product.material_code],
-    ['Category', product.category],
+    ['Material', humanize(product.material_code)],
+    ['Category', humanize(product.category)],
     ['Effective from', product.effective_from],
     ['Effective to', product.effective_to ?? 'No end date recorded'],
     ['Supplier status', humanize(product.supplier_status)],
@@ -49,15 +50,15 @@ function ProductDetails({ product }: { product: Product }) {
     <DialogContent className="max-h-[85svh] overflow-y-auto rounded-lg wrap-anywhere sm:max-w-2xl">
       <DialogHeader className="min-w-0 pr-8">
         <DialogTitle className="min-w-0 text-lg leading-6">
-          {product.name}
+          {displayText(product.name)}
         </DialogTitle>
         <DialogDescription className="min-w-0">
-          {product.supplier_name} / {product.product_code}
+          {displayText(product.supplier_name)}
         </DialogDescription>
       </DialogHeader>
       {product.description && (
         <p className="min-w-0 text-sm text-muted-foreground">
-          {product.description}
+          {displayText(product.description)}
         </p>
       )}
       <div className="flex flex-wrap gap-2">
@@ -71,7 +72,7 @@ function ProductDetails({ product }: { product: Product }) {
           <div key={label} className="min-w-0 border-b py-3">
             <dt className="text-xs text-muted-foreground">{label}</dt>
             <dd className="mt-1 text-sm font-medium tabular-nums">
-              {value}
+              {displayText(value)}
             </dd>
           </div>
         ))}
@@ -82,27 +83,10 @@ function ProductDetails({ product }: { product: Product }) {
             ? 'Evidence linked'
             : 'No evidence linked'}
         </h3>
-        {product.evidence_item_id && (
-          <p className="break-all font-mono text-xs">
-            {product.evidence_item_id}
-          </p>
-        )}
         <p className="text-xs text-muted-foreground">
-          Catalog evidence linkage is not a verification or procurement
-          approval. Evidence content and lineage are not included in this
-          catalog response.
+          Evidence content is available in the scenario review.
         </p>
       </section>
-      <dl className="space-y-2 border-t pt-3 text-xs">
-        <div>
-          <dt className="text-muted-foreground">Product ID</dt>
-          <dd className="mt-1 break-all font-mono">{product.id}</dd>
-        </div>
-        <div>
-          <dt className="text-muted-foreground">Supplier ID</dt>
-          <dd className="mt-1 break-all font-mono">{product.supplier_id}</dd>
-        </div>
-      </dl>
     </DialogContent>
   )
 }
@@ -134,7 +118,7 @@ export function ProductTable({ items }: { items: Product[] }) {
                   <Button
                     variant="link"
                     className="h-auto max-w-full justify-start p-0 text-left whitespace-normal wrap-anywhere"
-                    aria-label={`Inspect ${product.name}`}
+                    aria-label={`Inspect ${displayText(product.name)}`}
                   >
                     {product.name}
                   </Button>
@@ -142,10 +126,7 @@ export function ProductTable({ items }: { items: Product[] }) {
                 <ProductDetails product={product} />
               </Dialog>
               <p className="mt-1 text-xs text-muted-foreground">
-                {product.supplier_name}
-              </p>
-              <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
-                {product.product_code}
+                {displayText(product.supplier_name)}
               </p>
             </TableCell>
             <TableCell>

@@ -17,7 +17,6 @@ import {
 } from '@/components/query-state'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   Table,
@@ -28,224 +27,16 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { formatDate, formatDecimal, humanize } from '@/lib/format'
+import { formatDate, formatDecimal } from '@/lib/format'
+import { displayText, humanize } from '@/lib/presentation'
 import type { WorkspaceScope } from '@/lib/workspace'
 import { RecordedFacts } from './components/record-inspector'
+import { EvidenceRecords } from './components/evidence-records'
+import { MeasurementLineageView } from './components/measurement-lineage'
 import { measurementQueries } from './queries'
-import type { MeasurementDetail, MeasurementLineage } from './schemas'
 
 const BreakdownChart = lazy(() => import('./components/breakdown-chart'))
 const pageSize = 20
-
-function EvidenceRecords({ item }: { item: MeasurementDetail }) {
-  const [kind, setKind] = useState('activities')
-  const [offset, setOffset] = useState(0)
-  const total =
-    kind === 'activities'
-      ? item.inputs.length
-      : kind === 'factors'
-        ? item.factors.length
-        : item.grid_points.length
-  const pageInputs = item.inputs.slice(offset, offset + pageSize)
-  const sources =
-    kind === 'factors'
-      ? item.factors
-          .slice(offset, offset + pageSize)
-          .map((factor) => ({
-            id: factor.id,
-            label: factor.name,
-            value: `${formatDecimal(factor.factor_value)} ${factor.numerator_unit}/${factor.denominator_unit}`,
-            version: factor.version,
-            evidence: factor.evidence,
-          }))
-      : item.grid_points
-          .slice(offset, offset + pageSize)
-          .map((point) => ({
-            id: point.id,
-            label: `${point.provider} / ${point.zone}`,
-            value: `${formatDecimal(point.intensity_gco2e_per_kwh)} gCO2e/kWh`,
-            version: `${point.method_version} / ${formatDate(point.observed_at)}${point.is_estimated ? ' / estimated' : ''}`,
-            evidence: point.evidence,
-          }))
-  return (
-    <>
-      <div className="mb-5 max-w-full space-y-2">
-        <label htmlFor="evidence-kind" className="text-xs font-medium">
-          Source records
-        </label>
-        <NativeSelect
-          id="evidence-kind"
-          value={kind}
-          onChange={(event) => {
-            setKind(event.target.value)
-            setOffset(0)
-          }}
-        >
-          <NativeSelectOption value="activities">
-            Activity rows
-          </NativeSelectOption>
-          <NativeSelectOption value="factors">
-            Emission factors
-          </NativeSelectOption>
-          <NativeSelectOption value="grid">
-            Hourly grid points
-          </NativeSelectOption>
-        </NativeSelect>
-      </div>
-      {total === 0 ? (
-        <EmptyState
-          title="No source records"
-          detail="The measurement contains no records of this source type."
-        />
-      ) : kind === 'activities' ? (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Source / material</TableHead>
-              <TableHead>Quantity</TableHead>
-              <TableHead>Activity ID</TableHead>
-              <TableHead>Document</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {pageInputs.map((input) => (
-              <TableRow key={input.activity_record_id}>
-                <TableCell className="max-w-72 whitespace-normal wrap-anywhere">
-                  <p>{input.source_row_key}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {input.material_code}
-                    {input.interval_start
-                      ? ` / ${formatDate(input.interval_start)}`
-                      : ''}
-                  </p>
-                </TableCell>
-                <TableCell className="font-mono">
-                  {formatDecimal(input.source_quantity)} {input.source_unit}
-                </TableCell>
-                <TableCell className="max-w-56 whitespace-normal break-all font-mono text-xs">
-                  {input.activity_record_id}
-                </TableCell>
-                <TableCell>
-                  <Button asChild variant="link" size="sm">
-                    <Link to={`/data?document=${input.source_document_id}`}>
-                      Source
-                      <ArrowUpRight className="size-4" />
-                    </Link>
-                  </Button>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      ) : (
-        <ul className="divide-y">
-          {sources.map((source) => (
-            <li key={source.id} className="space-y-2 py-4 wrap-anywhere">
-              <p className="font-medium">{source.label}</p>
-              <p className="font-mono text-sm">{source.value}</p>
-              <p className="text-xs text-muted-foreground">{source.version}</p>
-              <p className="text-xs">
-                {source.evidence.source_document_filename} /{' '}
-                {source.evidence.locator}
-              </p>
-              <p className="break-all font-mono text-xs text-muted-foreground">
-                Evidence {source.evidence.id}
-              </p>
-              <p className="break-all font-mono text-xs text-muted-foreground">
-                SHA-256 {source.evidence.checksum}
-              </p>
-              <Button asChild variant="link" className="h-auto p-0 text-xs">
-                <Link
-                  to={`/data?document=${source.evidence.source_document_id}`}
-                >
-                  Source document
-                  <ArrowUpRight className="size-4" />
-                </Link>
-              </Button>
-            </li>
-          ))}
-        </ul>
-      )}
-      <PageControls
-        total={total}
-        limit={pageSize}
-        offset={offset}
-        count={Math.max(0, Math.min(pageSize, total - offset))}
-        onChange={setOffset}
-      />
-    </>
-  )
-}
-
-function LineageRecords({ graph }: { graph: MeasurementLineage }) {
-  const [offset, setOffset] = useState(0)
-  const nodes = graph.nodes.slice(offset, offset + pageSize)
-  const labels = new Map(graph.nodes.map((node) => [node.id, node.label]))
-  return (
-    <>
-      {graph.truncated && (
-        <p
-          role="status"
-          className="mb-4 text-sm text-amber-700 dark:text-amber-400"
-        >
-          Partial lineage: the backend traversal limit was reached.
-        </p>
-      )}
-      {graph.nodes.length === 0 ? (
-        <EmptyState
-          title="No lineage returned"
-          detail="There are no recorded source relationships for this measurement."
-        />
-      ) : (
-        <ol className="divide-y">
-          {nodes.map((node) => (
-            <li key={node.id} className="py-4 wrap-anywhere">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-sm font-medium">
-                  {humanize(node.label)}
-                </span>
-                <Badge variant="outline">{humanize(node.node_type)}</Badge>
-              </div>
-              <p className="mt-2 break-all font-mono text-xs text-muted-foreground">
-                {node.id}
-              </p>
-              {node.node_type === 'ledger_event' &&
-                z.uuid().safeParse(node.id).success && (
-                  <Button
-                    asChild
-                    variant="link"
-                    className="mt-2 h-auto p-0 text-xs"
-                  >
-                    <Link to={`/ledger?event=${node.id}`}>
-                      Inspect ledger event
-                      <ArrowUpRight className="size-4" />
-                    </Link>
-                  </Button>
-                )}
-              <ul className="mt-3 space-y-1 border-l pl-3 text-xs text-muted-foreground">
-                {graph.edges
-                  .filter((edge) => edge.source === node.id)
-                  .map((edge) => (
-                    <li key={edge.id}>
-                      {humanize(edge.relationship_type)}:{' '}
-                      {labels.get(edge.target) ?? edge.target}
-                    </li>
-                  ))}
-              </ul>
-            </li>
-          ))}
-        </ol>
-      )}
-      <PageControls
-        total={graph.nodes.length}
-        limit={pageSize}
-        offset={offset}
-        count={nodes.length}
-        onChange={setOffset}
-      />
-    </>
-  )
-}
 
 function MeasurementRecord({
   id,
@@ -271,14 +62,16 @@ function MeasurementRecord({
         <Button asChild variant="ghost" size="sm" className="-ml-2">
           <Link to="/measurement">
             <ArrowLeft />
-            Measurements
+            Emissions
           </Link>
         </Button>
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="min-w-0">
-            <h1 className="text-2xl font-semibold">Measurement record</h1>
-            <p className="mt-2 break-all font-mono text-xs text-muted-foreground">
-              {id}
+            <h1 className="text-2xl font-semibold">Emission record</h1>
+            <p className="mt-2 text-sm text-muted-foreground wrap-anywhere">
+              {detail.data
+                ? humanize(detail.data.metric_key)
+                : 'Measurement details'}
             </p>
           </div>
           <QueryRefresh query={detail} label="measurement record" />
@@ -291,14 +84,17 @@ function MeasurementRecord({
         <QueryState query={context}>
           {(data) => (
             <div className="flex flex-wrap items-center gap-3 text-sm">
-              <span className="font-medium">{data.company.name}</span>
+              <span className="font-medium">
+                {displayText(data.company.name)}
+              </span>
               <span className="text-muted-foreground">
-                {data.site.name} / {data.reporting_period.name}
+                {displayText(data.site.name)} /{' '}
+                {displayText(data.reporting_period.name)}
               </span>
               <Badge variant="outline" className="sm:ml-auto">
                 {data.company.is_synthetic
-                  ? 'Synthetic data / API'
-                  : 'Non-synthetic data / API'}
+                  ? 'Synthetic data'
+                  : 'Non-synthetic data'}
               </Badge>
             </div>
           )}
@@ -320,25 +116,40 @@ function MeasurementRecord({
         <div className="min-w-0 border-y bg-card px-5 py-5 sm:px-8">
           <TabsContent value="facts">
             <QueryState query={detail}>
-              {(item) => (
-                <>
-                  <RecordedFacts item={item} />
-                  {item.facts.ledger_event_id && (
-                    <Button
-                      asChild
-                      variant="outline"
-                      size="sm"
-                      className="mt-5"
-                    >
-                      <Link to={`/ledger?event=${item.facts.ledger_event_id}`}>
-                        Ledger event
-                        <ArrowUpRight />
-                      </Link>
-                    </Button>
-                  )}
-                </>
-              )}
+              {(item) => <RecordedFacts item={item} />}
             </QueryState>
+            <section
+              aria-label="Emissions breakdown"
+              className="mt-6 space-y-4 border-t pt-5"
+            >
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-semibold">Emissions by activity</h2>
+                <QueryRefresh query={breakdown} label="emissions breakdown" />
+              </div>
+              <QueryState query={breakdown}>
+                {(data) =>
+                  data.status === 'unsupported' ? (
+                    <EmptyState
+                      title="Unsupported measurement"
+                      detail="No verified emissions breakdown is available."
+                    />
+                  ) : data.items.length === 0 ? (
+                    <EmptyState
+                      title="No calculations returned"
+                      detail="No emissions breakdown is available for this measurement."
+                    />
+                  ) : (
+                    <Suspense
+                      fallback={
+                        <Skeleton className="h-56 motion-reduce:animate-none" />
+                      }
+                    >
+                      <BreakdownChart items={data.items} />
+                    </Suspense>
+                  )
+                }
+              </QueryState>
+            </section>
           </TabsContent>
           <TabsContent value="calculations">
             <div className="mb-4 flex items-center justify-between">
@@ -371,13 +182,11 @@ function MeasurementRecord({
                           <Skeleton className="h-56 motion-reduce:animate-none" />
                         }
                       >
-                        <BreakdownChart
-                          items={data.items.slice(offset, offset + pageSize)}
-                        />
+                        <BreakdownChart items={data.items} />
                       </Suspense>
                       <p className="my-4 text-xs text-muted-foreground">
-                        Individual calculations on this page. The recorded total
-                        comes from the measurement.
+                        Recorded activity emissions. Source records below are
+                        paginated.
                       </p>
                       <Table>
                         <TableHeader>
@@ -401,7 +210,7 @@ function MeasurementRecord({
                                         'No date recorded')}
                                   </p>
                                   <p className="mt-1 text-xs text-muted-foreground">
-                                    {item.material_code}
+                                    {humanize(item.material_code)}
                                   </p>
                                 </TableCell>
                                 <TableCell className="font-mono">
@@ -453,7 +262,7 @@ function MeasurementRecord({
               <QueryRefresh query={lineage} label="measurement lineage" />
             </div>
             <QueryState query={lineage}>
-              {(graph) => <LineageRecords key={id} graph={graph} />}
+              {(graph) => <MeasurementLineageView key={id} graph={graph} />}
             </QueryState>
           </TabsContent>
         </div>
@@ -473,7 +282,7 @@ export default function MeasurementDetailPage() {
           Invalid measurement identifier
         </h1>
         <Button asChild variant="outline">
-          <Link to="/measurement">Back to measurements</Link>
+          <Link to="/measurement">Back to emissions</Link>
         </Button>
       </section>
     )

@@ -169,8 +169,8 @@ const constraintList = z
 export const scenarioFormSchema = z.object({
   current_product_id: z.uuid('Select a current product.'),
   carbon_measurement_id: z.uuid('Select a verified measurement.'),
-  method_definition_id: z.uuid('Enter the scoring method UUID.'),
-  requested_by: z.uuid('Enter an actor UUID.'),
+  method_definition_id: z.uuid('Select a scoring method.'),
+  requested_by: z.uuid('Select a requester.'),
   quantity: positive,
   quantity_unit: z.string().trim().min(1).max(50),
   current_unit_cost: z.union([positive, z.literal('')]),

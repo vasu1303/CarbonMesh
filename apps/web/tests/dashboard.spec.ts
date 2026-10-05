@@ -23,10 +23,10 @@ test('canonical reads, source inspection, chart, paging and responsive themes', 
   await expect(measurements.locator('.recharts-bar-rectangle')).toHaveCount(6)
   await expect(page.getByText('Stale preview', { exact: true })).toBeVisible()
   await expect(
-    page.getByText('Synthetic fixture', { exact: true }),
+    page.getByText('Synthetic data', { exact: true }).first(),
   ).toBeVisible()
   await expect(
-    page.getByRole('button', { name: 'Refresh data', exact: true }),
+    page.getByRole('button', { name: 'Refresh dashboard', exact: true }),
   ).toBeEnabled()
   expect(
     await page.evaluate(
@@ -45,19 +45,19 @@ test('canonical reads, source inspection, chart, paging and responsive themes', 
     .click()
   const dialog = page.getByRole('dialog')
   await expect(
-    dialog.getByText('synthetic-row-1', { exact: true }),
+    dialog.getByText('Measured emissions', { exact: true }),
   ).toBeVisible()
   await dialog.getByRole('tab', { name: 'Lineage' }).click()
   await expect(
-    dialog.getByText('Partial lineage:', { exact: false }),
+    dialog.getByText('Partial lineage.', { exact: false }),
   ).toBeVisible()
-  await dialog.getByRole('tab', { name: 'Verified facts' }).click()
-  await dialog.getByRole('button', { name: 'Open ledger fact' }).click()
+  await expect(dialog.locator('.react-flow__node')).toHaveCount(2)
+  await dialog.getByRole('button', { name: 'Inspect ledger event', exact: true }).click()
   await expect(
     dialog.getByText('synthetic-factor.txt', { exact: true }),
   ).toBeVisible()
   await expect(
-    dialog.getByText('Persisted payload', { exact: true }),
+    dialog.getByText('Recorded facts', { exact: true }),
   ).toBeVisible()
   await dialog.getByRole('button', { name: 'Close', exact: true }).click()
   await expect(
@@ -75,18 +75,14 @@ test('canonical reads, source inspection, chart, paging and responsive themes', 
       () => document.documentElement.scrollWidth <= innerWidth,
     ),
   ).toBe(true)
+  expect(requests.some(r => /health|electricity-maps|grid\//.test(r.url.pathname))).toBe(false)
   const paths = new Set(requests.map((r) => r.url.pathname))
   for (const path of [
     '/context/resolve',
     '/measurements',
     '/quality/issues',
     '/approvals',
-    '/measurement/grid/latest',
-    '/procurement/suppliers',
-    '/procurement/products',
-    '/assurance/standards',
-    '/dispatch/loads',
-    '/ledger/events',
+
   ])
     expect(paths.has(`/api${path}`)).toBe(true)
   for (const request of requests) {
@@ -131,7 +127,7 @@ test('slow measurements do not block other panels', async ({ page }) => {
       measurements.getByRole('status', { name: 'Loading data' }),
     ).toBeVisible()
     await expect(
-      page.getByText('Synthetic fixture', { exact: true }),
+      page.getByText('Synthetic data', { exact: true }).first(),
     ).toBeVisible()
     await expect(
       page.getByText('Quantity is missing in the synthetic activity row.'),
@@ -150,12 +146,11 @@ test('empty results are not fabricated values', async ({ page }) => {
   await expect(
     page.getByText('No verified result', { exact: true }),
   ).toBeVisible()
-  await expect(
-    page.getByText('No cached grid data', { exact: true }),
-  ).toBeVisible()
+  await expect(page.getByText('Latest grid intensity', { exact: true })).toHaveCount(0)
   await expect(
     page.getByText('No pending approval previews', { exact: true }),
   ).toBeVisible()
+  await page.getByText('Recent activity', { exact: true }).click()
   await expect(
     page.getByText('No ledger events', { exact: true }),
   ).toBeVisible()
@@ -194,7 +189,7 @@ test('invalid response fails closed, retry recovers, failed refresh keeps a warn
     ),
   ).toBeVisible()
   await expect(
-    page.getByText('Synthetic fixture', { exact: true }),
+    page.getByText('Synthetic data', { exact: true }).first(),
   ).toBeVisible()
   mode = 'success'
   await measurements.getByRole('button', { name: 'Retry', exact: true }).click()
@@ -270,7 +265,7 @@ test('a measurement from a different context is not displayed', async ({
   ).toBeVisible()
   await expect(page.getByText('12,500.125', { exact: true })).toHaveCount(0)
   await expect(
-    page.getByText('Synthetic fixture', { exact: true }),
+    page.getByText('Synthetic data', { exact: true }).first(),
   ).toBeVisible()
 })
 
@@ -281,7 +276,7 @@ test('narrow viewport and source dialog remain usable with long labels', async (
   await mockDashboard(page)
   await page.goto('/dashboard')
   await expect(
-    page.getByRole('button', { name: 'Refresh data', exact: true }),
+    page.getByRole('button', { name: 'Refresh dashboard', exact: true }),
   ).toBeEnabled()
   expect(
     await page.evaluate(
@@ -294,7 +289,7 @@ test('narrow viewport and source dialog remain usable with long labels', async (
     .click()
   const dialog = page.getByRole('dialog')
   await expect(
-    dialog.getByText('synthetic-row-1', { exact: true }),
+    dialog.getByText('Measured emissions', { exact: true }),
   ).toBeVisible()
   expect(
     await dialog.evaluate(
@@ -346,7 +341,8 @@ test('generic dispatch approvals render without invented procurement values', as
   await queue.getByRole('button', { name: 'Inspect preview' }).click()
   await expect(
     page.getByRole('dialog').getByText(id(9002), { exact: true }),
-  ).toBeVisible()
+  ).toHaveCount(0)
+  await expect(page.getByRole('dialog').getByRole('link', { name: 'Review approval' })).toHaveAttribute('href', `/approvals?approval=${id(9001)}`)
   await expect(
     page.getByRole('dialog').getByText('Product / supplier', { exact: true }),
   ).toHaveCount(0)

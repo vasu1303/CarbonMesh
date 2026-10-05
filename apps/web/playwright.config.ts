@@ -39,7 +39,6 @@ export default defineConfig({
     reuseExistingServer: false,
     env: {
       VITE_API_BASE_URL: '/api',
-      VITE_AUTH_REQUIRED: process.env.VITE_AUTH_REQUIRED ?? 'true',
       VITE_COMPANY_ID: '00000000-0000-4000-8000-000000000001',
       VITE_SITE_ID: '00000000-0000-4000-8000-000000000002',
       VITE_REPORTING_PERIOD_ID: '00000000-0000-4000-8000-000000000003',

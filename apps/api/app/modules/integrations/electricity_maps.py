@@ -126,6 +126,7 @@ class ElectricityMapsHttpClient:
         *,
         params: Mapping[str, str] | None = None,
     ) -> Mapping[str, Any]:
+        _require_live_enabled()
         if self.token is None:
             raise ElectricityMapsProviderError(
                 "Electricity Maps is not configured.",
@@ -140,6 +141,7 @@ class ElectricityMapsHttpClient:
         token = self.token.get_secret_value()
 
         def request_json(attempt: int) -> Mapping[str, Any]:
+            _require_live_enabled()
             request = Request(
                 url,
                 headers={
@@ -218,6 +220,15 @@ class ElectricityMapsHttpClient:
                         "Electricity Maps could not be reached within the configured timeout."
                     ) from None
         raise AssertionError("bounded provider retry loop did not terminate")  # pragma: no cover
+
+
+def _require_live_enabled() -> None:
+    if not get_settings().electricity_maps_live_enabled:
+        raise ElectricityMapsProviderError(
+            "Electricity Maps live calls are disabled. Stored data remains available.",
+            code="integration_live_disabled",
+            retryable=False,
+        )
 
 
 def get_electricity_maps_client() -> ElectricityMapsProvider:

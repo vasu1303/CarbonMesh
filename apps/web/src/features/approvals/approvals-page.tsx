@@ -4,10 +4,11 @@ import {
   useQueryClient,
   type UseQueryResult,
 } from '@tanstack/react-query'
-import { Check, FolderOpen, X } from 'lucide-react'
+import { Check, Eye, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useOutletContext, useSearchParams } from 'react-router-dom'
 import { z } from 'zod'
+import { RecordSelect } from '@/components/record-select'
 import {
   EmptyState,
   PageControls,
@@ -17,17 +18,17 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Textarea } from '@/components/ui/textarea'
 import { useWorkspaceActor } from '@/features/auth/use-workspace-actor'
+import { displayText, humanize, recordLabel } from '@/lib/presentation'
+import { formatDate } from '@/lib/format'
 import type { WorkspaceScope } from '@/lib/workspace'
 import { ApiError, apiRequest } from '@/services/api'
 import { ApprovalPreview } from './approval-preview'
 import { approvalKey, approvalQueries } from './queries'
 import {
-  ActorField,
   AuditLink,
   CommandError,
   DefinitionList,
@@ -56,9 +57,9 @@ function DecisionForm({
   approval: ApprovalDetail
   query: UseQueryResult<ApprovalDetail, Error>
 }) {
-  const actor = useWorkspaceActor()
+  const actor = useWorkspaceActor('approver')
   const client = useQueryClient()
-  const [manualActor, setManualActor] = useState('')
+  const [selectedReviewer, setSelectedReviewer] = useState<string | null>(null)
   const [decision, setDecision] = useState<'approve' | 'reject'>('approve')
   const [note, setNote] = useState('')
   const [confirmedHash, setConfirmedHash] = useState('')
@@ -73,7 +74,7 @@ function DecisionForm({
     )
     return () => window.clearTimeout(timer)
   }, [clock, expires])
-  const actorId = actor.actorId || manualActor.trim()
+  const actorId = selectedReviewer ?? actor.actorId
   const allowedRole = !actor.authenticated || actor.role === 'approver'
   const current =
     approval.status === 'pending' &&
@@ -155,7 +156,7 @@ function DecisionForm({
       )}
       {!allowedRole && (
         <p role="alert" className="text-sm text-amber-700">
-          The signed-in actor must have the approver role.
+          A reviewer with approval responsibility is required for this decision.
         </p>
       )}
       {query.isError && (
@@ -189,14 +190,20 @@ function DecisionForm({
           disabled={blocked}
           className="grid min-w-0 gap-4 sm:grid-cols-2"
         >
-          <ActorField
-            {...actor}
-            value={manualActor}
-            onChange={(value) => {
-              setManualActor(value)
-              setConfirmed(false)
-            }}
-          />
+          <Field label="Reviewer">
+            <RecordSelect
+              kind="actors"
+              role="approver"
+              value={actorId}
+              placeholder="Choose an approver"
+              required
+              onChange={(event) => {
+                setSelectedReviewer(event.target.value)
+                setConfirmed(false)
+                setConfirmedHash('')
+              }}
+            />
+          </Field>
           <Field label="Decision">
             <NativeSelect
               value={decision}
@@ -221,21 +228,6 @@ function DecisionForm({
               />
             </Field>
           </div>
-          <div className="sm:col-span-2">
-            <Field label="Confirm preview hash">
-              <Input
-                value={confirmedHash}
-                onChange={(event) => {
-                  setConfirmedHash(event.target.value.trim())
-                  setConfirmed(false)
-                }}
-                autoComplete="off"
-                placeholder="Exact preview hash"
-                className="font-mono text-xs"
-                required
-              />
-            </Field>
-          </div>
           <Label
             htmlFor="confirm-decision"
             className="flex items-start gap-3 text-sm sm:col-span-2"
@@ -244,18 +236,21 @@ function DecisionForm({
               id="confirm-decision"
               className="mt-0.5 shrink-0"
               checked={confirmed}
-              onCheckedChange={(checked) => setConfirmed(checked === true)}
+              onCheckedChange={(checked) => {
+                setConfirmed(checked === true)
+                setConfirmedHash(checked === true ? approval.preview_hash : '')
+              }}
             />
             <span>
-              I confirm this {decision === 'approve' ? 'approval' : 'rejection'}{' '}
-              of the exact preview, its facts and evidence.
+              I have reviewed the facts, trade-offs and evidence and confirm
+              this {decision === 'approve' ? 'approval' : 'rejection'}.
             </span>
           </Label>
         </fieldset>
         <CommandError error={mutation.error} />
         {mutation.data && (
           <p role="status" className="text-sm text-emerald-700">
-            Decision recorded: {mutation.data.status}.{' '}
+            Decision recorded: {humanize(mutation.data.status)}.{' '}
             <EventLink id={mutation.data.ledger_event_id}>
               Decision ledger event
             </EventLink>
@@ -291,6 +286,7 @@ function ApprovalInspector({
   onClose: () => void
 }) {
   const scope = useOutletContext<WorkspaceScope>()
+  const actor = useWorkspaceActor('approver')
   const query = useQuery(approvalQueries.detail(scope.company_id, id))
   return (
     <section
@@ -298,7 +294,7 @@ function ApprovalInspector({
       className="min-w-0 space-y-4 border-t pt-5"
     >
       <div className="flex items-center justify-between gap-4">
-        <h2 className="text-lg font-semibold">Exact approval preview</h2>
+        <h2 className="text-lg font-semibold">Review decision</h2>
         <div className="flex gap-1">
           <QueryRefresh query={query} label="approval" />
           <Button
@@ -317,9 +313,9 @@ function ApprovalInspector({
           <>
             <div className="flex flex-wrap gap-2">
               <Badge variant="outline">
-                {targetLabel[data.target_type] || data.target_type}
+                {targetLabel[data.target_type] || humanize(data.target_type)}
               </Badge>
-              <Badge variant="outline">{data.status}</Badge>
+              <Badge variant="outline">{humanize(data.status)}</Badge>
               <Badge variant="outline">
                 {data.preview_current ? 'Preview current' : 'Preview stale'}
               </Badge>
@@ -327,19 +323,15 @@ function ApprovalInspector({
             </div>
             <DefinitionList
               items={[
-                ['Approval UUID', data.id],
-                ['Target UUID', data.target_id],
-                [
-                  'Requested by',
-                  `${data.requester_name} / ${data.requested_by}`,
-                ],
+                ['Requested by', recordLabel('actors', data.requester_name)],
                 ['Created', data.created_at],
                 ['Expires', data.expires_at],
-                ['Preview hash', data.preview_hash],
-                ['Analysis signature', data.analysis_signature],
-                ['Context hash', data.context_hash],
-                ['Idempotency key', data.idempotency_key],
-                ['Policy', data.policy_definition_id],
+                [
+                  'Review integrity',
+                  data.preview_current
+                    ? 'Current preview recorded'
+                    : 'Review needs refreshing',
+                ],
                 [
                   'Audit',
                   <AuditLink key="audit" type="approval" id={data.id}>
@@ -356,7 +348,7 @@ function ApprovalInspector({
                 <h3 className="text-sm font-semibold">Recorded decision</h3>
                 <DefinitionList
                   items={[
-                    ['Decider', data.decider_name || data.decided_by],
+                    ['Decided by', recordLabel('actors', data.decider_name)],
                     ['Decided at', data.decided_at],
                     ['Decision note', data.decision_note],
                     [
@@ -373,7 +365,7 @@ function ApprovalInspector({
               </section>
             )}
             <DecisionForm
-              key={`${data.id}:${data.preview_hash}`}
+              key={`${data.id}:${data.preview_hash}:${data.idempotency_key}:${actor.actorId}`}
               approval={data}
               query={query}
             />
@@ -391,7 +383,6 @@ function Approvals({
 }) {
   const scope = useOutletContext<WorkspaceScope>()
   const [params, setParams] = useSearchParams()
-  const [openError, setOpenError] = useState('')
   const list = useQuery(
     approvalQueries.list(
       scope.company_id,
@@ -424,7 +415,7 @@ function Approvals({
               <NativeSelectOption value="all">All statuses</NativeSelectOption>
               {approvalStatus.options.map((v) => (
                 <NativeSelectOption key={v} value={v}>
-                  {v}
+                  {humanize(v)}
                 </NativeSelectOption>
               ))}
             </NativeSelect>
@@ -442,34 +433,6 @@ function Approvals({
             </NativeSelect>
           </Field>
         </div>
-        <form
-          className="flex flex-wrap items-end gap-3"
-          onSubmit={(e) => {
-            e.preventDefault()
-            const id = String(
-              new FormData(e.currentTarget).get('approval') || '',
-            ).trim()
-            if (!z.uuid().safeParse(id).success) {
-              setOpenError('Enter a valid approval UUID.')
-              return
-            }
-            setOpenError('')
-            update({ approval: id })
-          }}
-        >
-          <Field label="Approval UUID">
-            <Input name="approval" required />
-          </Field>
-          <Button variant="outline" size="sm">
-            <FolderOpen />
-            Open approval
-          </Button>
-          {openError && (
-            <p role="alert" className="text-sm text-destructive">
-              {openError}
-            </p>
-          )}
-        </form>
       </div>
       <section aria-label="Approval queue" className="min-w-0">
         <div className="mb-3 flex items-center justify-between">
@@ -504,31 +467,37 @@ function Approvals({
                           <td className="min-w-44 max-w-72 p-2 wrap-anywhere">
                             <p>
                               {targetLabel[item.target_type] ||
-                                item.target_type}
+                                humanize(item.target_type)}
                             </p>
                             <p className="mt-1 text-xs text-muted-foreground">
-                              {item.recommended_product_name || item.target_id}
+                              {item.recommended_product_name
+                                ? displayText(item.recommended_product_name)
+                                : `Requested ${formatDate(item.created_at)}`}
                             </p>
                           </td>
-                          <td className="p-2">{item.requester_name}</td>
                           <td className="p-2">
-                            <Badge variant="outline">{item.status}</Badge>
+                            {recordLabel('actors', item.requester_name)}
+                          </td>
+                          <td className="p-2">
+                            <Badge variant="outline">
+                              {humanize(item.status)}
+                            </Badge>
                           </td>
                           <td className="p-2">
                             {item.preview_current ? 'Current' : 'Stale'}
                           </td>
                           <td className="whitespace-nowrap p-2 text-xs">
                             {item.expired ? 'Expired / ' : ''}
-                            {item.expires_at}
+                            {formatDate(item.expires_at)}
                           </td>
                           <td className="p-2">
                             <Button
                               size="sm"
                               variant="outline"
-                              aria-label={`Review approval ${item.id}`}
+                              aria-label={`Review ${targetLabel[item.target_type] || 'decision'} requested by ${recordLabel('actors', item.requester_name)} on ${formatDate(item.created_at)}`}
                               onClick={() => update({ approval: item.id })}
                             >
-                              Review
+                              <Eye /> Review
                             </Button>
                           </td>
                         </tr>
@@ -567,7 +536,8 @@ export default function ApprovalsPage() {
   if (!parsed.success)
     return (
       <section role="alert" className="space-y-4 px-5 py-6 sm:px-8">
-        <h1 className="text-xl font-semibold">Invalid approval filters</h1>
+        <h1 className="text-xl font-semibold">Approvals</h1>
+        <p className="text-sm">These review filters are unavailable.</p>
         <Button variant="outline" onClick={() => setParams({})}>
           Reset filters
         </Button>

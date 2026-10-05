@@ -2,7 +2,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check, Search } from 'lucide-react'
 import { useState } from 'react'
-import { useForm } from 'react-hook-form'
+import { useForm, useWatch } from 'react-hook-form'
 import { Link, useOutletContext, useSearchParams } from 'react-router-dom'
 import { z } from 'zod'
 
@@ -12,6 +12,8 @@ import {
   QueryRefresh,
   QueryState,
 } from '@/components/query-state'
+import { RecordSelect } from '@/components/record-select'
+import { displayText, humanize } from '@/lib/presentation'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -50,6 +52,7 @@ import {
 } from '@/features/data/schemas'
 import type { WorkspaceScope } from '@/lib/workspace'
 import { apiRequest, retryApiQuery } from '@/services/api'
+import { useWorkspaceOptions } from '@/services/workspace'
 
 const filterSchema = z.object({
   status: z.enum(['open', 'resolved', 'waived']).default('open'),
@@ -97,27 +100,24 @@ function ReviewIssue({
       decision_note: '',
     },
   })
+  const watched = useWatch({ control: form.control })
   const current = command.data ?? issue
-  const allowed =
-    !actor.authenticated ||
-    actor.role === 'sustainability_analyst' ||
-    actor.role === 'approver'
+  const reviewer = useWorkspaceOptions('actors', {
+    id: current.details.review?.actor_id,
+    enabled: !!current.details.review,
+  })
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap gap-2">
-        <Badge variant="outline">{current.severity}</Badge>
-        <Badge variant="outline">{current.status}</Badge>
+        <Badge variant="outline">{humanize(current.severity)}</Badge>
+        <Badge variant="outline">{humanize(current.status)}</Badge>
       </div>
-      <p className="text-sm">{current.message}</p>
+      <p className="text-sm">{displayText(current.message)}</p>
       <dl className="grid gap-3 text-xs sm:grid-cols-2">
-        <div>
-          <dt className="text-muted-foreground">Issue UUID</dt>
-          <dd className="break-all font-mono">{current.id}</dd>
-        </div>
         <div>
           <dt className="text-muted-foreground">Field / row</dt>
           <dd>
-            {current.field_name ?? 'Document'} /{' '}
+            {humanize(current.field_name ?? 'Document')} /{' '}
             {current.row_number ?? 'Document'}
           </dd>
         </div>
@@ -127,7 +127,7 @@ function ReviewIssue({
           className="block break-all text-sm text-emerald-700 underline dark:text-emerald-400"
           to={`/data?import=${current.import_id}`}
         >
-          Open import {current.import_id}
+          Open source import
         </Link>
       )}
       {current.details.review && (
@@ -136,11 +136,16 @@ function ReviewIssue({
           aria-label="Recorded review"
         >
           <h3 className="font-medium">Recorded review</h3>
-          <p className="whitespace-pre-wrap wrap-anywhere">
-            {current.details.review.decision_note}
+          <p className="text-xs text-muted-foreground">
+            Reviewed by{' '}
+            {reviewer.isPending
+              ? 'Loading reviewer...'
+              : displayText(
+                  reviewer.data?.items[0]?.label ?? 'Reviewer unavailable',
+                )}
           </p>
-          <p className="break-all font-mono text-xs">
-            Actor: {current.details.review.actor_id}
+          <p className="whitespace-pre-wrap wrap-anywhere">
+            {displayText(current.details.review.decision_note)}
           </p>
           <p className="text-xs text-muted-foreground">
             {current.details.reviewed_at ?? current.updated_at}
@@ -150,7 +155,7 @@ function ReviewIssue({
       {current.status === 'open' && (
         <form
           onSubmit={form.handleSubmit((values) => {
-            if (stale || !allowed) return
+            if (stale) return
             if (current.severity === 'error' && values.status === 'waived') {
               form.setError('status', {
                 message: 'Blocking errors cannot be waived.',
@@ -182,12 +187,10 @@ function ReviewIssue({
           })}
           className="space-y-4 border-t pt-4"
         >
-          <fieldset
-            disabled={command.pending || stale || !allowed}
-            className="space-y-4"
-          >
+          <fieldset disabled={command.pending || stale} className="space-y-4">
             <ActorField
               registration={form.register('actor_id')}
+              value={watched.actor_id ?? ''}
               error={form.formState.errors.actor_id?.message}
             />
             <Field
@@ -219,16 +222,9 @@ function ReviewIssue({
               />
             </Field>
             <p className="text-xs text-muted-foreground">
-              {current.severity === 'error'
-                ? 'Blocking errors cannot be waived. Correct the source and record the resolution.'
-                : 'A review changes the issue status only.'}{' '}
-              Rejected source records remain invalid until corrected and
-              imported.
+              Rejected rows need a corrected upload.
             </p>
-            <Button
-              type="submit"
-              disabled={command.pending || stale || !allowed}
-            >
+            <Button type="submit" disabled={command.pending || stale}>
               <Check />
               {command.pending ? 'Recording...' : 'Record decision'}
             </Button>
@@ -239,11 +235,6 @@ function ReviewIssue({
               decision.
             </p>
           )}
-          {!allowed && (
-            <p className="text-sm text-amber-700">
-              Only a sustainability analyst or approver can review issues.
-            </p>
-          )}
         </form>
       )}
       <CommandError error={command.error} />
@@ -252,7 +243,7 @@ function ReviewIssue({
           role="status"
           className="text-sm text-emerald-700 dark:text-emerald-400"
         >
-          Decision recorded. Source validity is unchanged.
+          Decision recorded.
         </p>
       )}
     </div>
@@ -300,6 +291,7 @@ function QualityQueue({ filters }: { filters: Filters }) {
     staleTime: 30_000,
     retry: retryApiQuery,
   })
+  const watched = useWatch({ control: form.control })
   function apply(values: Filters) {
     const parsed = filterSchema.safeParse(values)
     if (!parsed.success) {
@@ -339,23 +331,33 @@ function QualityQueue({ filters }: { filters: Filters }) {
             <NativeSelectOption value="info">Info</NativeSelectOption>
           </NativeSelect>
         </Field>
-        <Field
-          label="Issue code (exact)"
-          error={form.formState.errors.code?.message}
-        >
-          <Input {...form.register('code')} maxLength={100} />
-        </Field>
-        <Field
-          label="Issue type (exact)"
-          error={form.formState.errors.issue_type?.message}
-        >
-          <Input {...form.register('issue_type')} maxLength={100} />
-        </Field>
-        <Field
-          label="Import UUID filter"
-          error={form.formState.errors.import_id?.message}
-        >
-          <Input {...form.register('import_id')} />
+        <details className="sm:col-span-2 xl:col-span-3">
+          <summary className="cursor-pointer text-xs font-medium">
+            Additional filters
+          </summary>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            {' '}
+            <Field
+              label="Issue code (exact)"
+              error={form.formState.errors.code?.message}
+            >
+              <Input {...form.register('code')} maxLength={100} />
+            </Field>
+            <Field
+              label="Issue type (exact)"
+              error={form.formState.errors.issue_type?.message}
+            >
+              <Input {...form.register('issue_type')} maxLength={100} />
+            </Field>
+          </div>
+        </details>
+        <Field label="Import" error={form.formState.errors.import_id?.message}>
+          <RecordSelect
+            kind="imports"
+            placeholder="All imports"
+            {...form.register('import_id')}
+            value={watched.import_id ?? ''}
+          />
         </Field>
         <Field label="Rows per page">
           <NativeSelect {...form.register('limit')}>
@@ -400,13 +402,13 @@ function QualityQueue({ filters }: { filters: Filters }) {
                     {data.items.map((issue) => (
                       <TableRow key={issue.id}>
                         <TableCell className="min-w-64 max-w-lg whitespace-normal">
-                          <p className="font-medium">{issue.code}</p>
+                          <p className="font-medium">{humanize(issue.code)}</p>
                           <p className="text-xs text-muted-foreground">
-                            {issue.message}
+                            {displayText(issue.message)}
                           </p>
                           <p className="mt-1 text-xs text-muted-foreground">
-                            {issue.issue_type} /{' '}
-                            {issue.field_name ?? 'Document'}
+                            {humanize(issue.issue_type)} /{' '}
+                            {humanize(issue.field_name ?? 'Document')}
                           </p>
                         </TableCell>
                         <TableCell>
@@ -418,18 +420,18 @@ function QualityQueue({ filters }: { filters: Filters }) {
                                 : ''
                             }
                           >
-                            {issue.severity}
+                            {humanize(issue.severity)}
                           </Badge>
                         </TableCell>
                         <TableCell>{issue.row_number ?? 'Document'}</TableCell>
-                        <TableCell>{issue.status}</TableCell>
+                        <TableCell>{humanize(issue.status)}</TableCell>
                         <TableCell>
                           {issue.import_id ? (
                             <Link
                               className="font-mono text-xs text-emerald-700 underline dark:text-emerald-400"
                               to={`/data?import=${issue.import_id}`}
                             >
-                              {issue.import_id}
+                              Open import
                             </Link>
                           ) : (
                             'Not linked'
@@ -440,7 +442,7 @@ function QualityQueue({ filters }: { filters: Filters }) {
                             size="sm"
                             variant="outline"
                             onClick={() => setSelected(issue)}
-                            aria-label={`Review ${issue.code} ${issue.id}`}
+                            aria-label={`Review ${humanize(issue.code)} on row ${issue.row_number ?? 'document'}`}
                           >
                             Review
                           </Button>
@@ -477,7 +479,7 @@ function QualityQueue({ filters }: { filters: Filters }) {
         <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>Review quality issue</DialogTitle>
-            <DialogDescription>{selected?.code}</DialogDescription>
+            <DialogDescription>{displayText(selected?.code)}</DialogDescription>
           </DialogHeader>
           {selected && (
             <ReviewIssue
@@ -499,11 +501,16 @@ export default function QualityPage() {
   const parsed = filterSchema.safeParse(Object.fromEntries(params))
   return (
     <div className="min-w-0 space-y-5 px-5 py-6 sm:px-8">
-      <header>
-        <h1 className="text-2xl font-semibold">Data quality</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Source validation and audited review
-        </p>
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold">Check data</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Source validation and audited review
+          </p>
+        </div>
+        <Button asChild variant="outline">
+          <Link to="/data">Upload corrected data</Link>
+        </Button>
       </header>
       <WorkspaceProvenance />
       {parsed.success ? (
@@ -513,10 +520,7 @@ export default function QualityPage() {
         />
       ) : (
         <section role="alert" className="space-y-3">
-          <p>
-            Invalid quality filters. Identifiers must be UUIDs and pagination
-            must be within the supported bounds.
-          </p>
+          <p>These filters are invalid. Reset them to review quality issues.</p>
           <Button variant="outline" onClick={() => setParams({})}>
             Reset filters
           </Button>

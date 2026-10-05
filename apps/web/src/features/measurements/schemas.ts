@@ -282,7 +282,7 @@ export const measurementFiltersSchema = z.object({
     .refine((value) => [5, 10, 25, 50].includes(value))
     .catch(10),
   offset: z.coerce.number().int().min(0).max(1_000_000).catch(0),
-  view: z.enum(['records', 'chart']).catch('records'),
+  view: z.enum(['records', 'chart']).catch('chart'),
 })
 
 export type MeasurementSummary = z.infer<typeof measurementSummarySchema>

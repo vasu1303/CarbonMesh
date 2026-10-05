@@ -44,7 +44,6 @@ const DispatchScenarioPage = lazy(
 const ApprovalsPage = lazy(() => import('@/features/approvals/approvals-page'))
 const RunPage = lazy(() => import('@/features/runs/run-page'))
 const LedgerPage = lazy(() => import('@/features/ledger/ledger-page'))
-const DemoPage = lazy(() => import('@/features/demo/demo-page'))
 
 function Screen({ children }: { children: ReactNode }) {
   return (
@@ -232,11 +231,7 @@ const router = createBrowserRouter([
       },
       {
         path: 'demo',
-        element: (
-          <Screen>
-            <DemoPage />
-          </Screen>
-        ),
+        element: <Navigate to="/dashboard" replace />,
       },
       { path: '*', element: <MissingPage /> },
     ],

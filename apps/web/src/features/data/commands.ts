@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 
 export function useIdempotencyKey() {
   const last = useRef<{ payload: string; key: string } | null>(null)
@@ -12,6 +13,7 @@ export function useIdempotencyKey() {
 
 // Local execution state keeps command bodies out of the shared mutation cache.
 export function useCommand<T>() {
+  const client = useQueryClient()
   const [state, setState] = useState<{
     pending: boolean
     data?: T
@@ -34,6 +36,7 @@ export function useCommand<T>() {
     setState({ pending: true })
     try {
       const data = await operation()
+      void client.invalidateQueries({ queryKey: ['workspace-options'] })
       if (!mounted.current) return
       setState({ pending: false, data })
       onSuccess?.(data)

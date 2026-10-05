@@ -339,7 +339,9 @@ class DispatchService:
         except (ElectricityMapsProviderError, OSError, RuntimeError, TimeoutError) as error:
             retryable = bool(getattr(error, "retryable", True))
             code = str(getattr(error, "code", ForecastProviderError.code))
-            status_code = 503 if retryable or code == "integration_not_configured" else 502
+            status_code = 503 if retryable or code in {
+                "integration_not_configured", "integration_live_disabled",
+            } else 502
             if code == "integration_authentication_failed":
                 status_code = 401
             raise ForecastProviderError(

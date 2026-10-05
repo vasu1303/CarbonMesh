@@ -10,13 +10,16 @@ import {
 import { Link, useLocation, useOutletContext } from 'react-router-dom'
 import { z } from 'zod'
 import { QueryState } from '@/components/query-state'
+import { RecordSelect } from '@/components/record-select'
 import { Badge } from '@/components/ui/badge'
-import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { displayText, humanize, recordLabel } from '@/lib/presentation'
+import { useWorkspaceActor } from '@/features/auth/use-workspace-actor'
 import type { WorkspaceScope } from '@/lib/workspace'
 import { ApiError } from '@/services/api'
 import { catalogQueries } from '@/features/procurement/queries'
 import type { Fact } from '@/features/procurement/scenario-schemas'
+import { reviewValue } from './presentation'
 
 export function WorkspaceProvenance() {
   const scope = useOutletContext<WorkspaceScope>()
@@ -29,9 +32,12 @@ export function WorkspaceProvenance() {
       <QueryState query={context}>
         {(data) => (
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-            <span className="font-medium">{data.company.name}</span>
+            <span className="font-medium">
+              {displayText(data.company.name)}
+            </span>
             <span>
-              {data.site.name} / {data.reporting_period.name}
+              {displayText(data.site.name)} /{' '}
+              {displayText(data.reporting_period.name)}
             </span>
             <Badge variant="outline" className="sm:ml-auto">
               {data.company.is_synthetic
@@ -90,7 +96,6 @@ export function Field({
 }
 export function ActorField({
   actorId,
-  authenticated,
   value,
   onChange,
 }: {
@@ -99,20 +104,24 @@ export function ActorField({
   value: string
   onChange: (value: string) => void
 }) {
+  const actor = useWorkspaceActor()
+  if (actorId)
+    return (
+      <div className="space-y-1 text-sm">
+        <p className="text-xs text-muted-foreground">Requested by</p>
+        <p>{recordLabel('actors', actor.actorName)}</p>
+      </div>
+    )
   return (
-    <Field label="Actor UUID">
-      <Input
-        value={actorId || value}
+    <Field label="Requester">
+      <RecordSelect
+        kind="actors"
+        value={value}
         onChange={(e) => onChange(e.target.value)}
-        readOnly={authenticated || !!actorId}
         required
-        aria-label="Actor UUID"
-        placeholder="Required actor UUID"
+        placeholder="Choose a requester"
         autoComplete="off"
       />
-      {authenticated && (
-        <span className="block text-muted-foreground">Signed-in principal</span>
-      )}
     </Field>
   )
 }
@@ -120,15 +129,10 @@ export function CommandError({ error }: { error: Error | null }) {
   if (!error) return null
   return (
     <div role="alert" className="space-y-2 py-3 text-sm text-destructive">
-      <p>{error.message}</p>
+      <p>{displayText(error.message)}</p>
       {error instanceof ApiError && (
         <>
-          <p>{error.terminalState || error.code}</p>
-          {error.traceId && (
-            <p className="break-all font-mono text-xs">
-              Trace: {error.traceId}
-            </p>
-          )}
+          <p>{humanize(error.terminalState || error.code)}</p>
           {error.fieldDetails && <RecordFields value={error.fieldDetails} />}
         </>
       )}
@@ -142,7 +146,9 @@ export function DefinitionList({ items }: { items: [string, ReactNode][] }) {
         <div key={label} className="min-w-0">
           <dt className="mb-1 text-xs text-muted-foreground">{label}</dt>
           <dd className="whitespace-pre-wrap wrap-anywhere">
-            {value ?? 'Not recorded'}
+            {typeof value === 'string'
+              ? reviewValue(value)
+              : (value ?? 'Not recorded')}
           </dd>
         </div>
       ))}
@@ -166,7 +172,9 @@ export function EventLink({
       className="break-all text-emerald-700 underline underline-offset-4 dark:text-emerald-400"
       to={`/ledger?${params}`}
     >
-      {children ?? id}
+      {typeof children === 'string'
+        ? displayText(children)
+        : (children ?? 'View source event')}
     </Link>
   )
 }
@@ -190,7 +198,9 @@ export function AuditLink({
       className="break-all text-emerald-700 underline underline-offset-4 dark:text-emerald-400"
       to={`/ledger?${params}`}
     >
-      {children ?? id}
+      {typeof children === 'string'
+        ? displayText(children)
+        : (children ?? 'View record history')}
     </Link>
   )
 }
@@ -211,9 +221,12 @@ export function FactTable({ facts }: { facts: Fact[] }) {
               className="border-b align-top"
               key={f.id ?? `${f.placeholder}-${index}`}
             >
-              <td className="p-2 wrap-anywhere">{f.placeholder}</td>
-              <td className="p-2 font-mono" title={f.unit ?? undefined}>
-                {f.display_value}
+              <td className="p-2 wrap-anywhere">{humanize(f.placeholder)}</td>
+              <td
+                className="p-2 tabular-nums"
+                title={f.unit ? displayText(f.unit) : undefined}
+              >
+                {displayText(f.display_value)}
               </td>
               <td className="space-y-1 p-2 text-xs">
                 {f.ledger_event_id && (
@@ -245,7 +258,7 @@ export function FactTable({ facts }: { facts: Fact[] }) {
   )
 }
 
-// Records remain server-owned; these views format exact values without deriving facts.
+// Presentation never changes the server-owned preview used for decisions.
 export function RecordFields({
   value,
   depth = 0,
@@ -258,13 +271,13 @@ export function RecordFields({
   if (typeof value !== 'object')
     return (
       <span className="whitespace-pre-wrap wrap-anywhere">
-        {typeof value === 'boolean' ? (value ? 'Yes' : 'No') : String(value)}
+        {reviewValue(value)}
       </span>
     )
   if (depth > 8)
     return (
       <p className="text-muted-foreground">
-        Nested record available in the exact payload.
+        Further source details are recorded in the audit history.
       </p>
     )
   if (Array.isArray(value))
@@ -279,29 +292,42 @@ export function RecordFields({
     )
   return (
     <dl className="min-w-0 divide-y text-sm">
-      {Object.entries(value).map(([key, item]) => (
-        <div
-          className="grid min-w-0 gap-1 py-2 sm:grid-cols-[minmax(8rem,1fr)_minmax(0,3fr)] sm:gap-4"
-          key={key}
-        >
-          <dt className="wrap-anywhere text-xs text-muted-foreground">
-            {key.replaceAll('_', ' ')}
-          </dt>
-          <dd className="min-w-0 wrap-anywhere">
-            {typeof item === 'string' &&
-            z.uuid().safeParse(item).success &&
-            (key === 'ledger_event_id' || key.endsWith('_ledger_event_id')) ? (
-              <EventLink id={item} />
-            ) : typeof item === 'string' &&
-              z.uuid().safeParse(item).success &&
-              key === 'evidence_item_id' ? (
-              <AuditLink type="evidence_item" id={item} />
-            ) : (
-              <RecordFields value={item} depth={depth + 1} />
-            )}
-          </dd>
-        </div>
-      ))}
+      {Object.entries(value)
+        .filter(
+          ([key]) =>
+            !/(^id$|_ids?$|idempotency_key|trace_id|_template$)/.test(key) ||
+            key === 'ledger_event_id' ||
+            key.endsWith('_ledger_event_id') ||
+            key === 'evidence_item_id',
+        )
+        .map(([key, item]) => (
+          <div
+            className="grid min-w-0 gap-1 py-2 sm:grid-cols-[minmax(8rem,1fr)_minmax(0,3fr)] sm:gap-4"
+            key={key}
+          >
+            <dt className="wrap-anywhere text-xs text-muted-foreground">
+              {humanize(
+                key.replace(/_(hash|checksum|signature)$/, '_integrity'),
+              )}
+            </dt>
+            <dd className="min-w-0 wrap-anywhere">
+              {/hash|checksum|signature/.test(key) ? (
+                <span>{item ? 'Recorded' : 'Not recorded'}</span>
+              ) : typeof item === 'string' &&
+                z.uuid().safeParse(item).success &&
+                (key === 'ledger_event_id' ||
+                  key.endsWith('_ledger_event_id')) ? (
+                <EventLink id={item} />
+              ) : typeof item === 'string' &&
+                z.uuid().safeParse(item).success &&
+                key === 'evidence_item_id' ? (
+                <AuditLink type="evidence_item" id={item} />
+              ) : (
+                <RecordFields value={item} depth={depth + 1} />
+              )}
+            </dd>
+          </div>
+        ))}
     </dl>
   )
 }
@@ -309,11 +335,11 @@ export function RawPayload({ value }: { value: unknown }) {
   return (
     <details className="min-w-0 border-t py-3 text-xs">
       <summary className="cursor-pointer font-medium">
-        Exact technical payload
+        Additional recorded details
       </summary>
-      <pre className="mt-3 max-h-96 overflow-auto whitespace-pre-wrap break-all rounded border bg-muted/30 p-3">
-        {JSON.stringify(value, null, 2)}
-      </pre>
+      <div className="mt-3">
+        <RecordFields value={value} />
+      </div>
     </details>
   )
 }

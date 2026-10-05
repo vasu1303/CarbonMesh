@@ -1,4 +1,6 @@
 import type { Page, Route } from '@playwright/test'
+import { workspaceResponse } from './workspace-fixtures'
+import measurementRecords from './fixtures/measurements.synthetic.json' with { type: 'json' }
 
 // Synthetic contract projections for browser tests, never application fallback data.
 export const id = (value: number) =>
@@ -55,6 +57,7 @@ const approvals = [
 ]
 export const event = {
   id: id(501),
+  company_id: id(1),
   event_type: 'measurement.verified',
   entity_type: 'measurement',
   entity_id: id(201),
@@ -96,6 +99,8 @@ function paginate(items: unknown[], url: URL) {
 }
 
 export function fixtureFor(url: URL, empty = false): unknown {
+  const options = workspaceResponse(url)
+  if (options) return options
   const path = url.pathname.replace('/api', '')
   if (path === '/health') return { status: 'ok', service: 'CarbonMesh API' }
   if (path === '/auth/session')
@@ -123,9 +128,11 @@ export function fixtureFor(url: URL, empty = false): unknown {
   if (path === '/measurements') return paginate(empty ? [] : measurements, url)
   if (path === `/measurements/${id(201)}`)
     return {
+      ...measurementRecords.records[0].detail,
       ...measurement,
       formula: 'kg * kgCO2e_per_kg',
       calculation_run: {
+        ...measurementRecords.records[0].detail.calculation_run,
         id: id(701),
         method_key: 'purchased_material_v1',
         method_version: '1.0.0',
@@ -136,6 +143,7 @@ export function fixtureFor(url: URL, empty = false): unknown {
       },
       inputs: [
         {
+          ...measurementRecords.records[0].detail.inputs[0],
           activity_record_id: id(801),
           raw_activity_record_id: id(901),
           source_document_id: id(1001),
@@ -147,6 +155,7 @@ export function fixtureFor(url: URL, empty = false): unknown {
       ],
       factors: [
         {
+          ...measurementRecords.records[0].detail.factors[0],
           id: id(1101),
           name: 'Synthetic material factor',
           version: 'v1',
@@ -154,6 +163,7 @@ export function fixtureFor(url: URL, empty = false): unknown {
           numerator_unit: 'kgCO2e',
           denominator_unit: 'kg',
           evidence: {
+            ...measurementRecords.records[0].detail.factors[0].evidence,
             id: id(1201),
             source_document_id: id(1001),
             source_document_filename: 'synthetic-factor.txt',
@@ -162,7 +172,9 @@ export function fixtureFor(url: URL, empty = false): unknown {
           },
         },
       ],
-      facts: { fact_id: id(201), ledger_event_id: id(501), output_hash: hash },
+      calculations: [{ ...measurementRecords.records[0].detail.calculations[0], activity_record_id: id(801), emission_factor_id: id(1101), normalized_quantity_kg: '10000', factor_kgco2e_per_kg: '1.2500125', emissions_kgco2e: measurement.value_kgco2e, output_hash: hash }],
+      baseline: null,
+      facts: { fact_id: id(201), ledger_event_id: id(501), output_hash: hash, audit_log_id: null },
     }
   if (path === `/measurements/${id(201)}/lineage`)
     return {
@@ -210,6 +222,12 @@ export function fixtureFor(url: URL, empty = false): unknown {
       evidence: [
         {
           id: id(1201),
+          evidence_type: 'emission_factor',
+          metadata: { synthetic: true },
+          source_document_checksum: hash,
+          data_source_id: id(1000),
+          data_source_name: 'Synthetic factor source',
+          created_at: time,
           source_document_id: id(1001),
           source_filename: 'synthetic-factor.txt',
           locator: 'line:1',

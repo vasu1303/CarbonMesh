@@ -11,6 +11,7 @@ import {
 } from '@/components/ui/tooltip'
 import { ApiError } from '@/services/api'
 import { formatDate } from '@/lib/format'
+import { displayText } from '@/lib/presentation'
 
 export function QueryState<T>({
   query,
@@ -37,12 +38,9 @@ export function QueryState<T>({
             <AlertCircle className="size-4 shrink-0 text-amber-600" />
             Data unavailable
           </p>
-          <p className="text-muted-foreground">{query.error.message}</p>
-          {query.error instanceof ApiError && query.error.traceId && (
-            <p className="break-all font-mono text-xs text-muted-foreground">
-              Trace: {query.error.traceId}
-            </p>
-          )}
+          <p className="text-muted-foreground">
+            {displayText(query.error.message)}
+          </p>
           <Button
             variant="outline"
             size="sm"

@@ -1,8 +1,8 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { ArrowRight, FolderOpen, Plus, Search } from 'lucide-react'
+import { ArrowRight, Plus, Search } from 'lucide-react'
 import { useRef, useState } from 'react'
-import { useForm } from 'react-hook-form'
+import { useForm, useWatch } from 'react-hook-form'
 import { Link, useNavigate, useOutletContext } from 'react-router-dom'
 import { z } from 'zod'
 import {
@@ -11,6 +11,10 @@ import {
   QueryRefresh,
   QueryState,
 } from '@/components/query-state'
+import { RecordSelect } from '@/components/record-select'
+import { displayText, humanize } from '@/lib/presentation'
+import { OpenArtifact } from '@/features/assurance/workflow-ui'
+import { ActorField } from '@/features/data/intake-ui'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
@@ -41,7 +45,6 @@ function CreateScenario() {
     id: string
     label: string
   } | null>(null)
-  const [openError, setOpenError] = useState('')
   const retry = useRef<{ payload: string; key: string } | null>(null)
   const suppliers = useQuery(
     catalogQueries.suppliers(scope.company_id, filters),
@@ -78,6 +81,7 @@ function CreateScenario() {
       approval_expires_at: '',
     },
   })
+  const watched = useWatch({ control: form.control })
   const create = useMutation({
     mutationFn: async (values: z.output<typeof scenarioFormSchema>) => {
       const body = {
@@ -87,7 +91,7 @@ function CreateScenario() {
         current_product_id: values.current_product_id,
         carbon_measurement_id: values.carbon_measurement_id,
         method_definition_id: values.method_definition_id,
-        requested_by: actor.actorId || values.requested_by,
+        requested_by: values.requested_by,
         quantity: values.quantity,
         quantity_unit: values.quantity_unit,
         current_unit_cost: values.current_unit_cost || null,
@@ -156,33 +160,7 @@ function CreateScenario() {
         </Button>
       </header>
       <WorkspaceProvenance />
-      <form
-        className="flex flex-wrap items-end gap-3 border-b pb-5"
-        onSubmit={(event) => {
-          event.preventDefault()
-          const id = String(
-            new FormData(event.currentTarget).get('scenario') || '',
-          ).trim()
-          if (!z.uuid().safeParse(id).success) {
-            setOpenError('Enter a valid scenario UUID.')
-            return
-          }
-          navigate(`/procurement/scenarios/${id}`)
-        }}
-      >
-        <Field label="Existing scenario UUID">
-          <Input name="scenario" required placeholder="Scenario UUID" />
-        </Field>
-        <Button variant="outline" size="sm">
-          <FolderOpen />
-          Open scenario
-        </Button>
-        {openError && (
-          <p role="alert" className="text-sm text-destructive">
-            {openError}
-          </p>
-        )}
-      </form>
+      <OpenArtifact kind="Scenario" path="/procurement/scenarios" />
       <section
         aria-label="Supplier and product selection"
         className="space-y-4"
@@ -242,12 +220,12 @@ function CreateScenario() {
                       {filters.supplier &&
                         !data.items.some((v) => v.id === filters.supplier) && (
                           <NativeSelectOption value={filters.supplier}>
-                            {filters.supplier}
+                            Selected supplier
                           </NativeSelectOption>
                         )}
                       {data.items.map((v) => (
                         <NativeSelectOption key={v.id} value={v.id}>
-                          {v.name}
+                          {displayText(v.name)}
                         </NativeSelectOption>
                       ))}
                     </NativeSelect>
@@ -295,12 +273,12 @@ function CreateScenario() {
                       {selected &&
                         !data.items.some((v) => v.id === selected.id) && (
                           <NativeSelectOption value={selected.id}>
-                            {selected.name}
+                            {displayText(selected.name)}
                           </NativeSelectOption>
                         )}
                       {data.items.map((v) => (
                         <NativeSelectOption key={v.id} value={v.id}>
-                          {v.name} / {v.supplier_name}
+                          {displayText(v.name)} / {displayText(v.supplier_name)}
                         </NativeSelectOption>
                       ))}
                     </NativeSelect>
@@ -325,8 +303,8 @@ function CreateScenario() {
         </div>
         {selected && (
           <p className="text-sm wrap-anywhere">
-            {selected.name} / {selected.currency} {selected.unit_cost} per{' '}
-            {selected.pcf_unit} / {selected.pcf_kgco2e_per_unit} kgCO2e/
+            {displayText(selected.name)} / {selected.currency}{' '}
+            {selected.unit_cost} / {selected.pcf_kgco2e_per_unit}{' '}
             {selected.pcf_unit}
           </p>
         )}
@@ -356,7 +334,7 @@ function CreateScenario() {
                       item
                         ? {
                             id: item.id,
-                            label: `${item.value_kgco2e} ${item.unit} / ${item.id}`,
+                            label: `${humanize(item.metric_key)} / ${item.value_kgco2e} ${item.unit}`,
                           }
                         : null,
                     )
@@ -373,12 +351,12 @@ function CreateScenario() {
                       (v) => v.id === selectedMeasurement.id,
                     ) && (
                       <NativeSelectOption value={selectedMeasurement.id}>
-                        {selectedMeasurement.label}
+                        {displayText(selectedMeasurement.label)}
                       </NativeSelectOption>
                     )}
                   {data.items.map((v) => (
                     <NativeSelectOption key={v.id} value={v.id}>
-                      {v.value_kgco2e} {v.unit} / {v.id}
+                      {humanize(v.metric_key)} / {v.value_kgco2e} {v.unit}
                     </NativeSelectOption>
                   ))}
                 </NativeSelect>
@@ -412,18 +390,22 @@ function CreateScenario() {
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {textField('quantity', 'Quantity', 'Required quantity')}
             {textField('quantity_unit', 'Quantity unit', 'Required unit')}
-            {textField(
-              'method_definition_id',
-              'Scoring method UUID',
-              'Required supplier-scoring method UUID',
-            )}
-            <Field label="Actor UUID" error={errors.requested_by?.message}>
-              <Input
-                {...form.register('requested_by')}
-                readOnly={actor.authenticated || !!actor.actorId}
-                placeholder="Required actor UUID"
+            <Field
+              label="Scoring method"
+              error={errors.method_definition_id?.message}
+            >
+              <RecordSelect
+                kind="methods"
+                {...form.register('method_definition_id')}
+                value={watched.method_definition_id ?? ''}
+                required
               />
             </Field>
+            <ActorField
+              registration={form.register('requested_by')}
+              value={watched.requested_by ?? ''}
+              error={errors.requested_by?.message}
+            />
             {textField(
               'current_unit_cost',
               'Current unit cost override (optional)',
@@ -479,10 +461,9 @@ function CreateScenario() {
 }
 export default function ScenarioCreatePage() {
   const scope = useOutletContext<WorkspaceScope>()
-  const actor = useWorkspaceActor()
   return (
     <CreateScenario
-      key={`${scope.company_id}:${scope.site_id}:${scope.reporting_period_id}:${actor.actorId}`}
+      key={`${scope.company_id}:${scope.site_id}:${scope.reporting_period_id}}`}
     />
   )
 }

@@ -1,21 +1,19 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { CloudDownload, FilePlus2, Plus, X } from 'lucide-react'
+import { FilePlus2, Plus, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { Controller, useFieldArray, useForm, useWatch } from 'react-hook-form'
+import { useFieldArray, useForm, useWatch } from 'react-hook-form'
 import { useNavigate, useOutletContext } from 'react-router-dom'
-import { z } from 'zod'
 import {
   EmptyState,
   PageControls,
   QueryRefresh,
   QueryState,
 } from '@/components/query-state'
-import { Badge } from '@/components/ui/badge'
+import { RecordSelect } from '@/components/record-select'
+import { displayText } from '@/lib/presentation'
 import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import {
   Table,
@@ -29,202 +27,19 @@ import { useWorkspaceActor } from '@/features/auth/use-workspace-actor'
 import {
   CommandError,
   FieldError,
-  HashValue,
   OpenArtifact,
   WorkflowContext,
 } from '@/features/assurance/workflow-ui'
 import { usePayloadKey } from '@/features/assurance/use-payload-key'
 import type { WorkspaceScope } from '@/lib/workspace'
 import { apiRequest } from '@/services/api'
-import { ForecastView, OperatingConstraints } from './dispatch-views'
+import { OperatingConstraints } from './dispatch-views'
 import { dispatchQueries, scenarioInScope, scenarioKey } from './queries'
 import {
-  forecastFormSchema,
-  forecastSchema,
   scenarioFormSchema,
   scenarioSchema,
-  type Forecast,
   type ScenarioForm,
 } from './schemas'
-
-const syncFormSchema = forecastFormSchema.extend({ actor_id: z.uuid() })
-function ForecastSync({
-  scope,
-  onSynced,
-}: {
-  scope: WorkspaceScope
-  onSynced: (forecast: Forecast) => void
-}) {
-  const actor = useWorkspaceActor()
-  const form = useForm<z.infer<typeof syncFormSchema>>({
-    resolver: zodResolver(syncFormSchema),
-    defaultValues: {
-      zone: '',
-      fixture: false,
-      force_refresh: false,
-      actor_id: actor.actorId,
-    },
-  })
-  const fixtureMode = useWatch({ control: form.control, name: 'fixture' })
-  useEffect(() => {
-    if (actor.actorId) form.setValue('actor_id', actor.actorId)
-  }, [actor.actorId, form])
-  const sync = useMutation({
-    mutationFn: (values: z.infer<typeof syncFormSchema>) =>
-      apiRequest(
-        '/dispatch/forecasts/sync',
-        forecastSchema.refine(
-          (forecast) =>
-            forecast.site_id === scope.site_id &&
-            forecast.source_mode === (values.fixture ? 'fixture' : 'live'),
-        ),
-        {
-          signal: new AbortController().signal,
-          method: 'POST',
-          timeoutMs: 60_000,
-          // The sync contract has no actor field; the authenticated session authorizes the command.
-          body: {
-            company_id: scope.company_id,
-            site_id: scope.site_id,
-            zone: values.zone || null,
-            source_mode: values.fixture ? 'fixture' : 'live',
-            force_refresh: values.force_refresh,
-          },
-        },
-      ),
-    retry: false,
-    onSuccess: onSynced,
-  })
-  return (
-    <section
-      aria-label="Forecast synchronization"
-      className="space-y-4 border-t pt-5"
-    >
-      <h2 className="text-base font-semibold">Forecast snapshot</h2>
-      <form
-        aria-label="Sync forecast"
-        onSubmit={form.handleSubmit((values) => sync.mutate(values))}
-        className="space-y-4"
-      >
-        <fieldset
-          disabled={sync.isPending}
-          className="grid gap-4 sm:grid-cols-2"
-        >
-          <div>
-            <label
-              htmlFor="forecast-zone"
-              className="mb-2 block text-xs font-medium"
-            >
-              Grid zone (optional site override)
-            </label>
-            <Input id="forecast-zone" {...form.register('zone')} />
-            <FieldError message={form.formState.errors.zone?.message} />
-          </div>
-          <div>
-            <label
-              htmlFor="forecast-actor"
-              className="mb-2 block text-xs font-medium"
-            >
-              Workspace actor UUID
-            </label>
-            <Input
-              id="forecast-actor"
-              readOnly={!!actor.actorId}
-              required
-              {...form.register('actor_id')}
-            />
-            <FieldError message={form.formState.errors.actor_id?.message} />
-          </div>
-          <Label
-            htmlFor="forecast-fixture"
-            className="flex items-start gap-2 text-sm leading-relaxed font-normal"
-          >
-            <Controller
-              control={form.control}
-              name="fixture"
-              render={({ field }) => (
-                <Checkbox
-                  id="forecast-fixture"
-                  name={field.name}
-                  ref={field.ref}
-                  checked={field.value}
-                  onBlur={field.onBlur}
-                  onCheckedChange={(checked) =>
-                    field.onChange(checked === true)
-                  }
-                  disabled={sync.isPending}
-                  className="mt-0.5"
-                />
-              )}
-            />
-            Use backend synthetic fixture forecast
-          </Label>
-          <Label
-            htmlFor="forecast-force-refresh"
-            className="flex items-start gap-2 text-sm leading-relaxed font-normal"
-          >
-            <Controller
-              control={form.control}
-              name="force_refresh"
-              render={({ field }) => (
-                <Checkbox
-                  id="forecast-force-refresh"
-                  name={field.name}
-                  ref={field.ref}
-                  checked={field.value}
-                  onBlur={field.onBlur}
-                  onCheckedChange={(checked) =>
-                    field.onChange(checked === true)
-                  }
-                  disabled={sync.isPending}
-                  className="mt-0.5"
-                />
-              )}
-            />
-            Force provider refresh
-          </Label>
-        </fieldset>
-        <CommandError error={sync.error} />
-        <Button type="submit" variant="outline" disabled={sync.isPending}>
-          <CloudDownload />
-          {sync.isPending
-            ? 'Synchronizing...'
-            : fixtureMode
-              ? 'Sync fixture forecast'
-              : 'Sync live forecast'}
-        </Button>
-      </form>
-      {sync.data && (
-        <div className="space-y-4 border-t pt-4">
-          <div className="flex flex-wrap gap-3 text-sm">
-            <Badge variant="outline">
-              {sync.data.synthetic
-                ? 'Synthetic forecast'
-                : 'Non-synthetic forecast'}
-            </Badge>
-            <span>
-              {sync.data.provider} / {sync.data.source_mode} / {sync.data.zone}
-            </span>
-            <span>Issued: {sync.data.issued_at}</span>
-          </div>
-          <p className="text-sm">
-            Received: {sync.data.received_points} / Inserted:{' '}
-            {sync.data.inserted_points} / Existing: {sync.data.existing_points}{' '}
-            / Estimated: {sync.data.estimated_points}
-          </p>
-          <dl className="grid gap-3 sm:grid-cols-2">
-            <HashValue
-              label="Forecast source document"
-              value={sync.data.source_document_id}
-            />
-            <HashValue label="Snapshot hash" value={sync.data.snapshot_hash} />
-          </dl>
-          <ForecastView points={sync.data.points} />
-        </div>
-      )}
-    </section>
-  )
-}
 
 function DispatchWorkspace({ scope }: { scope: WorkspaceScope }) {
   const actor = useWorkspaceActor()
@@ -250,6 +65,7 @@ function DispatchWorkspace({ scope }: { scope: WorkspaceScope }) {
       approval_expires_at: '',
     },
   })
+  const watched = useWatch({ control: form.control })
   const blackouts = useFieldArray({
     control: form.control,
     name: 'blackout_windows',
@@ -265,7 +81,7 @@ function DispatchWorkspace({ scope }: { scope: WorkspaceScope }) {
         flexible_load_id: values.flexible_load_id,
         method_definition_id: values.method_definition_id,
         forecast_source_document_id: values.forecast_source_document_id,
-        requested_by: actor.actorId || values.requested_by,
+        requested_by: values.requested_by,
         policy_definition_id: values.policy_definition_id || null,
         window_start: new Date(`${values.window_start}Z`).toISOString(),
         window_end: new Date(`${values.window_end}Z`).toISOString(),
@@ -312,10 +128,6 @@ function DispatchWorkspace({ scope }: { scope: WorkspaceScope }) {
     (load) => load.id === selectedLoadId,
   )
   const fields = [
-    ['method_definition_id', 'Method definition UUID (required)', 'text'],
-    ['forecast_source_document_id', 'Forecast source document UUID', 'text'],
-    ['requested_by', 'Requesting actor UUID', 'text'],
-    ['policy_definition_id', 'Policy definition UUID (optional)', 'text'],
     ['window_start', 'Earliest start (UTC)', 'datetime-local'],
     ['window_end', 'Latest finish (UTC)', 'datetime-local'],
     ['baseline_start', 'Baseline start (UTC)', 'datetime-local'],
@@ -330,9 +142,9 @@ function DispatchWorkspace({ scope }: { scope: WorkspaceScope }) {
   return (
     <main className="min-w-0 space-y-6 px-5 py-6 sm:px-8">
       <header>
-        <h1 className="text-2xl font-semibold">Dispatch</h1>
+        <h1 className="text-2xl font-semibold">Energy planning</h1>
         <p className="mt-2 text-sm text-muted-foreground">
-          Advisory planning only. No equipment actuation is authorized.
+          Lower-carbon operating windows. Advisory only.
         </p>
       </header>
       <WorkflowContext scope={scope} />
@@ -359,9 +171,8 @@ function DispatchWorkspace({ scope }: { scope: WorkspaceScope }) {
                     {page.items.map((load) => (
                       <TableRow key={load.id}>
                         <TableCell>
-                          <p className="font-medium">{load.name}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {load.code}
+                          <p className="font-medium">
+                            {displayText(load.name)}
                           </p>
                         </TableCell>
                         <TableCell className="font-mono">
@@ -393,16 +204,6 @@ function DispatchWorkspace({ scope }: { scope: WorkspaceScope }) {
           )}
         </QueryState>
       </section>
-      <ForecastSync
-        scope={scope}
-        onSynced={(forecast) =>
-          form.setValue(
-            'forecast_source_document_id',
-            forecast.source_document_id,
-            { shouldValidate: true },
-          )
-        }
-      />
       <section
         aria-label="Create dispatch scenario"
         className="space-y-4 border-t pt-5"
@@ -433,7 +234,7 @@ function DispatchWorkspace({ scope }: { scope: WorkspaceScope }) {
                 <NativeSelectOption value="">Select a load</NativeSelectOption>
                 {loads.data?.items.map((load) => (
                   <NativeSelectOption key={load.id} value={load.id}>
-                    {load.name} / {load.code}
+                    {displayText(load.name)}
                   </NativeSelectOption>
                 ))}
               </NativeSelect>
@@ -441,6 +242,33 @@ function DispatchWorkspace({ scope }: { scope: WorkspaceScope }) {
                 message={form.formState.errors.flexible_load_id?.message}
               />
             </div>
+            {(
+              [
+                ['method_definition_id', 'Calculation method', 'methods'],
+                ['forecast_source_document_id', 'Stored forecast', 'forecasts'],
+                ['requested_by', 'Requested by', 'actors'],
+                ['policy_definition_id', 'Policy (optional)', 'policies'],
+              ] as const
+            ).map(([name, label, kind]) => (
+              <div key={name} className="min-w-0">
+                <label
+                  htmlFor={`dispatch-${name}`}
+                  className="mb-2 block text-xs font-medium"
+                >
+                  {label}
+                </label>
+                <RecordSelect
+                  id={`dispatch-${name}`}
+                  kind={kind}
+                  allowEmpty={name === 'policy_definition_id'}
+                  required={name !== 'policy_definition_id'}
+                  {...form.register(name)}
+                  value={watched[name] ?? ''}
+                  aria-invalid={!!form.formState.errors[name]}
+                />
+                <FieldError message={form.formState.errors[name]?.message} />
+              </div>
+            ))}
             {fields.map(([name, label, type]) => (
               <div key={name} className="min-w-0">
                 <label
@@ -454,7 +282,6 @@ function DispatchWorkspace({ scope }: { scope: WorkspaceScope }) {
                   type={type}
                   min={type === 'number' ? 0 : undefined}
                   step={type === 'number' ? 1 : undefined}
-                  readOnly={name === 'requested_by' && !!actor.actorId}
                   required={
                     ![
                       'policy_definition_id',
@@ -470,7 +297,7 @@ function DispatchWorkspace({ scope }: { scope: WorkspaceScope }) {
             ))}
           </fieldset>
           {selectedLoad && (
-            <details open>
+            <details>
               <summary className="cursor-pointer text-sm font-medium">
                 Recorded load constraints
               </summary>

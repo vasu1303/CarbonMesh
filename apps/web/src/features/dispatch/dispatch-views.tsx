@@ -8,6 +8,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
+import { displayText, humanize } from '@/lib/presentation'
 import { EmptyState } from '@/components/query-state'
 import {
   Table,
@@ -44,11 +45,11 @@ export function OperatingConstraints({
       {items.map((item) => (
         <div key={item.id} className="space-y-2 border-b pb-3 text-sm">
           <div className="flex flex-wrap gap-2">
-            <span className="font-medium">{item.name}</span>
+            <span className="font-medium">{displayText(item.name)}</span>
             <StateBadge
               state={item.is_hard ? 'hard_constraint' : 'advisory_constraint'}
             />
-            <span>{item.constraint_type}</span>
+            <span>{humanize(item.constraint_type)}</span>
           </div>
           {(item.valid_from || item.valid_to) && (
             <p className="break-words text-xs text-muted-foreground">
@@ -58,15 +59,17 @@ export function OperatingConstraints({
           )}
           <dl className="flex flex-wrap gap-x-5 gap-y-2">
             {Object.entries(item.configuration)
-              .filter(([, value]) =>
-                ['string', 'number', 'boolean'].includes(typeof value),
+              .filter(
+                ([key, value]) =>
+                  !/(^id$|_ids?$|hash|signature)/i.test(key) &&
+                  ['string', 'number', 'boolean'].includes(typeof value),
               )
               .map(([key, value]) => (
                 <div key={key}>
                   <dt className="text-xs text-muted-foreground">
-                    {key.replaceAll('_', ' ')}
+                    {humanize(key)}
                   </dt>
-                  <dd className="break-all text-xs">{String(value)}</dd>
+                  <dd className="break-all text-xs">{displayText(value)}</dd>
                 </div>
               ))}
           </dl>
@@ -101,7 +104,7 @@ export function FrozenConstraints({ value }: { value: Constraints }) {
           <>
             <div>
               <dt className="text-xs text-muted-foreground">Load</dt>
-              <dd>{value.load_snapshot.name}</dd>
+              <dd>{displayText(value.load_snapshot.name)}</dd>
             </div>
             <div>
               <dt className="text-xs text-muted-foreground">
@@ -150,14 +153,13 @@ export function FrozenConstraints({ value }: { value: Constraints }) {
           <OperatingConstraints items={value.source_constraints} />
           {value.method_snapshot && (
             <dl className="grid gap-3 sm:grid-cols-2">
-              <HashValue
-                label="Method"
-                value={`${value.method_snapshot.key} / ${value.method_snapshot.version}`}
-              />
-              <HashValue
-                label="Code version"
-                value={value.method_snapshot.code_version}
-              />
+              <div>
+                <dt className="text-xs text-muted-foreground">Method</dt>
+                <dd className="text-sm">
+                  {humanize(value.method_snapshot.key)} /{' '}
+                  {displayText(value.method_snapshot.version)}
+                </dd>
+              </div>
               <HashValue
                 label="Method hash"
                 value={value.method_snapshot.snapshot_hash}
@@ -244,7 +246,7 @@ export function ForecastView({
           </BarChart>
         </ResponsiveContainer>
       </div>
-      <details open>
+      <details>
         <summary className="cursor-pointer text-sm font-medium">
           Exact forecast values / UTC
         </summary>
@@ -293,15 +295,18 @@ export function ForecastView({
                         Point evidence
                       </summary>
                       <dl className="max-w-72 space-y-2 py-2">
-                        <HashValue label="Point" value={point.id} />
                         <HashValue
                           label="Point hash"
                           value={point.point_hash}
                         />
-                        <HashValue
-                          label="Evidence"
-                          value={point.evidence_item_id}
-                        />
+                        <div>
+                          <dt className="text-xs text-muted-foreground">
+                            Evidence
+                          </dt>
+                          <dd className="text-xs">
+                            {point.evidence_item_id ? 'Linked' : 'Missing'}
+                          </dd>
+                        </div>
                         {point.forecast_ledger_event_id && (
                           <div>
                             <dt className="text-xs">Forecast ledger</dt>

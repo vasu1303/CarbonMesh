@@ -88,7 +88,7 @@ class InvalidProviderResponseError(IntegrationServiceError):
 
 def _provider_error(error: ElectricityMapsProviderError) -> IntegrationServiceError:
     status_code = 503 if error.retryable else 502
-    if error.code == "integration_not_configured":
+    if error.code in {"integration_not_configured", "integration_live_disabled"}:
         status_code = 503
     if error.code == "integration_authentication_failed":
         status_code = 401

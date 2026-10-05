@@ -1,22 +1,22 @@
-import { useQuery } from '@tanstack/react-query'
 import { z } from 'zod'
-
-import { authenticationRequired, sessionOptions } from './session'
+import { useWorkspaceOptions } from '@/services/workspace'
 
 const configuredActor = z.uuid().safeParse(import.meta.env.VITE_ACTOR_ID)
 
-export function useWorkspaceActor() {
-  const session = useQuery({
-    ...sessionOptions,
-    enabled: authenticationRequired,
-  })
+export function useWorkspaceActor(preferredRole = 'sustainability_analyst') {
+  const actors = useWorkspaceOptions('actors')
+  const candidates = actors.data?.items.filter(
+    (item) => item.status === 'active' && item.role === preferredRole,
+  )
+  const actor =
+    candidates?.find(
+      (item) => configuredActor.success && item.id === configuredActor.data,
+    ) ?? candidates?.[0]
   return {
-    actorId: authenticationRequired
-      ? (session.data?.actor_id ?? '')
-      : configuredActor.success
-        ? configuredActor.data
-        : '',
-    authenticated: authenticationRequired && !!session.data,
-    role: authenticationRequired ? session.data?.role : undefined,
+    actorId: actor?.id ?? '',
+    actorName: actor?.label ?? '',
+    authenticated: false,
+    role: actor?.role ?? undefined,
+    isPending: actors.isPending,
   }
 }

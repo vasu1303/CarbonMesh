@@ -56,7 +56,7 @@ export function LedgerPanel({
                       size="icon"
                       variant="ghost"
                       className="size-8 shrink-0"
-                      aria-label={`Inspect event ${event.id}`}
+                      aria-label={`Inspect ${humanize(event.event_type)} from ${formatDate(event.created_at)}`}
                       title="Inspect event and evidence"
                       onClick={() => onInspect(event.id)}
                     >

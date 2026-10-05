@@ -1,28 +1,23 @@
 import { expect, test, type Page } from '@playwright/test'
 import { id } from './dashboard-fixtures'
 import {
-  dispatchForecast,
   dispatchLoad,
   dispatchRecommendation,
   dispatchScenario,
   mockDispatch,
 } from './dispatch-fixtures'
 
-async function fillActor(page: Page, label: string) {
-  const input = page.getByLabel(label, { exact: true })
-  if (await input.isEditable()) await input.fill(id(4))
-}
 async function fillScenario(page: Page) {
   await page
     .getByLabel('Flexible load', { exact: true })
     .selectOption(dispatchLoad.id)
   await page
-    .getByLabel('Method definition UUID (required)', { exact: true })
-    .fill(dispatchScenario.method.id)
+    .getByLabel('Calculation method', { exact: true })
+    .selectOption({ label: 'Dispatch optimization (synthetic)' })
   await page
-    .getByLabel('Forecast source document UUID', { exact: true })
-    .fill(dispatchForecast.source_document_id)
-  await fillActor(page, 'Requesting actor UUID')
+    .getByLabel('Stored forecast', { exact: true })
+    .selectOption({ label: 'Synthetic hourly forecast' })
+  await page.getByLabel('Requested by', { exact: true }).selectOption({ label: 'Synthetic analyst / active' })
   await page
     .getByLabel('Earliest start (UTC)', { exact: true })
     .fill('2026-10-01T00:00')
@@ -38,65 +33,15 @@ async function fillScenario(page: Page) {
     .fill('600.125000')
 }
 
-test('dispatch reads loads without provider calls and live errors never switch to fixtures', async ({
-  page,
-}) => {
-  const syncBodies: Record<string, unknown>[] = []
-  const calls = await mockDispatch(page, async (route, url) => {
-    if (url.pathname !== '/api/dispatch/forecasts/sync') return
-    syncBodies.push(route.request().postDataJSON())
-    if (syncBodies.length === 1) {
-      await route.fulfill({
-        status: 503,
-        json: {
-          detail: {
-            code: 'provider_unavailable',
-            message: 'Forecast provider unavailable.',
-            retryable: true,
-            terminal_state: 'provider_unavailable',
-          },
-        },
-      })
-      return true
-    }
-  })
+test('energy planning selects stored forecasts without provider or live-sync controls', async ({ page }) => {
+  const calls = await mockDispatch(page)
   await page.goto('/dispatch')
-  await expect(
-    page.getByRole('cell', { name: '500.125000', exact: true }),
-  ).toBeVisible()
-  expect(
-    calls.filter(
-      (call) =>
-        call.method === 'POST' && call.url.pathname !== '/api/context/resolve',
-    ),
-  ).toHaveLength(0)
-  await fillActor(page, 'Workspace actor UUID')
-  await page
-    .getByRole('button', { name: 'Sync live forecast', exact: true })
-    .click()
-  await expect(
-    page.getByText('Forecast provider unavailable.', { exact: true }),
-  ).toBeVisible()
-  expect(syncBodies).toHaveLength(1)
-  expect(syncBodies[0]).toMatchObject({
-    company_id: id(1),
-    site_id: id(2),
-    source_mode: 'live',
-    force_refresh: false,
-  })
-  await page
-    .getByLabel('Use backend synthetic fixture forecast', { exact: true })
-    .check()
-  await page
-    .getByRole('button', { name: 'Sync fixture forecast', exact: true })
-    .click()
-  await expect(
-    page.getByText('Synthetic forecast', { exact: true }),
-  ).toBeVisible()
-  expect(syncBodies[1].source_mode).toBe('fixture')
-  await expect(
-    page.getByLabel('Forecast source document UUID', { exact: true }),
-  ).toHaveValue(dispatchForecast.source_document_id)
+  await expect(page.getByRole('cell', { name: '500.125000', exact: true })).toBeVisible()
+  await page.getByLabel('Stored forecast', { exact: true }).selectOption({ label: 'Synthetic hourly forecast' })
+  await expect(page.getByRole('button', { name: /Sync.*forecast/i })).toHaveCount(0)
+  await expect(page.getByText(/Electricity Maps/i)).toHaveCount(0)
+  expect(calls.filter(call => call.method === 'POST' && call.url.pathname !== '/api/context/resolve')).toHaveLength(0)
+  expect(calls.some(call => /forecasts\/sync|electricity-maps/.test(call.url.pathname))).toBe(false)
 })
 
 test('scenario creation keeps exact quantities and stable retry identity', async ({
@@ -172,6 +117,7 @@ test('recommendation reads preserve precision, frozen forecasts, lineage and adv
     'href',
     `/approvals?approval=${dispatchRecommendation.approval.id}`,
   )
+  await page.getByText('Exact forecast values / UTC', { exact: true }).click()
   await expect(
     page.getByRole('cell', { name: '200.123456789', exact: true }),
   ).toBeVisible()
@@ -181,7 +127,7 @@ test('recommendation reads preserve precision, frozen forecasts, lineage and adv
     }),
   ).toBeVisible()
   await expect(
-    page.getByText('maximum delay exceeded', { exact: true }),
+    page.getByText('Maximum delay exceeded', { exact: true }),
   ).toBeVisible()
   expect(
     calls.some(
@@ -249,10 +195,9 @@ test('explicit optimization returns infeasible windows without relaxing constrai
       exact: true,
     }),
   ).toBeVisible()
-  await fillActor(page, 'Workspace actor UUID')
   await page
     .getByLabel(
-      'Advisory recommendation and approval preview only; retain the frozen constraints.',
+      'Keep the recorded constraints; advisory recommendation only.',
       { exact: true },
     )
     .check()
@@ -263,7 +208,7 @@ test('explicit optimization returns infeasible windows without relaxing constrai
     page.getByText('No feasible operating window', { exact: true }),
   ).toBeVisible()
   await expect(
-    page.getByText('insufficient capacity', { exact: true }),
+    page.getByText('Insufficient capacity', { exact: true }),
   ).toBeVisible()
   expect(
     calls.find((call) => call.url.pathname.endsWith('/optimize'))?.body,

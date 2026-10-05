@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { displayText } from '@/lib/presentation'
 import type { WorkspaceScope } from '@/lib/workspace'
 import { CatalogFiltersForm } from './components/catalog-filters'
 import { ProductTable } from './components/product-table'
@@ -34,7 +35,7 @@ function Catalog({ filters }: { filters: CatalogFilters }) {
   const selectedSupplier =
     suppliers.data?.items.find((item) => item.id === filters.supplier)?.name ??
     products.data?.items[0]?.supplier_name ??
-    filters.supplier
+    'Selected supplier'
 
   function update(
     values: Record<string, string | number | null>,
@@ -105,7 +106,7 @@ function Catalog({ filters }: { filters: CatalogFilters }) {
           <p className="mb-2 text-xs font-medium text-muted-foreground">
             Procurement
           </p>
-          <h1 className="text-2xl font-semibold">Supplier catalog</h1>
+          <h1 className="text-2xl font-semibold">Suppliers</h1>
           <p className="mt-2 text-sm text-muted-foreground">
             Suppliers, product footprints and commercial terms
           </p>
@@ -137,14 +138,16 @@ function Catalog({ filters }: { filters: CatalogFilters }) {
         <QueryState query={context}>
           {(data) => (
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
-              <span className="font-medium">{data.company.name}</span>
+              <span className="font-medium">
+                {displayText(data.company.name)}
+              </span>
               <span className="text-muted-foreground">
                 Company-wide catalog
               </span>
               <Badge variant="outline" className="sm:ml-auto">
                 {data.company.is_synthetic
-                  ? 'Synthetic data / API'
-                  : 'Non-synthetic data / API'}
+                  ? 'Synthetic data'
+                  : 'Workspace data'}
               </Badge>
             </div>
           )}
@@ -215,7 +218,9 @@ function Catalog({ filters }: { filters: CatalogFilters }) {
             <div className="mt-4 flex min-w-0 items-start gap-2 text-xs">
               <span className="min-w-0 py-2 wrap-anywhere text-muted-foreground">
                 Supplier:{' '}
-                <span className="text-foreground">{selectedSupplier}</span>
+                <span className="text-foreground">
+                  {displayText(selectedSupplier)}
+                </span>
               </span>
               <Button
                 variant="ghost"

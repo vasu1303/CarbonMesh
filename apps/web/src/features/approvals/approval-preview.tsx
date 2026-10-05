@@ -8,7 +8,8 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { ScenarioAssessments } from '@/features/procurement/components/scenario-assessments'
+import { displayText, humanize } from '@/lib/presentation'
+import { formatDate } from '@/lib/format'
 import {
   AuditLink,
   DefinitionList,
@@ -35,10 +36,10 @@ export function ApprovalPreview({ approval }: { approval: ApprovalDetail }) {
       <div className="space-y-5">
         <div>
           <h3 className="text-base font-medium">
-            {review.recommended_product.name}
+            {displayText(review.recommended_product.name)}
           </h3>
           <p className="text-sm text-muted-foreground">
-            {review.recommended_product.supplier_name}
+            {displayText(review.recommended_product.supplier_name)}
           </p>
         </div>
         <DefinitionList
@@ -64,7 +65,10 @@ export function ApprovalPreview({ approval }: { approval: ApprovalDetail }) {
               'Method',
               `${data.impact.score.method_key} / ${data.impact.score.method_version}`,
             ],
-            ['Source state hash', data.impact.source_state_hash],
+            [
+              'Source integrity',
+              data.impact.source_state_hash ? 'Recorded' : 'Not recorded',
+            ],
             [
               'Scenario',
               <Link
@@ -72,14 +76,37 @@ export function ApprovalPreview({ approval }: { approval: ApprovalDetail }) {
                 className="text-emerald-700 underline"
                 to={`/procurement/scenarios/${data.scenario_id}`}
               >
-                {data.scenario_id}
+                Open procurement scenario
               </Link>,
             ],
           ]}
         />
         <section aria-label="Frozen supplier score">
           <h3 className="mb-3 text-sm font-semibold">Frozen supplier score</h3>
-          <ScenarioAssessments items={[review.supplier_score]} />
+          <DefinitionList
+            items={[
+              [
+                'Feasibility',
+                review.supplier_score.feasible
+                  ? 'Meets hard constraints'
+                  : 'Does not meet hard constraints',
+              ],
+              ['Rank', review.supplier_score.rank ?? 'Unranked'],
+              ['Carbon score', review.supplier_score.scores.carbon],
+              ['Evidence score', review.supplier_score.scores.evidence],
+              ['Circularity score', review.supplier_score.scores.circularity],
+              [
+                'Operational fit score',
+                review.supplier_score.scores.operational_fit,
+              ],
+              ['Total score', review.supplier_score.scores.total],
+            ]}
+          />
+          {review.supplier_score.infeasibility_reasons.map((reason, index) => (
+            <p key={index} className="mt-2 text-sm text-amber-700">
+              {displayText(reason.message)}
+            </p>
+          ))}
         </section>
         <section>
           <h3 className="mb-3 text-sm font-semibold">Bound facts</h3>
@@ -90,13 +117,20 @@ export function ApprovalPreview({ approval }: { approval: ApprovalDetail }) {
           {review.evidence.map((e) => (
             <div key={e.id} className="space-y-2 border-b py-3 text-sm">
               <AuditLink type="evidence_item" id={e.id}>
-                {e.evidence_type}
+                {humanize(e.evidence_type)}
               </AuditLink>
-              <p className="wrap-anywhere">{e.locator}</p>
-              <p className="break-all font-mono text-xs">{e.checksum}</p>
+              <p className="wrap-anywhere">{displayText(e.locator)}</p>
+              <p className="text-xs text-muted-foreground">
+                Source integrity {e.checksum ? 'recorded' : 'not recorded'}
+              </p>
               <RecordFields value={e.metadata} />
             </div>
           ))}
+          {!review.evidence.length && (
+            <p className="text-sm text-muted-foreground">
+              No supporting evidence recorded.
+            </p>
+          )}
         </section>
         <details className="border-t pt-3">
           <summary className="cursor-pointer text-sm font-medium">
@@ -114,8 +148,10 @@ export function ApprovalPreview({ approval }: { approval: ApprovalDetail }) {
     const data = parsed.data
     return (
       <div className="space-y-5">
-        <h3 className="text-base font-medium wrap-anywhere">{data.title}</h3>
-        <p className="text-sm text-amber-700">{data.disclaimer}</p>
+        <h3 className="text-base font-medium wrap-anywhere">
+          {displayText(data.title)}
+        </h3>
+        <p className="text-sm text-amber-700">{displayText(data.disclaimer)}</p>
         <DefinitionList
           items={[
             ['Standard', `${data.standard.code} / ${data.standard.version}`],
@@ -129,7 +165,7 @@ export function ApprovalPreview({ approval }: { approval: ApprovalDetail }) {
                 className="text-emerald-700 underline"
                 to={`/measurement/${data.measurement_id}`}
               >
-                {data.measurement_id}
+                Open verified measurement
               </Link>,
             ],
             [
@@ -139,7 +175,7 @@ export function ApprovalPreview({ approval }: { approval: ApprovalDetail }) {
                 className="text-emerald-700 underline"
                 to={`/assurance/${data.target_id}`}
               >
-                {data.target_id}
+                Open disclosure draft
               </Link>,
             ],
           ]}
@@ -150,13 +186,17 @@ export function ApprovalPreview({ approval }: { approval: ApprovalDetail }) {
             <article key={claim.id} className="space-y-3 border-b py-4">
               <div className="flex flex-wrap items-center gap-3">
                 <span className="text-sm font-medium">
-                  {claim.requirement_code || claim.claim_type}
+                  {humanize(claim.requirement_code || claim.claim_type)}
                 </span>
-                <Badge variant="outline">{claim.support_status}</Badge>
+                <Badge variant="outline">
+                  {humanize(claim.support_status)}
+                </Badge>
                 <span className="text-xs">Confidence {claim.confidence}</span>
               </div>
               <p className="whitespace-pre-wrap text-sm">
-                {claim.rendered_text || claim.claim_template}
+                {claim.rendered_text
+                  ? displayText(claim.rendered_text)
+                  : 'No supported claim text recorded.'}
               </p>
               {claim.ledger_event_id && (
                 <EventLink id={claim.ledger_event_id}>
@@ -167,7 +207,8 @@ export function ApprovalPreview({ approval }: { approval: ApprovalDetail }) {
                 {claim.citations.map((c) => (
                   <li key={c.id} className="space-y-1">
                     <p>
-                      {c.validation_status} / {c.locator || 'No locator'}
+                      {humanize(c.validation_status)} /{' '}
+                      {displayText(c.locator || 'No source location recorded')}
                     </p>
                     {c.ledger_event_id && (
                       <EventLink id={c.ledger_event_id}>
@@ -200,9 +241,10 @@ export function ApprovalPreview({ approval }: { approval: ApprovalDetail }) {
           {data.gaps.map((g) => (
             <div key={g.id} className="border-b py-3 text-sm">
               <p className="font-medium">
-                {g.code} / {g.severity} / {g.status}
+                {humanize(g.code)} / {humanize(g.severity)} /{' '}
+                {humanize(g.status)}
               </p>
-              <p>{g.message}</p>
+              <p>{displayText(g.message)}</p>
             </div>
           ))}
           {!data.gaps.length && (
@@ -218,7 +260,7 @@ export function ApprovalPreview({ approval }: { approval: ApprovalDetail }) {
             Frozen disclosure text
           </summary>
           <p className="mt-3 whitespace-pre-wrap text-sm">
-            {data.rendered_text || 'Not recorded'}
+            {displayText(data.rendered_text)}
           </p>
         </details>
         <RawPayload value={payload} />
@@ -244,11 +286,16 @@ export function ApprovalPreview({ approval }: { approval: ApprovalDetail }) {
             ['Reduction', `${data.reduction_pct}%`],
             ['Method version', data.method_version],
             ['Code version', data.method_code_version],
-            ['Input hash', data.input_hash],
-            ['Output hash', data.output_hash],
+            ['Input integrity', data.input_hash ? 'Recorded' : 'Not recorded'],
             [
-              'Forecast source checksum',
-              data.forecast_source_document_checksum,
+              'Result integrity',
+              data.output_hash ? 'Recorded' : 'Not recorded',
+            ],
+            [
+              'Forecast integrity',
+              data.forecast_source_document_checksum
+                ? 'Recorded'
+                : 'Not recorded',
             ],
             [
               'Scenario',
@@ -257,7 +304,7 @@ export function ApprovalPreview({ approval }: { approval: ApprovalDetail }) {
                 className="text-emerald-700 underline"
                 to={`/dispatch/${data.scenario_id}`}
               >
-                {data.scenario_id}
+                Open dispatch scenario
               </Link>,
             ],
           ]}
@@ -281,7 +328,7 @@ export function ApprovalPreview({ approval }: { approval: ApprovalDetail }) {
             <TableBody>
               {data.forecast_points.map((p) => (
                 <TableRow key={p.id}>
-                  <TableCell>{p.forecast_for}</TableCell>
+                  <TableCell>{formatDate(p.forecast_for)}</TableCell>
                   <TableCell className="font-mono">
                     {p.intensity_gco2e_per_kwh}
                   </TableCell>
@@ -302,7 +349,7 @@ export function ApprovalPreview({ approval }: { approval: ApprovalDetail }) {
         </section>
         <details className="border-t pt-3">
           <summary className="cursor-pointer text-sm font-medium">
-            Frozen dependencies and hashes
+            Methods and source details
           </summary>
           <RecordFields
             value={{

@@ -1,12 +1,26 @@
 import { z } from 'zod'
 
+const fieldDetailsSchema = z.union([
+  z.record(z.string(), z.unknown()),
+  z
+    .array(z.record(z.string(), z.unknown()))
+    .transform((details) =>
+      Object.fromEntries(
+        details.map((item, index) => [
+          typeof item.field === 'string' ? item.field : `issue_${index + 1}`,
+          item.detail ?? item,
+        ]),
+      ),
+    ),
+])
+
 const errorSchema = z.object({
   detail: z.object({
     code: z.string(),
     message: z.string(),
     trace_id: z.string().nullable().optional(),
     retryable: z.boolean().optional(),
-    field_details: z.record(z.string(), z.unknown()).optional(),
+    field_details: fieldDetailsSchema.optional(),
     terminal_state: z.string().optional(),
   }),
 })

@@ -27,6 +27,11 @@ from app.modules.integrations.schemas import ElectricityMapsRangePayload
 DEMO_FIXTURES = Path(__file__).resolve().parents[4] / "data" / "demo"
 
 
+@pytest.fixture(autouse=True)
+def enable_mocked_http_provider(monkeypatch):
+    monkeypatch.setenv("ELECTRICITY_MAPS_LIVE_ENABLED", "true")
+
+
 class FakeResponse:
     def __init__(self, payload: dict[str, object] | bytes) -> None:
         self._raw = (

@@ -19,9 +19,8 @@ async function completeScenario(page: Page) {
     .selectOption(measurement.id)
   await page.getByLabel('Quantity', { exact: true }).fill('10000.123456789012')
   await page.getByLabel('Quantity unit', { exact: true }).fill('kg')
-  await page.getByLabel('Scoring method UUID').fill(ids.method)
-  const actor = page.getByLabel('Actor UUID', { exact: true })
-  if (await actor.isEditable()) await actor.fill(ids.actor)
+  await page.getByLabel('Scoring method').selectOption({ label: 'Supplier scoring (synthetic)' })
+  await page.getByLabel('Requested by', { exact: true }).selectOption({ label: 'Synthetic approver / active' })
   await page.getByLabel('Maximum cost increase (%)').fill('5.00')
   await page.getByLabel('Maximum lead time (days)').fill('30')
   await page.getByLabel('Minimum circularity score').fill('50.00')
@@ -31,10 +30,9 @@ async function completeScenario(page: Page) {
   await page.getByLabel('Excluded risk levels (comma separated)').fill('high')
 }
 async function confirmPreview(page: Page) {
-  const actor = page.getByLabel('Actor UUID', { exact: true })
-  if (await actor.isEditable()) await actor.fill(ids.actor)
-  await page.getByLabel('Confirm preview hash', { exact: true }).fill(sha)
-  await page.getByRole('checkbox', { name: /I confirm this/ }).check()
+  await expect(page.getByLabel('Reviewer', { exact: true })).toHaveValue(ids.actor)
+  await expect(page.getByLabel('Reviewer', { exact: true }).locator('option:checked')).toContainText('Synthetic approver')
+  await page.getByRole('checkbox', { name: /I have reviewed the facts/ }).check()
 }
 
 test('scenario commands require a submitted valid form and preserve exact decimal strings', async ({
@@ -152,7 +150,7 @@ test('no feasible scenario has no invented recommendation or history request', a
   })
   await page.goto(`/procurement/scenarios/${ids.scenario}`)
   await expect(
-    page.getByText('No feasible option', { exact: true }),
+    page.getByText('No feasible option', { exact: true }).first(),
   ).toBeVisible()
   await expect(
     page.getByText('No recommendation', { exact: true }),
@@ -222,7 +220,7 @@ for (const [kind, text] of [
       },
     )
     await page.getByRole('button', { name: 'Confirm approval' }).click()
-    await expect(page.getByText('Decision recorded: approved.')).toBeVisible()
+    await expect(page.getByText('Decision recorded: Approved.')).toBeVisible()
     await page.getByRole('button', { name: 'Close approval' }).click()
     await expect(page).toHaveURL(/status=all$/)
   })
@@ -350,9 +348,9 @@ test('a failed rejection retries with the preview key and requires renewed confi
   await expect(
     page.getByRole('button', { name: 'Confirm rejection' }),
   ).toBeDisabled()
-  await page.getByRole('checkbox', { name: /I confirm this/ }).check()
+  await page.getByRole('checkbox', { name: /I have reviewed the facts/ }).check()
   await page.getByRole('button', { name: 'Confirm rejection' }).click()
-  await expect(page.getByText('Decision recorded: rejected.')).toBeVisible()
+  await expect(page.getByText('Decision recorded: Rejected.')).toBeVisible()
   const decisions = calls
     .filter((c) => c.url.pathname.endsWith('/decision'))
     .map((c) => c.body)
@@ -399,7 +397,7 @@ test('ledger filters and pagination survive event links and bounded recursive au
   const list = page.getByRole('region', { name: 'Ledger events', exact: true })
   await list.getByRole('button', { name: 'Next page' }).click()
   await expect(page).toHaveURL(/offset=10/)
-  await page.getByLabel('Event UUID', { exact: true }).fill(ids.event)
+  await page.getByLabel('Ledger event', { exact: true }).selectOption({ label: 'Synthetic procurement decision' })
   await page.getByRole('button', { name: 'Open event', exact: true }).click()
   await expect(page).toHaveURL(new RegExp(`event=${ids.event}`))
   await expect(page).toHaveURL(/offset=10/)
@@ -408,11 +406,11 @@ test('ledger filters and pagination survive event links and bounded recursive au
   ).toBeVisible()
   await page.getByRole('button', { name: 'Trace entity audit' }).click()
   await expect(
-    page.getByText('Partial trace: the server traversal limit was reached.'),
+    page.getByText('Partial trace. More source relationships exist beyond this result.'),
   ).toBeVisible()
-  await page
-    .getByRole('button', { name: `Open linked event ${ids.parent}` })
-    .click()
+  const graph = page.getByRole('region', { name: 'Ledger event detail' })
+  await graph.locator(`.react-flow__node[data-id="${ids.parent}"] button`).click()
+  await graph.getByRole('button', { name: 'Open linked event', exact: true }).click()
   await expect(page).toHaveURL(new RegExp(`event=${ids.parent}`))
   await expect(page).toHaveURL(/event_type=measurement.verified/)
   await expect(page).toHaveURL(/offset=10/)
@@ -503,8 +501,8 @@ test('ledger date and entity filters submit bounded UTC queries', async ({
 }) => {
   const calls = await mockScenariosApprovalsLedger(page)
   await page.goto('/ledger')
-  await page.getByLabel('Entity type', { exact: true }).fill('measurement')
-  await page.getByLabel('Entity UUID', { exact: true }).fill(measurement.id)
+  await page.getByLabel('Record type', { exact: true }).selectOption('measurement')
+  await page.getByLabel('Record', { exact: true }).selectOption({ label: 'Purchased-material emissions (synthetic)' })
   await page.getByLabel('Created from (local time)').fill('2026-09-01T00:00')
   await page.getByLabel('Created to (local time)').fill('2026-09-30T23:59:59')
   await page.getByRole('button', { name: 'Apply filters' }).click()

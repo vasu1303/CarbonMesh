@@ -15,6 +15,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { formatDate, formatDecimal } from '@/lib/format'
+import { displayText, humanize } from '@/lib/presentation'
 import type { MeasurementSummary } from '../schemas'
 import { StatusBadge } from './status-badge'
 
@@ -43,23 +44,21 @@ export function RecordsTable({
               <Button
                 asChild
                 variant="link"
-                className="h-auto p-0 font-mono text-xs"
+                className="h-auto max-w-72 p-0 text-left text-sm whitespace-normal"
               >
                 <Link
                   to={`/measurement/${item.id}`}
-                  aria-label={`Open measurement ${item.id}`}
+                  aria-label={`Open ${humanize(item.metric_key)} recorded ${formatDate(item.created_at)}`}
                 >
-                  {item.id.slice(-12)}
+                  {humanize(item.metric_key)}
                 </Link>
               </Button>
               <p className="mt-1 text-xs text-muted-foreground">
                 {formatDate(item.created_at)}
               </p>
-              <p
-                className="mt-1 max-w-64 truncate text-xs text-muted-foreground"
-                title={item.metric_key}
-              >
-                {item.metric_key}
+              <p className="mt-1 max-w-64 text-xs text-muted-foreground whitespace-normal wrap-anywhere">
+                {displayText(item.site_name)} /{' '}
+                {displayText(item.reporting_period_name)}
               </p>
             </TableCell>
             <TableCell>
@@ -83,7 +82,7 @@ export function RecordsTable({
                       variant="ghost"
                       size="icon"
                       className="size-8"
-                      aria-label={`View lineage ${item.id}`}
+                      aria-label={`View lineage for ${humanize(item.metric_key)} recorded ${formatDate(item.created_at)}`}
                       onClick={() => onInspect(item.id, 'lineage')}
                     >
                       <GitBranch className="size-4" />
@@ -97,7 +96,7 @@ export function RecordsTable({
                       variant="ghost"
                       size="icon"
                       className="size-8"
-                      aria-label={`View facts ${item.id}`}
+                      aria-label={`View facts for ${humanize(item.metric_key)} recorded ${formatDate(item.created_at)}`}
                       onClick={() => onInspect(item.id)}
                     >
                       <ArrowUpRight />
