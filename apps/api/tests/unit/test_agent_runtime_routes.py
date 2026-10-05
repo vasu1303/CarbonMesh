@@ -77,7 +77,6 @@ async def test_resume_route_spawns_only_an_accepted_running_continuation(monkeyp
         spawned.append((name, coroutine))
         coroutine.close()
 
-    monkeypatch.setattr(agent_routes, "_service", lambda _: ResumeService())
     monkeypatch.setattr(agent_routes.agent_task_registry, "spawn", capture_spawn)
 
     result = await agent_routes.resume_agent_run(
@@ -85,6 +84,7 @@ async def test_resume_route_spawns_only_an_accepted_running_continuation(monkeyp
         request,
         session,  # type: ignore[arg-type]
         session_factory=object(),  # type: ignore[arg-type]
+        service_factory=lambda _: ResumeService(),
         trace_id="trace-resume",
     )
 
@@ -112,7 +112,6 @@ async def test_resume_route_does_not_spawn_for_idempotent_or_stopped_result(monk
     def fail_spawn(*_, **__) -> None:
         pytest.fail("an idempotent or stopped resume must not spawn execution")
 
-    monkeypatch.setattr(agent_routes, "_service", lambda _: ReplayService())
     monkeypatch.setattr(agent_routes.agent_task_registry, "spawn", fail_spawn)
 
     result = await agent_routes.resume_agent_run(
@@ -120,6 +119,7 @@ async def test_resume_route_does_not_spawn_for_idempotent_or_stopped_result(monk
         request,
         FakeSession(),  # type: ignore[arg-type]
         session_factory=object(),  # type: ignore[arg-type]
+        service_factory=lambda _: ReplayService(),
         trace_id="trace-replay",
     )
 
@@ -128,7 +128,7 @@ async def test_resume_route_does_not_spawn_for_idempotent_or_stopped_result(monk
 
 
 @pytest.mark.asyncio
-async def test_resume_route_preserves_typed_safe_error(monkeypatch) -> None:
+async def test_resume_route_preserves_typed_safe_error() -> None:
     request = _resume_request()
     session = FakeSession()
 
@@ -139,14 +139,13 @@ async def test_resume_route_preserves_typed_safe_error(monkeypatch) -> None:
                 "The requested interrupt is no longer current.",
             )
 
-    monkeypatch.setattr(agent_routes, "_service", lambda _: StaleResumeService())
-
     with pytest.raises(HTTPException) as caught:
         await agent_routes.resume_agent_run(
             uuid4(),
             request,
             session,  # type: ignore[arg-type]
             session_factory=object(),  # type: ignore[arg-type]
+            service_factory=lambda _: StaleResumeService(),
             trace_id="trace-stale",
         )
 

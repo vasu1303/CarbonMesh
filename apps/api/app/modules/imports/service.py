@@ -112,16 +112,16 @@ class ImportService:
         session: AsyncSession,
         repository: ImportRepository | None = None,
         *,
-        actor_id: UUID | None = None,
         trace_id: str | None = None,
     ) -> None:
         self.session = session
         self.repository = repository or ImportRepository(session)
-        self.actor_id = actor_id
+        self.actor_id: UUID | None = None
         self.trace_id = trace_id
 
     async def import_activity(self, request: ActivityImportRequest) -> ImportResult:
         try:
+            await self._validate_import_actor(request)
             replay = await self._replay_import(request, "activity")
             if replay is not None:
                 return replay
@@ -495,6 +495,7 @@ class ImportService:
 
     async def import_suppliers(self, request: SupplierImportRequest) -> ImportResult:
         try:
+            await self._validate_import_actor(request)
             replay = await self._replay_import(request, "suppliers")
             if replay is not None:
                 return replay
@@ -502,6 +503,18 @@ class ImportService:
         except Exception:
             await self.session.rollback()
             raise
+
+    async def _validate_import_actor(
+        self, request: ActivityImportRequest | SupplierImportRequest
+    ) -> None:
+        self.actor_id = request.actor_id
+        if self.actor_id is None:
+            return
+        actor = await self.repository.get_actor(request.company_id, self.actor_id)
+        if actor is None or not actor.is_active:
+            raise ImportReferenceNotFound(
+                "The acting user is not active in the selected company.", field_name="actor_id"
+            )
 
     async def _import_suppliers(self, request: SupplierImportRequest) -> ImportResult:
         if not await self.repository.company_exists(request.company_id):
@@ -1471,7 +1484,11 @@ def _hourly_issue_context(source: DataSource) -> dict[str, Any]:
 
 
 def _import_request_hash(request: ActivityImportRequest | SupplierImportRequest) -> str:
-    return _row_checksum(request.model_dump(mode="json", exclude={"idempotency_key"}))
+    excluded = {"idempotency_key"}
+    if request.actor_id is None:
+        # Preserve replay hashes for imports made before explicit actor attribution.
+        excluded.add("actor_id")
+    return _row_checksum(request.model_dump(mode="json", exclude=excluded))
 
 
 def _normalize_unit(value: str) -> str:

@@ -81,7 +81,7 @@ export async function apiRequest<T>(
   try {
     const response = await fetch(url, {
       method: options.method ?? (options.body === undefined ? 'GET' : 'POST'),
-      credentials: 'include',
+      credentials: 'omit',
       cache: 'no-store',
       headers: {
         Accept: 'application/json',

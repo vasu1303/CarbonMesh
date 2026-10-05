@@ -199,6 +199,5 @@ export const scenarioFormSchema = z.object({
       'Enter a valid expiry.',
     ),
 })
-export type Scenario = z.infer<typeof scenarioSchema>
 export type Assessment = z.infer<typeof assessmentSchema>
 export type Fact = z.infer<typeof factSchema>

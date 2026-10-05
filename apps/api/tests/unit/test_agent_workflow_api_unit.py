@@ -136,13 +136,13 @@ async def test_agent_sse_preflight_owns_a_short_lived_factory_session(monkeypatc
         assert kwargs["session_factory"] is session_factory
         yield "event: run.completed\ndata: {}\n\n"
 
-    monkeypatch.setattr(agent_routes, "_service", FoundRunService)
     monkeypatch.setattr(agent_routes, "follow_persisted_sse_events", one_event)
 
     response = await agent_routes.stream_agent_run_events(
         run_id,
         session_factory=session_factory,  # type: ignore[arg-type]
         company_id=company_id,
+        service_factory=FoundRunService,
         last_event_id=None,
         trace_id="trace-safe",
     )
@@ -156,13 +156,12 @@ async def test_agent_sse_preflight_owns_a_short_lived_factory_session(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_agent_route_redacts_unexpected_workflow_failure(monkeypatch) -> None:
+async def test_agent_route_redacts_unexpected_workflow_failure() -> None:
     class FailingService:
         async def start(self, *_, **__):
             raise RuntimeError("secret database/provider diagnostic")
 
     session = FakeRouteSession()
-    monkeypatch.setattr(agent_routes, "_service", lambda _: FailingService())
     request = AgentQueryRequest(
         query="Measure the packaging footprint",
         context=_context(),
@@ -173,6 +172,7 @@ async def test_agent_route_redacts_unexpected_workflow_failure(monkeypatch) -> N
             request,
             session,
             session_factory=None,
+            service_factory=lambda _: FailingService(),
             trace_id="trace-safe",
         )
 

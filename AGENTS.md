@@ -31,9 +31,11 @@ documents determine the target; they do not prove that a feature exists.
 - The October 5 usability direction groups the interface into Prepare, Plan,
   and Review. Users select named database records; UUIDs remain internal keys
   and URL/payload references, never visible labels or fields to type manually.
-- The hackathon workspace has no frontend sign-in or access-key flow. Named
-  actors still identify commands and approval decisions. This is a trusted
-  local/demo experience, not a replacement for authentication on a public deployment.
+- Application authentication is removed from the frontend and API: no sign-in,
+  access keys, signed sessions, or authentication configuration. Named actors
+  still identify commands and approval decisions; company scoping and domain
+  approval checks remain. This is a trusted local/demo experience with a private
+  API. Database/provider credentials and the destructive reset token remain.
 - Electricity Maps controls are removed from the interface. Live provider calls
   are disabled by default, including calls from agents. Existing stored grid
   data, measurements and forecasts remain available; missing data must never

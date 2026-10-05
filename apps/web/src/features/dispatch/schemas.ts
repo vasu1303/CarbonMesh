@@ -254,18 +254,6 @@ export const optimizationSchema = recommendationResultSchema.extend({
   feasible_windows: z.number().int().nonnegative(),
   rejected_windows: z.array(rejectedWindowSchema),
 })
-export const forecastFormSchema = z.object({
-  zone: z
-    .string()
-    .trim()
-    .max(100)
-    .refine(
-      (value) => value === '' || value.length >= 2,
-      'Enter a zone or leave it empty.',
-    ),
-  fixture: z.boolean(),
-  force_refresh: z.boolean(),
-})
 const localUtc = z
   .string()
   .regex(

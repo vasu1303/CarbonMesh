@@ -121,7 +121,7 @@ test('run facts, judgments, recorded trace and documented proxy remain separate'
   expect(errors).toEqual([])
 })
 
-test('native event replay uses configured credentials and closes after a terminal run', async ({
+test('native event replay needs no cross-origin credentials and closes after a terminal run', async ({
   page,
 }) => {
   await page.addInitScript(() => {

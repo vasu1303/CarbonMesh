@@ -68,22 +68,9 @@ export const importResultSchema = z.object({
   created_at: timestamp,
   updated_at: timestamp,
 })
-export const metricsSchema = z.object({
-  company_id: uuid,
-  count,
-  items: z.array(
-    z.object({
-      id: uuid,
-      key: z.string(),
-      version: z.string(),
-      name: z.string(),
-      canonical_unit: z.string(),
-      method_version: z.string(),
-    }),
-  ),
-})
 export const importFormSchema = z
   .object({
+    actor_id: uuid,
     kind: z.enum(['activity', 'suppliers']),
     source_name: z.string().trim().min(1, 'Source name is required.').max(160),
     metric_definition_id: optionalUuid,

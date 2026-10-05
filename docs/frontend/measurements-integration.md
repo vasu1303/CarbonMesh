@@ -2,21 +2,14 @@
 
 `/measurement` lists persisted results and opens an explicit calculation form.
 `/measurement/:id` provides facts, calculation breakdown, evidence and lineage.
-All workspace screens use the same API-only navigation and session boundary.
+All workspace screens use the same API-only navigation and workspace context.
 
 ## Setup
 
 Start the backend and frontend using the README, then open
-`http://localhost:3000/measurement`. Sign in with an operator-provisioned analyst
-access key. The shared session boundary uses `/api/auth/session` (GET, POST,
-DELETE) and the backend HttpOnly cookie. Keys and tokens are not persisted in
-browser storage or frontend configuration. Protected queries start only after
-authentication and a company match. Expiry and sign-out clear workspace queries.
-
-Local development may explicitly disable sign-in with `VITE_AUTH_REQUIRED=false`
-and backend `AUTH_REQUIRED=false`. Production frontend builds always require
-sign-in. When local commands require an actor, supply an existing actor UUID;
-no actor is invented by the UI.
+`http://localhost:3000/measurement`. The frontend and API use no sign-in, access
+key, or session. Queries use the configured workspace context. Commands use an
+existing named actor selected from the API; the UI does not invent actors.
 
 Configure existing company, site, period and metric UUIDs in `apps/web/.env` as
 documented in `.env.example`. Names and provenance come from the backend.
@@ -65,7 +58,7 @@ strings except chart geometry. No emissions or confidence formula runs in React.
 From `apps/web`: `npm run typecheck`, `npm run lint`, `npm run build`, and
 `npm run test:e2e`. Browser fixtures live only under `tests/`; they are not part
 of the application bundle and are not database seeds. Browser tests cover
-authentication, independent API loading, precision, filters, inspection,
+direct workspace access, independent API loading, precision, filters, inspection,
 confidence versions, Scope 2 evidence, failures and responsive light/dark views.
 
 Live acceptance uses the already-populated Neon `carbonmesh` database through
@@ -74,7 +67,7 @@ state until a separate explicit sync populates it.
 
 Earlier baseline verified on 2026-10-03: all 60 browser tests passed, as did typecheck, lint and
 the production build (Vite reports a non-blocking main-chunk size advisory).
-An authenticated browser loaded four actual API records: one verified and three
+A browser loaded four actual API records: one verified and three
 superseded. The latest record displayed 34,400 kgCO2e with confidence 0.9325,
 confidence v2 components and persisted lineage. Dashboard queries validated
 successfully; grid history returned its expected no-data state. Desktop/mobile

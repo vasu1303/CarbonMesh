@@ -26,9 +26,9 @@ import { ApprovalsPanel } from './components/approvals-panel'
 import { LedgerPanel } from './components/ledger-panel'
 import { MeasurementsPanel } from './components/measurements-panel'
 import { QualityPanel } from './components/quality-panel'
-import { QueryState } from './components/query-state'
+import { QueryState } from '@/components/query-state'
 import type { Inspection } from './components/source-inspector'
-import { formatDecimal } from './format'
+import { formatDecimal } from '@/lib/format'
 import { dashboardKey, dashboardQueries, type DashboardScope } from './queries'
 
 const SourceInspector = lazy(() =>

@@ -5,7 +5,6 @@ import { apiRequest, retryApiQuery } from '@/services/api'
 import * as schemas from './schemas'
 
 import type { WorkspaceScope as DashboardScope } from '@/lib/workspace'
-export { workspaceScope as dashboardScope } from '@/lib/workspace'
 export type { WorkspaceScope as DashboardScope } from '@/lib/workspace'
 export const dashboardKey = ['dashboard'] as const
 
@@ -78,24 +77,6 @@ export const dashboardQueries = {
         offset,
       },
     ),
-  measurement: (scope: DashboardScope, id: string) =>
-    read(
-      `/measurements/${id}`,
-      schemas.measurementDetailSchema.refine(
-        (item) => item.id === id && matchesScope(item, scope),
-      ),
-      {
-        company_id: scope.company_id,
-      },
-    ),
-  lineage: (scope: DashboardScope, id: string) =>
-    read(
-      `/measurements/${id}/lineage`,
-      schemas.lineageSchema.refine((item) => item.measurement_id === id),
-      {
-        company_id: scope.company_id,
-      },
-    ),
   issues: (scope: DashboardScope, severity?: string) =>
     read('/quality/issues', schemas.pageSchema(schemas.issueSchema), {
       company_id: scope.company_id,
@@ -126,47 +107,10 @@ export const dashboardQueries = {
       limit: 5,
       offset: 0,
     }),
-  event: (scope: DashboardScope, id: string) =>
-    read(
-      `/ledger/events/${id}`,
-      schemas.ledgerDetailSchema.refine((item) => item.id === id),
-      {
-        company_id: scope.company_id,
-      },
-    ),
-  grid: (scope: DashboardScope) =>
-    read(
-      '/measurement/grid/latest',
-      schemas.gridSchema.refine((item) => item.site_id === scope.site_id),
-      {
-        company_id: scope.company_id,
-        site_id: scope.site_id,
-      },
-    ),
   suppliers: (scope: DashboardScope) =>
     read(
       '/procurement/suppliers',
       schemas.pageSchema(schemas.catalogItemSchema),
       { company_id: scope.company_id, active_only: true, limit: 1, offset: 0 },
     ),
-  products: (scope: DashboardScope) =>
-    read(
-      '/procurement/products',
-      schemas.pageSchema(schemas.catalogItemSchema),
-      { company_id: scope.company_id, active_only: true, limit: 1, offset: 0 },
-    ),
-  standards: (scope: DashboardScope) =>
-    read(
-      '/assurance/standards',
-      schemas.pageSchema(schemas.catalogItemSchema),
-      { company_id: scope.company_id, active_only: true, limit: 1, offset: 0 },
-    ),
-  loads: (scope: DashboardScope) =>
-    read('/dispatch/loads', schemas.pageSchema(schemas.catalogItemSchema), {
-      company_id: scope.company_id,
-      site_id: scope.site_id,
-      active_only: true,
-      limit: 1,
-      offset: 0,
-    }),
 }

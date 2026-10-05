@@ -602,7 +602,6 @@ async def test_staleness_reloads_active_requirements_and_current_ranked_evidence
         active_only=True,
     )
     service._plan_claim.assert_awaited_once_with(
-        draft,
         dependencies,
         requirement,
         allowed_evidence_item_ids=frozenset({current_evidence.evidence.id}),

@@ -30,8 +30,6 @@ playwright-report/
 test-results/
 artifacts/
 docs/verification/
-test-results/
-playwright-report/
 coverage.xml
 pytest-report.xml
 .coverage
@@ -39,6 +37,3 @@ pytest-report.xml
 verification-reports/
 verification-report*.json
 verification_report*.json
-
-# Unused binary from the Vite starter template
-apps/web/src/assets/hero.png

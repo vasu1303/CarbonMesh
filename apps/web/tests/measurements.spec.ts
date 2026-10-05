@@ -131,14 +131,6 @@ test('a rejected Scope 2 calculation stays explicit without a fallback result', 
 function responseFor(url: URL) {
   const options = workspaceResponse(url)
   if (options) return options
-  if (url.pathname === '/api/auth/session')
-    return {
-      company_id: fixture.scope.company_id,
-      actor_id: '00000000-0000-4000-8000-000000000004',
-      role: 'sustainability_analyst',
-    }
-  if (url.pathname === '/api/health')
-    return { status: 'ok', service: 'CarbonMesh API' }
   if (url.pathname === '/api/context/resolve') return fixture.context
   if (url.pathname === '/api/semantic/metrics') return fixture.metrics
   if (url.pathname === `/api/measurements/${first.id}/breakdown`) {
@@ -272,10 +264,7 @@ test('measurements use canonical reads, filters, paging and source inspection', 
     expect(call.method).toBe(
       call.url.pathname === '/api/context/resolve' ? 'POST' : 'GET',
     )
-    if (
-      call.method === 'GET' &&
-      !['/api/health', '/api/auth/session'].includes(call.url.pathname)
-    )
+    if (call.method === 'GET')
       expect(call.url.searchParams.get('company_id')).toBe(
         fixture.scope.company_id,
       )

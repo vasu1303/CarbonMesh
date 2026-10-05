@@ -8,7 +8,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.api.errors import safe_http_error
 from app.dependencies.database import DatabaseSession
-from app.dependencies.request import AuthenticatedActorId, TraceIdHeader
+from app.dependencies.request import TraceIdHeader
 from app.modules.imports.schemas import (
     ActivityImportRequest,
     ImportResult,
@@ -35,11 +35,10 @@ async def import_activity(
     request: ActivityImportRequest,
     session: DatabaseSession,
     trace_id: TraceIdHeader = None,
-    authenticated_actor: AuthenticatedActorId = None,
 ) -> ImportResult:
     """Import CSV/JSON activity rows and normalize accepted records."""
     try:
-        service = ImportService(session, actor_id=authenticated_actor, trace_id=trace_id)
+        service = ImportService(session, trace_id=trace_id)
         return await service.import_activity(request)
     except ImportReferenceNotFound as error:
         raise _http_error(status.HTTP_404_NOT_FOUND, error, trace_id) from error
@@ -74,11 +73,10 @@ async def import_suppliers(
     request: SupplierImportRequest,
     session: DatabaseSession,
     trace_id: TraceIdHeader = None,
-    authenticated_actor: AuthenticatedActorId = None,
 ) -> ImportResult:
     """Import supplier products and bind each product to source evidence."""
     try:
-        service = ImportService(session, actor_id=authenticated_actor, trace_id=trace_id)
+        service = ImportService(session, trace_id=trace_id)
         return await service.import_suppliers(request)
     except ImportReferenceNotFound as error:
         raise _http_error(status.HTTP_404_NOT_FOUND, error, trace_id) from error

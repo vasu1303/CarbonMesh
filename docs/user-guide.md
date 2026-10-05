@@ -65,8 +65,9 @@ measurement method and an active analyst in the selected workspace.
 1. Open **Upload data**, then **Activity & suppliers**.
 2. Choose the activity import type, give the source a recognizable name and
    upload a CSV or JSON file matching the backend contract.
-   The repository includes `data/demo/api-smoke-material-v1.csv` as an explicitly
-   synthetic material example. It intentionally includes an invalid row.
+   The repository includes `data/demo/activity.csv` as a synthetic recycled
+   aluminium example. Its supplier/product references must already exist in
+   the selected company.
 3. Submit the import. Review accepted/rejected counts and the import status.
    The import remains selectable by its name and date.
 4. Follow the quality-check action to **Check data**. Review the row, field and

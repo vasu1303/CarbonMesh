@@ -21,7 +21,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Textarea } from '@/components/ui/textarea'
-import { useWorkspaceActor } from '@/features/auth/use-workspace-actor'
+import { useWorkspaceActor } from '@/services/use-workspace-actor'
 import { displayText, humanize, recordLabel } from '@/lib/presentation'
 import { formatDate } from '@/lib/format'
 import type { WorkspaceScope } from '@/lib/workspace'
@@ -75,7 +75,6 @@ function DecisionForm({
     return () => window.clearTimeout(timer)
   }, [clock, expires])
   const actorId = selectedReviewer ?? actor.actorId
-  const allowedRole = !actor.authenticated || actor.role === 'approver'
   const current =
     approval.status === 'pending' &&
     approval.preview_current &&
@@ -134,7 +133,6 @@ function DecisionForm({
   })
   const blocked =
     !current ||
-    !allowedRole ||
     query.isError ||
     query.isFetching ||
     mutation.isPending
@@ -152,11 +150,6 @@ function DecisionForm({
                 ? 'stale preview'
                 : 'unsupported or incomplete preview'}
           .
-        </p>
-      )}
-      {!allowedRole && (
-        <p role="alert" className="text-sm text-amber-700">
-          A reviewer with approval responsibility is required for this decision.
         </p>
       )}
       {query.isError && (

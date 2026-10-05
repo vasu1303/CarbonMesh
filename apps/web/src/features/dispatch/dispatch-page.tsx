@@ -23,7 +23,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { useWorkspaceActor } from '@/features/auth/use-workspace-actor'
+import { useWorkspaceActor } from '@/services/use-workspace-actor'
 import {
   CommandError,
   FieldError,

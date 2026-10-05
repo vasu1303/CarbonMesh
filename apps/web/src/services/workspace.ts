@@ -40,7 +40,6 @@ const optionsSchema = z.object({
   limit: z.number().int().positive(),
   offset: z.number().int().nonnegative(),
 })
-export type RecordOption = z.infer<typeof optionSchema>
 
 export function useWorkspaceOptions(
   kind: RecordKind,

@@ -1,11 +1,11 @@
 # Workspace Options
 
 `GET /api/workspace/options` is a read-only named-picker query. It uses the
-ordinary API authentication, tenant checks, and security middleware.
+requested company scope and validates related site and period selections.
 
 | Query parameter | Contract |
 | --- | --- |
-| `company_id` | Required UUID, checked against the authenticated company when authentication is enabled. |
+| `company_id` | Required UUID used to scope all returned records. |
 | `kind` | Required enum: `actors`, `metrics`, `methods`, `policies`, `imports`, `documents`, `activity`, `evidence`, `measurements`, `suppliers`, `products`, `standards`, `loads`, `forecasts`, `assurance`, `procurement`, `dispatch`, `runs`, `ledger`. |
 | `site_id` | Optional UUID; must belong to the company. |
 | `reporting_period_id` | Optional UUID; must belong to the company. |
@@ -78,9 +78,8 @@ routes. No automatic fixture fallback occurs: history needs `mode: "fixture"`;
 forecast sync needs `source_mode: "fixture"`. Stored data and deterministic
 calculation paths remain available.
 
-`.env.example` explicitly selects the approved hackathon `AUTH_REQUIRED=false`
-mode. Runtime authentication still defaults to true if unconfigured, and
-`AUTH_REQUIRED=true` retains session, actor, and company enforcement. Destructive
-demo reset still requires the separately configured reset token. Existing local
-`.env` files are not rewritten; a running API must be restarted to load code
-changes and use the intended process configuration.
+Application authentication is removed from the frontend and API. Named actor
+selection records command and approval attribution; company scoping and domain
+approval validation remain. Destructive demo reset still requires the separately
+configured reset token. Obsolete authentication settings can be removed from
+local `.env` files; a running API must be restarted to load code changes.

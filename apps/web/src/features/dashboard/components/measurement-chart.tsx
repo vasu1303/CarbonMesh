@@ -5,7 +5,7 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from '@/components/ui/chart'
-import { formatDecimal } from '../format'
+import { formatDecimal } from '@/lib/format'
 import type { Measurement } from '../schemas'
 
 export default function MeasurementChart({

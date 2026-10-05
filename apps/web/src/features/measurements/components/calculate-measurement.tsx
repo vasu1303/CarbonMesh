@@ -17,7 +17,7 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
-import { useWorkspaceActor } from '@/features/auth/use-workspace-actor'
+import { useWorkspaceActor } from '@/services/use-workspace-actor'
 import type { WorkspaceScope } from '@/lib/workspace'
 import { displayText } from '@/lib/presentation'
 import { apiRequest } from '@/services/api'
@@ -96,7 +96,7 @@ export default function CalculateMeasurement({
             company_id: scope.company_id,
             site_id: scope.site_id,
             reporting_period_id: scope.reporting_period_id,
-            actor_id: actor.authenticated ? actor.actorId : values.actor_id,
+            actor_id: values.actor_id,
             ...(values.path === 'electricity'
               ? {
                   output_metric_key: 'emissions.scope2.location_based',
@@ -205,32 +205,25 @@ export default function CalculateMeasurement({
               )}
             </div>
           ))}
-          {!actor.authenticated && (
-            <div className="space-y-2">
-              <label htmlFor="calculate-actor" className="text-xs font-medium">
-                Acting user
-              </label>
-              <RecordSelect
-                id="calculate-actor"
-                kind="actors"
-                placeholder="Select an acting user"
-                disabled={calculate.isPending}
-                aria-invalid={!!form.formState.errors.actor_id}
-                {...form.register('actor_id')}
-                value={actorId}
-              />
-              {form.formState.errors.actor_id && (
-                <p role="alert" className="text-xs text-destructive">
-                  {form.formState.errors.actor_id.message}
-                </p>
-              )}
-            </div>
-          )}
-          {actor.authenticated && (
-            <p className="text-sm">
-              Acting user: {displayText(actor.actorName)}
-            </p>
-          )}
+          <div className="space-y-2">
+            <label htmlFor="calculate-actor" className="text-xs font-medium">
+              Acting user
+            </label>
+            <RecordSelect
+              id="calculate-actor"
+              kind="actors"
+              placeholder="Select an acting user"
+              disabled={calculate.isPending}
+              aria-invalid={!!form.formState.errors.actor_id}
+              {...form.register('actor_id')}
+              value={actorId}
+            />
+            {form.formState.errors.actor_id && (
+              <p role="alert" className="text-xs text-destructive">
+                {form.formState.errors.actor_id.message}
+              </p>
+            )}
+          </div>
           <p className="border-l-2 border-amber-500 pl-3 text-xs text-muted-foreground">
             Missing factors or grid intervals block calculation. This action
             does not fill missing activity or substitute a fixture.

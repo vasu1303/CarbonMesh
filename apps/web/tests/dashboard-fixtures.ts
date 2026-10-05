@@ -102,9 +102,6 @@ export function fixtureFor(url: URL, empty = false): unknown {
   const options = workspaceResponse(url)
   if (options) return options
   const path = url.pathname.replace('/api', '')
-  if (path === '/health') return { status: 'ok', service: 'CarbonMesh API' }
-  if (path === '/auth/session')
-    return { company_id: id(1), actor_id: id(4), role: 'sustainability_analyst' }
   if (path === '/context/resolve')
     return {
       company: {
@@ -241,26 +238,6 @@ export function fixtureFor(url: URL, empty = false): unknown {
       parents_truncated: false,
       children_truncated: false,
     }
-  if (path === '/measurement/grid/latest')
-    return {
-      site_id: id(2),
-      grid_intensity_point_id: id(1401),
-      zone: 'IN-NO',
-      value: '0.4150',
-      unit: 'kgCO2e/kWh',
-      provider_timestamp: time,
-      is_estimated: true,
-      temporal_granularity: 'hourly',
-      provenance: {
-        provider: 'electricity_maps',
-        provider_mode: 'fixture',
-        synthetic: true,
-        source_document_id: id(1002),
-        evidence_item_id: id(1202),
-        response_checksum: hash,
-        retrieved_at: time,
-      },
-    }
   if (
     [
       '/procurement/suppliers',
@@ -292,19 +269,6 @@ export async function mockDashboard(
       body: request.postDataJSON(),
     })
     if (override && (await override(route, url))) return
-    if (empty && url.pathname === '/api/measurement/grid/latest') {
-      await route.fulfill({
-        status: 404,
-        json: {
-          detail: {
-            code: 'grid_intensity_not_found',
-            message: 'No grid data.',
-            retryable: false,
-          },
-        },
-      })
-      return
-    }
     const body = fixtureFor(url, empty)
     if (body === undefined)
       throw new Error(`Unexpected request: ${request.method()} ${url.pathname}`)

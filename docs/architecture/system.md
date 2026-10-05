@@ -1,6 +1,6 @@
 # CarbonMesh System Architecture
 
-Last updated: 2026-10-02
+Last updated: 2026-10-05
 
 ## Scope and implementation
 
@@ -8,12 +8,13 @@ CarbonMesh connects Measurement, Assurance, Procurement, and advisory Dispatch
 through one ledger, generic human approvals, and a bounded agent runtime.
 Deterministic domain services, hourly Scope 2, generic approval decisions,
 non-agent fact bindings, database readiness, and production approval resume
-are implemented. The frontend's 16-screen experience remains work for its
-separate owner; the diagram shows that intended experience.
+are implemented. The React workspace connects the four module workflows with
+named record selection, approval review, run traces, and evidence diagrams.
 
-The model plans; application services calculate and validate. Live history,
-forecast, and agent grid modes are the default. Explicit synthetic fixture mode
-never substitutes for a failed live provider. A typed stop such as
+The model plans; application services calculate and validate. Grid workflows use
+stored data by default; live provider calls require explicit configuration,
+including calls from agents. Explicit synthetic fixture mode never substitutes
+for a disabled or failed live provider. A typed stop such as
 `provider_unavailable` or `budget_exhausted` is not successful completion.
 Product rules and team ownership remain in [AGENTS.md](../../AGENTS.md).
 
@@ -29,13 +30,13 @@ flowchart TB
   end
 
   subgraph Experience[Experience]
-    Web[React 19 and TypeScript<br/>16 target screens]
+    Web[React 19 and TypeScript<br/>Prepare, Plan, Review]
     HTTP[REST commands and queries<br/>SSE progress]
     Web <--> HTTP
   end
 
   subgraph Runtime[Application and bounded agent runtime]
-    API[FastAPI and Pydantic v2<br/>authorization, validation, idempotency]
+    API[FastAPI and Pydantic v2<br/>context, validation, idempotency]
     Context[Stage 0 contextualizer<br/>context isolation and ContextEnvelope]
     Planner[Intent planner and policy gate<br/>typed ExecutionPlan and budgets]
     Graph[LangGraph orchestrator<br/>five bounded graphs and interrupts]
@@ -174,11 +175,11 @@ remain available without an external collector.
 - All demo data is synthetic and visibly marked.
 - Retrieved documents are untrusted evidence; their text cannot change policy or
   tool access.
-- Tenant filters and actor/role checks apply before data leaves a repository.
-- Operator-provisioned demo access keys bind a company and actor to a short-lived
-  signed session. Every protected request checks active identity and current role;
-  payload/query identities must agree. Bearer and HttpOnly-cookie transport support
-  REST and SSE. Explicit origin rules protect cookie mutations.
+- Tenant filters scope data reads; domain actor/role checks validate commands and
+  approval decisions.
+- Application authentication is removed. The trusted local/demo API uses no
+  access keys, signed sessions, or authentication cookies. Named actors provide
+  attribution, and approval validation and the destructive reset token remain.
 - Source bodies, prompts, credentials, and provider responses are redacted from
   normal logs.
 - Unknown placeholders, invented citations, stale previews, missing forecast

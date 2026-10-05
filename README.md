@@ -41,21 +41,16 @@ Configure `apps/api/.env` using [.env.example](apps/api/.env.example):
   Stored grid data and forecasts remain usable. A stored provider token alone
   does not permit live calls.
 - `DEMO_RESET_TOKEN`: required only for the guarded demo reset endpoint.
-- `AUTH_REQUIRED=false`: trusted local/demo mode with no frontend login.
-  Named actors still identify commands and decisions; they are not authentication.
-  Do not expose this mode publicly. Backend authentication remains available
-  for separately secured API deployments using `AUTH_SIGNING_KEY` and `AUTH_ACCESS_KEYS`.
 - `EMBEDDING_PROVIDER=openai` and `EMBEDDING_MODEL`: evidence embeddings use
   the existing OpenAI key and 768 dimensions. `hash` is explicit offline mode.
 
 The application loads this file directly. Keep credentials local; `.env` is
 ignored by Git and is excluded from the Docker build context.
 
-The standard browser workflow uses no access key. Configure explicit
-`CORS_ORIGINS` if the frontend and API run on different origins. For a separate
-API deployment with `AUTH_REQUIRED=true`, the existing signed-session API and
-its security tests remain in place; this simplified frontend does not supply a
-login flow for that deployment.
+Application authentication is removed from both the frontend and API. No access
+keys, sessions, or authentication settings are needed. Named actors identify
+commands and decisions, and company scoping and approval validation remain.
+Configure explicit `CORS_ORIGINS` if the frontend and API run on different origins.
 
 Verify an existing database and start the API from `apps/api`:
 
@@ -117,75 +112,6 @@ requests to the backend on port 8000. Optional workspace configuration is in
 `apps/web/.env.example`; internal references stay in configuration, not user forms.
 
 Before pushing, run `npm run typecheck`, `npm run lint`, and `npm run build`.
-
-## Run without Docker
-
-For a small additive API test dataset on an existing synthetic Maverick tenant,
-run the following from `apps/api` after configuring its database connection:
-
-```bash
-python -m app.modules.demo.populate --endpoint YOUR_EXACT_ENDPOINT --database carbonmesh
-python -m app.modules.demo.populate --endpoint YOUR_EXACT_ENDPOINT --database carbonmesh --apply
-```
-
-The first command only verifies the schema, tenant, and row counts. `--apply`
-imports `data/demo/api-smoke-material-v1.csv`: three synthetic material receipts
-and one deliberately invalid quantity. The existing import and Measurement
-services create quality issues, calculated values, confidence, hashes, and ledger
-lineage. No carbon result is hard-coded in the script. Repeating the same command
-reuses the import and calculation results. Each service owns its transaction, so
-an interrupted run can be resumed; the whole script is not one atomic transaction.
-Changing the fixture requires a new filename and idempotency key.
-
-This command refuses a different target or a missing/inactive/non-synthetic
-Maverick tenant. It never bootstraps, resets, deletes, overwrites reference data,
-approves recommendations, or calls an external model/grid provider. Existing
-suppliers, standards, loads, recommendations, and approvals remain untouched.
-Scope 2 and Assurance results still require suitable timestamp-aligned grid and
-activity data; empty tables are not filled with fabricated artifacts.
-
-To verify API data, use `GET /api/measurements` with the configured workspace
-selectors, then inspect the result and its lineage. Internal references, exact
-values, output hashes and ledger references must match the database. API-backed
-synthetic data remains synthetic. Authentication is optional only in the trusted
-local/demo configuration described above.
-
-For a small additive API test dataset on an existing synthetic Maverick tenant,
-run the following from `apps/api` after configuring its database connection:
-
-```bash
-python -m app.modules.demo.populate --endpoint YOUR_EXACT_ENDPOINT --database carbonmesh
-python -m app.modules.demo.populate --endpoint YOUR_EXACT_ENDPOINT --database carbonmesh --apply
-```
-
-The first command only verifies the schema, tenant, and row counts. `--apply`
-imports `data/demo/api-smoke-material-v1.csv`: three synthetic material receipts
-and one deliberately invalid quantity. The existing import and Measurement
-services create quality issues, calculated values, confidence, hashes, and ledger
-lineage. No carbon result is hard-coded in the script. Repeating the same command
-reuses the import and calculation results. Each service owns its transaction, so
-an interrupted run can be resumed; the whole script is not one atomic transaction.
-Changing the fixture requires a new filename and idempotency key.
-
-This command refuses a different target or a missing/inactive/non-synthetic
-Maverick tenant. It never bootstraps, resets, deletes, overwrites reference data,
-approves recommendations, or calls an external model/grid provider. Existing
-suppliers, standards, loads, recommendations, and approvals remain untouched.
-Scope 2 and Assurance results still require suitable timestamp-aligned grid and
-activity data; empty tables are not filled with fabricated artifacts.
-
-To verify API data, use `GET /api/measurements` with the configured workspace
-selectors, then inspect the result and its lineage. Internal references, exact
-values, output hashes and ledger references must match the database. API-backed
-synthetic data remains synthetic. Authentication is optional only in the trusted
-local/demo configuration described above.
-
-Electricity Maps live calls are **disabled by default**, including agent calls.
-The UI has no provider test or synchronization controls. Stored measurements,
-history and forecast snapshots remain usable. An operator must deliberately
-enable live calls outside the normal UI when needed. Fixture requests still
-require explicit opt-in and retain synthetic provenance; disabled or failed
-live requests never silently fall back to fixtures.
 
 ## Demo data and provider modes
 

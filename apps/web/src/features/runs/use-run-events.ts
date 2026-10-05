@@ -1,6 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
-import { authenticationRequired } from '@/features/auth/session'
 import { apiUrl } from '@/services/api'
 import { runOptions } from './queries'
 import {
@@ -104,7 +103,6 @@ export function useRunEvents(run: AgentRun) {
         apiUrl(`/runs/${run.run_id}/events`, {
           company_id: run.context.company_id,
         }),
-        { withCredentials: authenticationRequired },
       )
       source.onopen = () => {
         if (!disposed) setConnection('Connected to persisted events')

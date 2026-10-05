@@ -62,6 +62,7 @@ class _ImportRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     company_id: UUID
+    actor_id: UUID | None = None
     source_name: str = Field(min_length=1, max_length=160)
     filename: str = Field(min_length=1, max_length=255)
     content_type: Literal["text/csv", "application/json"]

@@ -422,9 +422,7 @@ export async function mockScenariosApprovalsLedger(
       }
     }
     let body: unknown
-    if (path === '/api/auth/session')
-      body = { company_id: id(1), actor_id: ids.actor, role: 'approver' }
-    else if (path === '/api/measurements')
+    if (path === '/api/measurements')
       body = paged([
         {
           ...measurement,

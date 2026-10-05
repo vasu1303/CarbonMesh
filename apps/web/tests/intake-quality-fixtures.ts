@@ -3,14 +3,6 @@ import { id, mockDashboard } from './dashboard-fixtures'
 
 // Synthetic test-only projections. Every API call is intercepted, including commands.
 export const time = '2026-09-30T12:00:00Z'
-export const resetReceipt = {
-  status: 'reset',
-  synthetic: true,
-  company_id: id(1),
-  site_id: id(2),
-  reporting_period_id: id(3),
-  seeded: { metrics: 2, activity_records: 3, supplier_products: 4, emission_factors: 5 },
-}
 export const importId = id(8100)
 export const documentId = id(8101)
 export const qualityIssues = Array.from({ length: 27 }, (_, index) => ({
@@ -176,14 +168,6 @@ export async function mockIntake(
         offset,
       }
     }
-    if (url.pathname === '/api/health/ready')
-      result = { status: 'ok', service: 'CarbonMesh API' }
-    if (url.pathname === '/api/db/demo')
-      result = {
-        connected: true,
-        database_time: time,
-        message: 'Synthetic test database connection.',
-      }
     if (result === undefined) return
     await route.fulfill({ json: result })
     return true
