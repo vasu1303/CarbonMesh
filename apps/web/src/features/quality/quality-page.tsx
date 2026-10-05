@@ -34,7 +34,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
-import { useWorkspaceActor } from '@/features/auth/use-workspace-actor'
+import { useWorkspaceActor } from '@/services/use-workspace-actor'
 import {
   ActorField,
   CommandError,

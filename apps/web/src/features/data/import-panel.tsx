@@ -25,8 +25,10 @@ import {
 } from '@/components/ui/table'
 import type { WorkspaceScope } from '@/lib/workspace'
 import { apiRequest, retryApiQuery } from '@/services/api'
+import { useWorkspaceActor } from '@/services/use-workspace-actor'
 import { readImportFile } from './files'
 import {
+  ActorField,
   CommandError,
   Field,
   MetricField,
@@ -169,6 +171,7 @@ function ImportInspection({ id }: { id: string }) {
 
 export function ImportPanel() {
   const scope = useOutletContext<WorkspaceScope>()
+  const actor = useWorkspaceActor()
   const client = useQueryClient()
   const [params, setParams] = useSearchParams()
   const file = useRef<HTMLInputElement>(null)
@@ -177,6 +180,7 @@ export function ImportPanel() {
   const form = useForm<ImportForm>({
     resolver: zodResolver(importFormSchema),
     defaultValues: {
+      actor_id: actor.actorId,
       kind: 'activity',
       source_name: '',
       metric_definition_id: '',
@@ -213,6 +217,7 @@ export function ImportPanel() {
         const upload = await readImportFile(selected)
         const body = {
           company_id: scope.company_id,
+          actor_id: values.actor_id,
           source_name: values.source_name,
           ...upload,
           external_reference: values.external_reference || null,
@@ -278,6 +283,11 @@ export function ImportPanel() {
         >
           <fieldset disabled={command.pending} className="space-y-4">
             <div className={formGrid}>
+              <ActorField
+                registration={form.register('actor_id')}
+                value={watched.actor_id}
+                error={form.formState.errors.actor_id?.message}
+              />
               <Field label="Import type">
                 <NativeSelect {...form.register('kind')}>
                   <NativeSelectOption value="activity">

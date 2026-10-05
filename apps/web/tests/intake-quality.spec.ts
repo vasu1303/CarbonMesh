@@ -71,7 +71,7 @@ test('file import retains raw decimals and retry identity until its payload chan
   })
   await page.goto('/data')
   const form = page.getByRole('region', { name: 'New import', exact: true })
-  await expect(form.getByLabel('Requested by', { exact: true })).toHaveCount(0)
+  await supplyActor(form)
   await form
     .getByLabel('Source name', { exact: true })
     .fill('Synthetic hourly source')
@@ -97,11 +97,11 @@ test('file import retains raw decimals and retry identity until its payload chan
     form.getByText('Synthetic transient import failure.'),
   ).toBeVisible()
   expect(bodies[0].idempotency_key).toBe(bodies[1].idempotency_key)
+  expect(bodies[0].actor_id).toBe(id(4))
   expect(bodies[0].content).toBe(original)
   expect(bodies[0].company_id).toBe(id(1))
   expect(bodies[0].site_id).toBe(id(2))
   expect(bodies[0].is_synthetic).toBe(true)
-  expect(bodies[0]).not.toHaveProperty('actor_id')
   await form
     .getByLabel('Source name', { exact: true })
     .fill('Synthetic changed source')
@@ -126,6 +126,7 @@ test('supplier imports use the canonical envelope and no activity scope fields',
   await page.goto('/data')
   const form = page.getByRole('region', { name: 'New import', exact: true })
   await form.getByLabel('Import type').selectOption('suppliers')
+  await form.getByLabel('Requested by', { exact: true }).selectOption({ label: 'Synthetic approver / active' })
   await form
     .getByLabel('Source name', { exact: true })
     .fill('Synthetic supplier file')
@@ -141,6 +142,7 @@ test('supplier imports use the canonical envelope and no activity scope fields',
   await form.getByRole('button', { name: 'Upload and check', exact: true }).click()
   await expect.poll(() => body).toBeTruthy()
   expect(body?.content).toBe(csv)
+  expect(body?.actor_id).toBe(id(6004))
   expect(body?.is_synthetic).toBe(true)
   expect(body).not.toHaveProperty('site_id')
   expect(body).not.toHaveProperty('metric_definition_id')
@@ -181,9 +183,15 @@ test('oversized imports and malformed UUIDs are blocked before any command', asy
 test('document deep link downloads original content and indexes only on submit', async ({
   page,
 }) => {
+  await page.context().addCookies([
+    { name: 'carbonmesh_session', value: 'expired-demo-session', url: 'http://127.0.0.1:3100' },
+  ])
   let indexes = 0
   await mockIntake(page, async (route, url) => {
     if (url.pathname === `/api/sources/${documentId}/content`) {
+      const headers = await route.request().allHeaders()
+      expect(headers.cookie).toBeUndefined()
+      expect(headers.authorization).toBeUndefined()
       await route.fulfill({
         body: 'Synthetic evidence',
         contentType: 'application/octet-stream',

@@ -14,9 +14,5 @@ export function useWorkspaceActor(preferredRole = 'sustainability_analyst') {
     ) ?? candidates?.[0]
   return {
     actorId: actor?.id ?? '',
-    actorName: actor?.label ?? '',
-    authenticated: false,
-    role: actor?.role ?? undefined,
-    isPending: actors.isPending,
   }
 }

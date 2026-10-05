@@ -33,11 +33,11 @@ for (const [label, fields, expected] of [
     await page.goto('/dashboard')
     const result = await page.evaluate(async () => {
       const apiModule = '/src/services/api.ts'
-      const healthModule = '/src/schemas/health.ts'
+      const contextModule = '/src/schemas/context.ts'
       const { apiRequest, ApiError, retryApiQuery } = await import(apiModule)
-      const { healthSchema } = await import(healthModule)
+      const { contextSchema } = await import(contextModule)
       try {
-        await apiRequest('/contract-error', healthSchema, {
+        await apiRequest('/contract-error', contextSchema, {
           signal: new AbortController().signal,
         })
         return null

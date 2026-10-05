@@ -7,7 +7,6 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -98,8 +97,8 @@ app.add_middleware(RequestTelemetryMiddleware)
 if get_settings().cors_origins:
     app.add_middleware(
         CORSMiddleware, allow_origins=get_settings().cors_origins,
-        allow_credentials=True, allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type", "X-Trace-ID", "X-Demo-Reset-Token"],
+        allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Content-Type", "X-Trace-ID", "X-Demo-Reset-Token"],
         expose_headers=["X-Trace-ID", "Content-Disposition"],
     )
 app.add_exception_handler(RequestValidationError, request_validation_error_response)
@@ -145,29 +144,3 @@ app.add_exception_handler(ConnectionError, handle_database_error)
 app.add_exception_handler(TimeoutError, handle_database_error)
 app.add_exception_handler(Exception, handle_unexpected_error)
 app.include_router(api_router, prefix="/api")
-
-
-def authenticated_openapi() -> dict:
-    """Describe both session transports without requiring credentials for public routes."""
-    if app.openapi_schema is None:
-        schema = get_openapi(title=app.title, version=app.version, routes=app.routes)
-        schema.setdefault("components", {})["securitySchemes"] = {
-            "BearerSession": {"type": "http", "scheme": "bearer"},
-            "CookieSession": {
-                "type": "apiKey", "in": "cookie", "name": "carbonmesh_session",
-            },
-        }
-        for path, methods in schema["paths"].items():
-            for method, operation in methods.items():
-                if method not in {"get", "post", "patch", "delete", "put", "head", "options"}:
-                    continue
-                if path in {"/api/health", "/api/health/ready"}:
-                    continue
-                if path == "/api/auth/session" and method != "get":
-                    continue
-                operation["security"] = [{"BearerSession": []}, {"CookieSession": []}]
-        app.openapi_schema = schema
-    return app.openapi_schema
-
-
-app.openapi = authenticated_openapi

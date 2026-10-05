@@ -21,12 +21,11 @@ import { measurementQueries } from '@/features/measurements/queries'
 import { formatDate, formatDecimal } from '@/lib/format'
 import { displayText, humanize } from '@/lib/presentation'
 import { dashboardQueries, type DashboardScope } from '../queries'
-import type { Approval, GridIntensity } from '../schemas'
+import type { Approval } from '../schemas'
 
 export type Inspection =
   | { kind: 'measurement' | 'event'; id: string }
   | { kind: 'approval'; item: Approval }
-  | { kind: 'grid'; item: GridIntensity }
 
 function Fact({ label, value }: { label: string; value: string }) {
   return (
@@ -244,65 +243,6 @@ export function SourceInspector({
                 Review approval
               </Link>
             </Button>
-          </>
-        )}
-        {selection?.kind === 'grid' && (
-          <>
-            <dl className="grid gap-x-5 sm:grid-cols-2">
-              <Fact label="Grid zone" value={selection.item.zone} />
-              <Fact
-                label="Intensity"
-                value={
-                  formatDecimal(selection.item.value) +
-                  ' ' +
-                  selection.item.unit
-                }
-              />
-              <Fact
-                label="Provider"
-                value={humanize(selection.item.provenance.provider)}
-              />
-              <Fact
-                label="Source"
-                value={
-                  selection.item.provenance.synthetic
-                    ? 'Synthetic source'
-                    : 'Non-synthetic source'
-                }
-              />
-              <Fact
-                label="Observed"
-                value={formatDate(selection.item.provider_timestamp)}
-              />
-              <Fact
-                label="Estimation"
-                value={
-                  selection.item.is_estimated ? 'Estimated' : 'Not estimated'
-                }
-              />
-            </dl>
-            <div className="flex flex-wrap gap-3">
-              <Button asChild variant="outline" size="sm">
-                <Link
-                  to={
-                    '/data?document=' +
-                    selection.item.provenance.source_document_id
-                  }
-                >
-                  Source document
-                </Link>
-              </Button>
-              <Button asChild variant="outline" size="sm">
-                <Link
-                  to={
-                    '/ledger?audit_type=evidence_item&audit_id=' +
-                    selection.item.provenance.evidence_item_id
-                  }
-                >
-                  Evidence history
-                </Link>
-              </Button>
-            </div>
           </>
         )}
       </DialogContent>

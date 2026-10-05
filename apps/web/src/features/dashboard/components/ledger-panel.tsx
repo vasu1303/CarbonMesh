@@ -2,9 +2,9 @@ import { useQuery } from '@tanstack/react-query'
 import { ArrowUpRight, GitCommitHorizontal } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
-import { formatDate, humanize } from '../format'
+import { formatDate, humanize } from '@/lib/format'
 import { dashboardQueries, type DashboardScope } from '../queries'
-import { EmptyState, QueryRefresh, QueryState } from './query-state'
+import { EmptyState, QueryRefresh, QueryState } from '@/components/query-state'
 
 export function LedgerPanel({
   scope,

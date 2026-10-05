@@ -2,13 +2,21 @@ import { expect, test } from '@playwright/test'
 import { mockDashboard } from './dashboard-fixtures'
 
 test('workspace opens directly without sign-in UI or authentication requests', async ({ page }) => {
-  const calls = await mockDashboard(page)
+  await page.context().addCookies([
+    { name: 'carbonmesh_session', value: 'expired-demo-session', url: 'http://127.0.0.1:3100' },
+  ])
+  const headers: Record<string, string>[] = []
+  const calls = await mockDashboard(page, async (route) => {
+    headers.push(await route.request().allHeaders())
+  })
   await page.goto('/dashboard')
   await expect(page.getByRole('button', { name: '12,500.125', exact: true })).toBeVisible()
   await expect(page.getByLabel('Access key', { exact: true })).toHaveCount(0)
   await expect(page.getByRole('button', { name: /Sign in|Sign out/i })).toHaveCount(0)
   await expect(page.getByRole('heading', { name: /Sign in/i })).toHaveCount(0)
   expect(calls.some(({ url }) => url.pathname.startsWith('/api/auth/'))).toBe(false)
+  expect(headers.length).toBeGreaterThan(0)
+  expect(headers.every((item) => !item.cookie && !item.authorization)).toBe(true)
 })
 
 for (const status of [401, 403]) {

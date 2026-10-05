@@ -127,6 +127,29 @@ def test_import_envelope_does_not_mutate_content_before_checksum() -> None:
     assert request.filename == "activity.csv"
 
 
+def test_import_replay_hash_preserves_legacy_requests_and_binds_explicit_actors() -> None:
+    request = SupplierImportRequest(
+        company_id=UUID("00000000-0000-4000-8000-000000000001"),
+        source_name="Synthetic legacy import",
+        filename="empty.json",
+        content_type="application/json",
+        content=[],
+        is_synthetic=True,
+        idempotency_key="synthetic-legacy-import",
+    )
+    # Persisted before actor_id existed in the import transport contract.
+    legacy_hash = "bc3ad326028f62b09c6816a1466b08a0e45fea4942ec63b85a7f1a72731178fa"
+    assert import_service_module._import_request_hash(request) == legacy_hash
+    explicit_null = request.model_copy(update={"actor_id": None})
+    assert import_service_module._import_request_hash(explicit_null) == legacy_hash
+
+    analyst = request.model_copy(update={"actor_id": UUID(int=4)})
+    other_actor = request.model_copy(update={"actor_id": UUID(int=5)})
+    analyst_hash = import_service_module._import_request_hash(analyst)
+    assert analyst_hash != legacy_hash
+    assert import_service_module._import_request_hash(other_actor) != analyst_hash
+
+
 def test_mass_normalization_uses_decimal_and_fixed_scale() -> None:
     assert normalize_quantity(Decimal("12.5"), "tonnes", "kg") == Decimal("12500.000000")
     assert normalize_quantity(Decimal(10), "lb", "kg") == Decimal("4.535924")

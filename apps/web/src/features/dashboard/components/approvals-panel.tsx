@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { formatDate, formatDecimal, humanize } from '../format'
+import { formatDate, formatDecimal, humanize } from '@/lib/format'
 import { dashboardQueries, type DashboardScope } from '../queries'
 import type { Approval } from '../schemas'
 import {
@@ -12,7 +12,7 @@ import {
   PageControls,
   QueryRefresh,
   QueryState,
-} from './query-state'
+} from '@/components/query-state'
 
 function approvalStatus(item: Approval, now: number) {
   if (!item.preview_current) return 'Stale preview'

@@ -207,7 +207,6 @@ export const dispatchPreviewSchema = z.object({
   advisory_only: z.literal(true),
   actuation_authorized: z.literal(false),
 })
-export type Approval = z.infer<typeof approvalSchema>
 export type ApprovalDetail = z.infer<typeof approvalDetailSchema>
 
 export function supportedPreview(item: ApprovalDetail) {

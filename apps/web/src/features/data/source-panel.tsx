@@ -21,7 +21,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { useWorkspaceActor } from '@/features/auth/use-workspace-actor'
+import { useWorkspaceActor } from '@/services/use-workspace-actor'
 import type { WorkspaceScope } from '@/lib/workspace'
 import { ApiError, apiRequest, apiUrl } from '@/services/api'
 import { readSourceFile } from './files'
@@ -67,7 +67,7 @@ function DocumentActions({ id }: { id: string }) {
         response = await fetch(
           apiUrl(`/sources/${id}/content`, { company_id: scope.company_id }),
           {
-            credentials: 'include',
+            credentials: 'omit',
             cache: 'no-store',
             signal: AbortSignal.timeout(30_000),
           },

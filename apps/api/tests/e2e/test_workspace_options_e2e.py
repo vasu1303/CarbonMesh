@@ -1,4 +1,3 @@
-import json
 import re
 from datetime import date
 from unittest.mock import Mock
@@ -254,7 +253,7 @@ async def test_forecast_picker_returns_one_snapshot_and_stored_reads_work(
 
 
 @pytest.mark.asyncio
-async def test_typed_validation_and_authentication_still_apply(
+async def test_typed_validation_and_credential_free_workspace_access(
     api_client, e2e_context, monkeypatch
 ):
     ids = e2e_context.ids
@@ -281,21 +280,13 @@ async def test_typed_validation_and_authentication_still_apply(
     ).status_code == 422
 
     monkeypatch.setenv("AUTH_REQUIRED", "true")
-    monkeypatch.setenv("AUTH_COOKIE_SECURE", "false")
-    monkeypatch.setenv("AUTH_SIGNING_KEY", "synthetic-workspace-signing-key-over-32-chars")
-    key = "synthetic-workspace-access-key-over-32-chars"
-    monkeypatch.setenv(
-        "AUTH_ACCESS_KEYS",
-        json.dumps(
-            [
-                {"key": key, "company_id": str(ids.company_id), "actor_id": str(ids.analyst_id)},
-            ]
-        ),
+    accessible = await api_client.get(URL, params=valid)
+    assert accessible.status_code == 200, accessible.text
+    assert accessible.json()["total"] > 0
+    assert "set-cookie" not in accessible.headers
+    missing_company = await api_client.get(
+        URL, params={**valid, "company_id": str(uuid4())}
     )
-    assert (await api_client.get(URL, params=valid)).status_code == 401
-    login = await api_client.post("/api/auth/session", json={"access_key": key})
-    assert login.status_code == 200, login.text
-    assert (await api_client.get(URL, params=valid)).status_code == 200
-    assert (
-        await api_client.get(URL, params={**valid, "company_id": str(uuid4())})
-    ).status_code == 403
+    assert missing_company.status_code == 200, missing_company.text
+    assert missing_company.json()["items"] == []
+    assert missing_company.json()["total"] == 0

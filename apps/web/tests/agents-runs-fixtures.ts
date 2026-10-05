@@ -268,16 +268,6 @@ export async function mockAgents(
       await route.fulfill({ json: metrics })
       return
     }
-    if (path === '/api/auth/session') {
-      await route.fulfill({
-        json: {
-          company_id: id(1),
-          actor_id: actorId,
-          role: 'sustainability_analyst',
-        },
-      })
-      return
-    }
     if (path === `/api/runs/${runId}`) {
       await route.fulfill({ json: runFixture })
       return

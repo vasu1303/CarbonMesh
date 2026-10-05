@@ -1,11 +1,11 @@
 # CarbonMesh API Contract
 
-Last updated: 2026-10-02
+Last updated: 2026-10-05
 
 ## Scope
 
-The backend exposes 54 implemented operations, each on one canonical `/api/...`
-path. The endpoint index below matches the generated OpenAPI catalog.
+The backend exposes implemented operations on canonical `/api/...` paths.
+The endpoint index below describes the application catalog.
 The running API's `/docs` and `/openapi.json` are authoritative for exact
 Pydantic request/response schemas. This document explains client behavior;
 [AGENTS.md](../../AGENTS.md) defines product scope and team ownership.
@@ -13,8 +13,8 @@ Pydantic request/response schemas. This document explains client behavior;
 ## Conventions
 
 - Tenant-owned query endpoints require `company_id`; command payloads carry
-  company and actor context matching a server-issued session. Every protected
-  request checks that the actor, role, company, and configured grant remain active.
+  company and actor context. Company scoping and domain actor/role validation
+  remain; actor selection provides attribution without authenticating the caller.
 - UUID path/query values use canonical UUID strings.
 - Carbon, quantity, cost, percentages, confidence, and scores are exact decimal
   strings in API payloads where their Pydantic contracts require it.
@@ -25,22 +25,19 @@ Pydantic request/response schemas. This document explains client behavior;
 - `X-Trace-ID` may be supplied by the caller and is echoed in safe error flows.
 - No implemented endpoint performs purchasing or equipment actuation.
 
-### Authentication
+Live Electricity Maps calls are disabled by default. History/forecast requests
+may default to a `live` source mode, but execution, including agent calls,
+returns `integration_live_disabled` unless `ELECTRICITY_MAPS_LIVE_ENABLED=true`.
+Stored data remains available, and fixture requests require explicit opt-in.
 
-| Method | Path | Purpose |
-| --- | --- | --- |
-| POST | `/api/auth/session` | Exchange an operator-provisioned access key for a signed, expiring session and HttpOnly cookie. |
-| GET | `/api/auth/session` | Read the current active principal. |
-| DELETE | `/api/auth/session` | Clear the browser session cookie. |
+### Workspace access and attribution
 
-Data APIs accept `Authorization: Bearer <access_token>` or the session cookie.
-The latter supports native EventSource. Access keys and signing keys stay in
-server configuration. Session responses are `no-store`. Auditors are read-only;
-approval decisions require the approver role and the domain's exact preview checks.
-Mutations reject unapproved origins. Logout clears the cookie; previously issued
-Bearer tokens expire normally or are revoked by removing the actor's grant,
-deactivating the actor, changing the role, or rotating the signing key.
-Health endpoints remain public; an unconfigured authentication boundary fails closed.
+REST and SSE requests require no application credentials. Authentication routes,
+signed sessions, cookies, and access-key configuration are removed. This API is
+for the trusted local/demo workspace. Named actor IDs bind commands and decisions
+to existing company records. Approval decisions still require the domain's
+approver role, exact preview, expiry, staleness, and idempotency checks. Destructive
+demo reset retains its separately configured reset token.
 
 ## Endpoint index
 
@@ -64,6 +61,11 @@ Health endpoints remain public; an unconfigured authentication boundary fails cl
 | POST | `/api/activities/import` | Import CSV/JSON activity through raw and normalized records. |
 | GET | `/api/quality/issues` | Filter/paginate typed quality findings. |
 | PATCH | `/api/quality/issues/{issue_id}` | Audited, tenant/actor-scoped resolve or waive decision. |
+
+Activity and supplier import bodies accept an optional `actor_id` for audit
+attribution. When supplied, it must identify an active actor in the selected
+company. Replays retain the original audit event and actor; changing an explicit
+actor with the same idempotency key is a conflict.
 
 ### Measurement and grid history
 
@@ -136,7 +138,7 @@ filters before bounding candidate similarity search.
 Source uploads are limited to 1 MiB decoded content and 128 evidence chunks.
 Embedding requests are bounded to 8,000 UTF-8 bytes per input and 250,000 bytes
 per batch, with a response size cap and an overall timeout. Reindex requests
-require the authenticated actor and document's company; repeated indexing with
+require an active actor in the document's company; repeated indexing with
 the same model is a no-op. Original downloads verify both byte length and SHA-256,
 use `private, no-store`, and never expose local storage paths. Checksum replays
 cannot relabel the stored source's site, period, or synthetic status.

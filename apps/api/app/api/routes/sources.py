@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException, Query, Response, status
 
 from app.api.errors import safe_http_error
 from app.dependencies.database import DatabaseSession
-from app.dependencies.request import AuthenticatedActorId, TraceIdHeader
+from app.dependencies.request import TraceIdHeader
 from app.modules.sources.errors import SourceUploadError
 from app.modules.sources.schemas import (
     SourceIndexRequest,
@@ -43,10 +43,7 @@ async def upload_source(
     request: SourceUploadRequest,
     session: DatabaseSession,
     trace_id: TraceIdHeader = None,
-    authenticated_actor: AuthenticatedActorId = None,
 ) -> SourceUploadResponse:
-    if request.actor_id is None and authenticated_actor is not None:
-        request = request.model_copy(update={"actor_id": authenticated_actor})
     try:
         return await upload_source_document(session, request, trace_id=trace_id)
     except SourceUploadError as error:

@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { fixtureFor, id, mockDashboard } from './dashboard-fixtures'
-import { formatDecimal } from '../src/features/dashboard/format'
+import { formatDecimal } from '../src/lib/format'
 
 test('canonical reads, source inspection, chart, paging and responsive themes', async ({
   page,
@@ -89,10 +89,7 @@ test('canonical reads, source inspection, chart, paging and responsive themes', 
     expect(request.method).toBe(
       request.url.pathname === '/api/context/resolve' ? 'POST' : 'GET',
     )
-    if (
-      request.method === 'GET' &&
-      !['/api/health', '/api/auth/session'].includes(request.url.pathname)
-    )
+    if (request.method === 'GET')
       expect(request.url.searchParams.get('company_id')).toBe(id(1))
   }
   const measurementRequest = requests.find(

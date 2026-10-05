@@ -788,7 +788,6 @@ class AssuranceService:
         draft.status = "validating"
         plans = [
             await self._plan_claim(
-                draft,
                 dependencies,
                 requirement,
                 allowed_evidence_item_ids=allowed_evidence_item_ids,
@@ -1283,7 +1282,6 @@ class AssuranceService:
 
     async def _plan_claim(
         self,
-        draft: Any,
         dependencies: DraftDependencies,
         requirement: DisclosureRequirement,
         *,
@@ -1931,7 +1929,6 @@ class AssuranceService:
             self._validate_draft_dependencies(dependencies, current_requirements)
             current_plans = [
                 await self._plan_claim(
-                    aggregate.draft,
                     dependencies,
                     requirement,
                     allowed_evidence_item_ids=self._stored_evidence_scope_ids(

@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { displayText, humanize } from '@/lib/presentation'
 import { dashboardQueries, type DashboardScope } from '../queries'
-import { EmptyState, QueryRefresh, QueryState } from './query-state'
+import { EmptyState, QueryRefresh, QueryState } from '@/components/query-state'
 
 export function QualityPanel({ scope }: { scope: DashboardScope }) {
   const [severity, setSeverity] = useState('all')

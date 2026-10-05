@@ -10,11 +10,9 @@ import {
 import { Link, useLocation, useOutletContext } from 'react-router-dom'
 import { z } from 'zod'
 import { QueryState } from '@/components/query-state'
-import { RecordSelect } from '@/components/record-select'
 import { Badge } from '@/components/ui/badge'
 import { Label } from '@/components/ui/label'
-import { displayText, humanize, recordLabel } from '@/lib/presentation'
-import { useWorkspaceActor } from '@/features/auth/use-workspace-actor'
+import { displayText, humanize } from '@/lib/presentation'
 import type { WorkspaceScope } from '@/lib/workspace'
 import { ApiError } from '@/services/api'
 import { catalogQueries } from '@/features/procurement/queries'
@@ -92,37 +90,6 @@ export function Field({
         </span>
       )}
     </div>
-  )
-}
-export function ActorField({
-  actorId,
-  value,
-  onChange,
-}: {
-  actorId: string
-  authenticated: boolean
-  value: string
-  onChange: (value: string) => void
-}) {
-  const actor = useWorkspaceActor()
-  if (actorId)
-    return (
-      <div className="space-y-1 text-sm">
-        <p className="text-xs text-muted-foreground">Requested by</p>
-        <p>{recordLabel('actors', actor.actorName)}</p>
-      </div>
-    )
-  return (
-    <Field label="Requester">
-      <RecordSelect
-        kind="actors"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        required
-        placeholder="Choose a requester"
-        autoComplete="off"
-      />
-    </Field>
   )
 }
 export function CommandError({ error }: { error: Error | null }) {

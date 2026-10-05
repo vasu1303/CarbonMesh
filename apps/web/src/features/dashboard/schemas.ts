@@ -42,75 +42,6 @@ export const measurementSchema = z.object({
   created_at: timestamp,
 })
 
-export const measurementDetailSchema = measurementSchema
-  .omit({ ledger_event_id: true })
-  .extend({
-    formula: z.string(),
-    calculation_run: z.object({
-      id,
-      method_key: z.string(),
-      method_version: z.string(),
-      code_version: z.string(),
-      input_hash: z.string(),
-      output_hash: z.string(),
-      rounding_policy: z.string(),
-    }),
-    inputs: z.array(
-      z.object({
-        activity_record_id: id,
-        raw_activity_record_id: id,
-        source_document_id: id,
-        source_row_key: z.string(),
-        raw_checksum: z.string(),
-        source_quantity: decimal,
-        source_unit: z.string(),
-      }),
-    ),
-    factors: z.array(
-      z.object({
-        id,
-        name: z.string(),
-        version: z.string(),
-        factor_value: decimal,
-        numerator_unit: z.string(),
-        denominator_unit: z.string(),
-        evidence: z.object({
-          id,
-          source_document_id: id,
-          source_document_filename: z.string(),
-          locator: z.string(),
-          checksum: z.string(),
-        }),
-      }),
-    ),
-    facts: z.object({
-      fact_id: id,
-      ledger_event_id: id.nullable(),
-      output_hash: z.string(),
-    }),
-  })
-
-export const lineageSchema = z.object({
-  measurement_id: id,
-  root_event_id: id.nullable(),
-  truncated: z.boolean(),
-  nodes: z.array(
-    z.object({
-      id: z.string(),
-      node_type: z.enum(['ledger_event', 'evidence']),
-      label: z.string(),
-    }),
-  ),
-  edges: z.array(
-    z.object({
-      id: z.string(),
-      source: z.string(),
-      target: z.string(),
-      relationship_type: z.string(),
-    }),
-  ),
-})
-
 export const issueSchema = z.object({
   id,
   code: z.string(),
@@ -153,59 +84,7 @@ export const ledgerEventSchema = z.object({
   payload_hash: z.string(),
   created_at: timestamp,
 })
-export const ledgerDetailSchema = ledgerEventSchema.extend({
-  payload: z.record(z.string(), z.unknown()),
-  evidence: z.array(
-    z.object({
-      id,
-      source_document_id: id,
-      source_filename: z.string(),
-      locator: z.string(),
-      checksum: z.string(),
-      is_synthetic: z.boolean(),
-    }),
-  ),
-  parents: z.array(
-    z.object({
-      edge_id: id,
-      relationship_type: z.string(),
-      event: ledgerEventSchema,
-    }),
-  ),
-  children: z.array(
-    z.object({
-      edge_id: id,
-      relationship_type: z.string(),
-      event: ledgerEventSchema,
-    }),
-  ),
-  evidence_truncated: z.boolean(),
-  parents_truncated: z.boolean(),
-  children_truncated: z.boolean(),
-})
-
-export const gridSchema = z.object({
-  site_id: id,
-  grid_intensity_point_id: id,
-  zone: z.string(),
-  value: decimal,
-  unit: z.string(),
-  provider_timestamp: timestamp,
-  is_estimated: z.boolean(),
-  temporal_granularity: z.string(),
-  provenance: z.object({
-    provider: z.string(),
-    provider_mode: z.enum(['fixture', 'live']),
-    synthetic: z.boolean(),
-    source_document_id: id,
-    evidence_item_id: id,
-    response_checksum: z.string(),
-    retrieved_at: timestamp,
-  }),
-})
-
 export const catalogItemSchema = z.object({ id, name: z.string() })
 
 export type Measurement = z.infer<typeof measurementSchema>
 export type Approval = z.infer<typeof approvalSchema>
-export type GridIntensity = z.infer<typeof gridSchema>

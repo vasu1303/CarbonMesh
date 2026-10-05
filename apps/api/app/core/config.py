@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Literal
 
 from dotenv import load_dotenv
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
 load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
@@ -39,22 +39,10 @@ class Settings(BaseModel):
     embedding_dimensions: Literal[768] = 768
     embedding_timeout_seconds: float = 15.0
     source_storage_dir: Path = Path(__file__).resolve().parents[2] / ".data" / "sources"
-    auth_required: bool = True
-    auth_signing_key: SecretStr | None = None
-    auth_access_keys: SecretStr | None = None
-    auth_session_seconds: int = 3600
-    auth_cookie_secure: bool = True
-    auth_cookie_samesite: Literal["strict", "lax", "none"] = "strict"
     cors_origins: list[str] = Field(default_factory=list)
     telemetry_enabled: bool = False
     telemetry_otlp_endpoint: str | None = None
     telemetry_service_name: str = "carbonmesh-api"
-
-    @model_validator(mode="after")
-    def validate_cookie_security(self):
-        if self.auth_cookie_samesite == "none" and not self.auth_cookie_secure:
-            raise ValueError("Cross-site cookies require HTTPS and AUTH_COOKIE_SECURE=true.")
-        return self
 
     @field_validator(
         "database_url",
@@ -64,8 +52,6 @@ class Settings(BaseModel):
         "gemini_api_key",
         "anthropic_api_key",
         "openrouter_api_key",
-        "auth_signing_key",
-        "auth_access_keys",
         mode="before",
     )
     @classmethod
@@ -113,13 +99,6 @@ class Settings(BaseModel):
     def validate_agent_recovery_interval(cls, value: float) -> float:
         if not 1 <= value <= 3600:
             raise ValueError("Agent recovery interval must be between 1 and 3600 seconds.")
-        return value
-
-    @field_validator("auth_session_seconds")
-    @classmethod
-    def validate_session_lifetime(cls, value: int) -> int:
-        if not 60 <= value <= 86400:
-            raise ValueError("Session lifetime must be between 60 and 86400 seconds.")
         return value
 
     @field_validator("cors_origins", mode="before")
@@ -185,12 +164,6 @@ def get_settings() -> Settings:
         source_storage_dir=os.getenv(
             "SOURCE_STORAGE_DIR", str(Path(__file__).resolve().parents[2] / ".data" / "sources")
         ),
-        auth_required=os.getenv("AUTH_REQUIRED", "true"),
-        auth_signing_key=os.getenv("AUTH_SIGNING_KEY"),
-        auth_access_keys=os.getenv("AUTH_ACCESS_KEYS"),
-        auth_session_seconds=os.getenv("AUTH_SESSION_SECONDS", "3600"),
-        auth_cookie_secure=os.getenv("AUTH_COOKIE_SECURE", "true"),
-        auth_cookie_samesite=os.getenv("AUTH_COOKIE_SAMESITE", "strict"),
         cors_origins=os.getenv("CORS_ORIGINS", ""),
         telemetry_enabled=os.getenv("TELEMETRY_ENABLED", "false"),
         telemetry_otlp_endpoint=os.getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT"),

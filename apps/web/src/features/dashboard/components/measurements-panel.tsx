@@ -12,14 +12,14 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { formatDate, formatDecimal, humanize } from '../format'
+import { formatDate, formatDecimal, humanize } from '@/lib/format'
 import { dashboardQueries, type DashboardScope } from '../queries'
 import {
   EmptyState,
   PageControls,
   QueryRefresh,
   QueryState,
-} from './query-state'
+} from '@/components/query-state'
 
 const MeasurementChart = lazy(() => import('./measurement-chart'))
 
